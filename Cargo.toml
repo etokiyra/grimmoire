@@ -1,0 +1,24 @@
+[package]
+name = "grimmoire"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A terminal-native, ASCII-first dark-fantasy wizard RPG."
+repository = "https://github.com/etokiyra/grimmoire"
+readme = "README.md"
+keywords = ["game", "terminal", "tui", "roguelike"]
+categories = ["games"]
+# Not published to crates.io; Grimmoire ships as a binary.
+publish = false
+
+[dependencies]
+# Terminal lifecycle (raw mode, alternate screen), input events, and the escape
+# sequences the renderer backend paints with. Chosen over `termion` (less
+# actively maintained, Unix-only) and `ratatui` (a full widget/TUI framework
+# that would own the drawing model Grimmoire wants to keep for itself).
+crossterm = "0.29"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

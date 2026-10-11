@@ -1,0 +1,9 @@
+# Rust build output
+/target
+
+# Rust compiler backup files
+**/*.rs.bk
+
+# Editor and OS noise
+*.swp
+.DS_Store
