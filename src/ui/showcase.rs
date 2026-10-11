@@ -724,7 +724,9 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
-            image_backend: crate::terminal::ImageBackend::None,
+            graphics: crate::terminal::GraphicsSupport::Forced,
+            art: crate::ui::art::Art::none(),
+            key_releases: true,
             palette: Palette::BASIC,
             stats: PresentStats {
                 width: 100,

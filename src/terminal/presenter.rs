@@ -1,10 +1,16 @@
-//! Frame presentation: turning a composed [`Canvas`] into terminal output.
+//! Frame presentation: turning a composed frame into terminal output.
 //!
 //! Presentation is separated from terminal lifecycle and from frame composition.
 //! The presenter keeps the previous frame and writes only the cells that changed,
 //! grouped into contiguous runs and positioned with absolute cursor moves. It
 //! writes through any [`Write`] sink, so its output can be captured and asserted
 //! in tests without a real terminal.
+//!
+//! Images are handed to [`Graphics`], which owns the image lifecycle. This module
+//! only decides *when* the graphics state must be re-established: after a full
+//! redraw (the clear-screen escape code is specified to clear images too) or when
+//! the set of placements changed. Ordinary text and UI updates therefore cost no
+//! image traffic at all.
 //!
 //! # Avoiding scroll and corruption
 //!
@@ -24,10 +30,10 @@ use crossterm::style::{
 };
 use crossterm::terminal::{Clear, ClearType};
 
-use crate::render::{Canvas, Color, ImagePlacement, Style, glyph};
+use crate::assets::Assets;
+use crate::render::{AssetId, Canvas, Color, ImagePlacement, Rect, Style, glyph};
 
-use super::capabilities::CellMetrics;
-use super::graphics::ImageBackend;
+use super::graphics::{Graphics, GraphicsSupport};
 
 /// Statistics describing a single presented frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -44,8 +50,12 @@ pub struct PresentStats {
     pub bytes: u32,
     /// Whether the frame required clearing the whole screen first.
     pub full_redraw: bool,
-    /// Number of images emitted.
-    pub images_drawn: u32,
+    /// Images whose data was transmitted for the first time.
+    pub images_transmitted: u32,
+    /// Placements written or replaced.
+    pub images_placed: u32,
+    /// Placements removed.
+    pub images_removed: u32,
 }
 
 impl PresentStats {
@@ -63,30 +73,47 @@ impl PresentStats {
 }
 
 /// Diffs frames against the last presented frame and writes the difference.
-///
-/// Graphics are handled here too, because only this layer knows what the terminal
-/// was last told. Image rectangles are *reserved*: no cell inside one is ever
-/// written, and the images themselves are re-emitted whenever the set of
-/// placements changes or after a full redraw. That keeps ordinary UI text and
-/// graphics from fighting over the same pixels.
 #[derive(Debug)]
 pub struct Presenter {
     previous: Canvas,
     last: PresentStats,
     force_full: bool,
-    image_keys: Vec<u64>,
+    graphics: Graphics,
+    placed_key: Vec<(Rect, AssetId)>,
 }
 
 impl Presenter {
-    /// Creates a presenter that will perform a full redraw on its first frame.
+    /// Creates a presenter with no graphics, for tests and headless use.
     #[must_use]
     pub fn new() -> Self {
+        Self::with_graphics(GraphicsSupport::Unsupported)
+    }
+
+    /// Creates a presenter that drives images at the given support level.
+    #[must_use]
+    pub fn with_graphics(support: GraphicsSupport) -> Self {
         Presenter {
             previous: Canvas::new(0, 0),
             last: PresentStats::default(),
             force_full: true,
-            image_keys: Vec::new(),
+            graphics: Graphics::new(support),
+            placed_key: Vec::new(),
         }
+    }
+
+    /// The graphics state, for diagnostics.
+    #[must_use]
+    pub const fn graphics(&self) -> &Graphics {
+        &self.graphics
+    }
+
+    /// Deletes every image and placement this application created.
+    ///
+    /// Called on shutdown and before a resize, so the terminal is never left
+    /// holding stale graphics.
+    pub fn clear_graphics<W: Write>(&mut self, out: &mut W) -> io::Result<()> {
+        self.placed_key.clear();
+        self.graphics.clear(out)
     }
 
     /// Forces the next presentation to clear and repaint the whole screen.
@@ -105,28 +132,28 @@ impl Presenter {
 
     /// Presents a frame of cells with no images.
     pub fn present<W: Write>(&mut self, frame: &Canvas, out: &mut W) -> io::Result<PresentStats> {
-        self.present_with(frame, &[], ImageBackend::None, None, out)
+        let assets = Assets::default();
+        self.present_with(frame, &[], &assets, out)
     }
 
-    /// Presents `frame`, its `images`, writing only what changed.
+    /// Presents `frame`, then makes the terminal's images match `images`.
     ///
-    /// Cells covered by an image are never written. If the set of images differs
-    /// from the previous frame — including when one disappears — the whole screen
-    /// is repainted first, so nothing can be left behind in a region that is no
-    /// longer covered.
+    /// Cells covered by an image are never written, so the two layers cannot
+    /// fight over the same pixels. When graphics are unavailable the image
+    /// rectangles are ignored entirely and the cell layer owns the whole frame.
     pub fn present_with<W: Write>(
         &mut self,
         frame: &Canvas,
         images: &[ImagePlacement],
-        backend: ImageBackend,
-        metrics: Option<CellMetrics>,
+        assets: &Assets,
         out: &mut W,
     ) -> io::Result<PresentStats> {
-        // A backend that cannot draw is treated as having no images at all, so
-        // the cell layer stays fully responsible for the rectangle.
-        let drawable: &[ImagePlacement] = if backend.is_available() { images } else { &[] };
-        let keys: Vec<u64> = drawable.iter().map(ImagePlacement::key).collect();
-        let images_changed = keys != self.image_keys;
+        // With no graphics support the cell layer must render the whole frame.
+        let drawable: &[ImagePlacement] = if self.graphics.support().is_available() {
+            images
+        } else {
+            &[]
+        };
 
         let mut sink = CountingWriter::new(out);
         let mut stats = PresentStats {
@@ -137,6 +164,9 @@ impl Presenter {
 
         let resized =
             self.previous.width() != frame.width() || self.previous.height() != frame.height();
+        let key: Vec<(Rect, AssetId)> = drawable.iter().map(|p| (p.area, p.asset)).collect();
+        let images_changed = key != self.placed_key;
+
         if resized || self.force_full || images_changed {
             queue!(sink, Clear(ClearType::All), MoveTo(0, 0))?;
             self.previous = Canvas::new(frame.width(), frame.height());
@@ -182,36 +212,29 @@ impl Presenter {
             }
         }
 
-        // Images last, so they paint over the (unwritten) rectangles reserved for
-        // them, and never over text we just drew.
-        if backend.is_available() && (images_changed || stats.full_redraw) {
-            for placement in drawable {
-                let Some(scaled) = backend.resize_for(
-                    &placement.image,
-                    placement.area.width,
-                    placement.area.height,
-                    metrics,
-                ) else {
-                    continue;
-                };
-                let Some(bytes) = backend.encode(&scaled) else {
-                    continue;
-                };
-                queue!(sink, MoveTo(placement.area.x, placement.area.y))?;
-                sink.write_all(&bytes)?;
-                stats.images_drawn = stats.images_drawn.saturating_add(1);
-            }
-            // A sixel leaves the cursor somewhere unhelpful; put it back.
-            queue!(sink, MoveTo(0, 0))?;
-        }
+        // Images last, so they paint over the rectangles reserved for them and
+        // never over text we just drew. `stats.full_redraw` means the screen was
+        // cleared, which also clears images, so the graphics state is rebuilt.
+        let report = self
+            .graphics
+            .sync(&mut sink, drawable, assets, stats.full_redraw)?;
+        stats.images_transmitted = report.transmitted;
+        stats.images_placed = report.placed;
+        stats.images_removed = report.removed;
 
         queue!(sink, SetAttribute(Attribute::Reset), ResetColor)?;
         sink.flush()?;
         stats.bytes = sink.written();
         self.previous.copy_from(frame);
-        self.image_keys = keys;
+        self.placed_key = key;
         self.last = stats;
         Ok(stats)
+    }
+}
+
+impl Default for Presenter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -231,12 +254,6 @@ fn is_changed(
         return false;
     }
     previous.get(x, y) != frame.get(x, y)
-}
-
-impl Default for Presenter {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// A writer that counts the bytes it forwards to the inner sink.
@@ -320,11 +337,10 @@ fn to_terminal_color(color: Color) -> TerminalColor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use super::{ImageBackend, PresentStats, Presenter};
-    use crate::render::{Canvas, Image, ImagePlacement, Rect, Rgb, Style};
-    use crate::terminal::CellMetrics;
+    use super::{PresentStats, Presenter};
+    use crate::assets::Assets;
+    use crate::render::{AssetId, Canvas, ImagePlacement, Rect, Style};
+    use crate::terminal::GraphicsSupport;
 
     fn render(presenter: &mut Presenter, canvas: &Canvas) -> (Vec<u8>, PresentStats) {
         let mut out = Vec::new();
@@ -332,32 +348,25 @@ mod tests {
         (out, stats)
     }
 
-    fn metrics() -> Option<CellMetrics> {
-        Some(CellMetrics {
-            width: 8,
-            height: 16,
-        })
+    fn text_of(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes).into_owned()
     }
 
-    fn red_image() -> Arc<Image> {
-        Arc::new(Image::solid(32, 16, Rgb::new(255, 0, 0)))
+    fn empty_assets() -> Assets {
+        Assets::default()
     }
 
     fn present_images(
         presenter: &mut Presenter,
         canvas: &Canvas,
         images: &[ImagePlacement],
-        backend: ImageBackend,
     ) -> (Vec<u8>, PresentStats) {
         let mut out = Vec::new();
+        let assets = empty_assets();
         let stats = presenter
-            .present_with(canvas, images, backend, metrics(), &mut out)
+            .present_with(canvas, images, &assets, &mut out)
             .expect("present");
         (out, stats)
-    }
-
-    fn text_of(bytes: &[u8]) -> String {
-        String::from_utf8_lossy(bytes).into_owned()
     }
 
     #[test]
@@ -479,69 +488,64 @@ mod tests {
 
     #[test]
     fn cells_under_an_image_are_never_written() {
-        let mut presenter = Presenter::new();
+        let mut presenter = Presenter::with_graphics(GraphicsSupport::Confirmed);
         let mut canvas = Canvas::new(20, 4);
         canvas.put_str(0, 0, "0123456789", Style::PLAIN);
-        let images = vec![ImagePlacement::new(Rect::new(3, 0, 4, 1), red_image())];
+        let images = [ImagePlacement::new(Rect::new(3, 0, 4, 1), AssetId::new(0))];
 
-        let (bytes, stats) = present_images(&mut presenter, &canvas, &images, ImageBackend::Sixel);
+        let (_, stats) = present_images(&mut presenter, &canvas, &images);
 
         // Ten glyphs were composed; the four inside the image are reserved.
         assert_eq!(6, stats.cells_written);
-        assert_eq!(1, stats.images_drawn);
-        assert!(
-            bytes.windows(2).any(|window| window == b"\x1bP"),
-            "expected a sixel sequence"
-        );
     }
 
     #[test]
-    fn without_a_backend_the_reserved_cells_are_drawn_as_text() {
-        let mut presenter = Presenter::new();
+    fn without_graphics_the_reserved_cells_are_drawn_as_text() {
+        let mut presenter = Presenter::new(); // no graphics support
         let mut canvas = Canvas::new(20, 4);
         canvas.put_str(0, 0, "0123456789", Style::PLAIN);
-        let images = vec![ImagePlacement::new(Rect::new(3, 0, 4, 1), red_image())];
+        let images = [ImagePlacement::new(Rect::new(3, 0, 4, 1), AssetId::new(0))];
 
-        let (bytes, stats) = present_images(&mut presenter, &canvas, &images, ImageBackend::None);
+        let (bytes, stats) = present_images(&mut presenter, &canvas, &images);
 
         assert_eq!(10, stats.cells_written, "the cell layer must own the area");
-        assert_eq!(0, stats.images_drawn);
-        assert!(!bytes.windows(2).any(|window| window == b"\x1bP"));
+        assert_eq!(0, stats.images_placed);
+        assert!(!bytes.windows(2).any(|window| window == b"\x1b_G"));
         assert!(text_of(&bytes).contains('3'));
     }
 
     #[test]
-    fn removing_an_image_forces_a_full_repaint() {
-        let mut presenter = Presenter::new();
+    fn removing_an_image_forces_a_full_repaint_of_its_region() {
+        let mut presenter = Presenter::with_graphics(GraphicsSupport::Confirmed);
         let mut canvas = Canvas::new(20, 4);
         canvas.put_str(0, 0, "0123456789", Style::PLAIN);
-        let images = vec![ImagePlacement::new(Rect::new(3, 0, 4, 1), red_image())];
+        let images = [ImagePlacement::new(Rect::new(3, 0, 4, 1), AssetId::new(0))];
 
-        let (_, first) = present_images(&mut presenter, &canvas, &images, ImageBackend::Sixel);
+        let (_, first) = present_images(&mut presenter, &canvas, &images);
         assert!(first.full_redraw);
 
-        let (_, second) = present_images(&mut presenter, &canvas, &[], ImageBackend::Sixel);
+        let (_, second) = present_images(&mut presenter, &canvas, &[]);
         assert!(
             second.full_redraw,
             "the region the image covered must be repainted"
         );
-        // And the cells that were hidden are now written again.
         assert_eq!(10, second.cells_written);
     }
 
     #[test]
-    fn unchanged_images_are_not_re_emitted() {
-        let mut presenter = Presenter::new();
+    fn an_unchanged_image_is_not_re_emitted() {
+        let mut presenter = Presenter::with_graphics(GraphicsSupport::Confirmed);
         let mut canvas = Canvas::new(20, 4);
-        let images = vec![ImagePlacement::new(Rect::new(3, 0, 4, 1), red_image())];
-        present_images(&mut presenter, &canvas, &images, ImageBackend::Sixel);
+        let images = [ImagePlacement::new(Rect::new(3, 0, 4, 1), AssetId::new(0))];
+        present_images(&mut presenter, &canvas, &images);
 
         canvas.put_char(18, 0, 'x', Style::PLAIN);
-        let (bytes, stats) = present_images(&mut presenter, &canvas, &images, ImageBackend::Sixel);
+        let (bytes, stats) = present_images(&mut presenter, &canvas, &images);
 
         assert!(!stats.full_redraw);
-        assert_eq!(0, stats.images_drawn, "the image did not change");
+        assert_eq!(0, stats.images_placed, "the image did not change");
+        assert_eq!(0, stats.images_transmitted);
         assert!(text_of(&bytes).contains('x'));
-        assert!(!bytes.windows(2).any(|window| window == b"\x1bP"));
+        assert!(!bytes.windows(2).any(|window| window == b"\x1b_G"));
     }
 }

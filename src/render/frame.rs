@@ -6,46 +6,27 @@
 //! * **cells** — ordinary character cells, drawn through [`Canvas`] views; and
 //! * **images** — rectangles a graphics backend may paint, recorded as intent.
 //!
-//! A screen never emits graphics-protocol bytes; it only says "an image of this
-//! size belongs here". Deciding whether and how to realise that is the terminal
-//! layer's job, which is what keeps protocol details out of the game and out of
-//! the UI.
+//! A screen never emits graphics bytes and never sees image data: it names an
+//! asset handle and a rectangle. Whether those pixels are painted, and how, is
+//! the graphics backend's business, which is what keeps protocol details out of
+//! the game and out of the UI.
 
-use std::sync::Arc;
-
-use super::{Canvas, CanvasView, Image, Rect};
+use super::{AssetId, Canvas, CanvasView, Rect};
 
 /// An image to be drawn inside a rectangle of cells.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImagePlacement {
     /// Where, in cells, the image should appear.
     pub area: Rect,
-    /// The image itself. Shared so a screen can hold one and place it repeatedly.
-    pub image: Arc<Image>,
+    /// Which asset to draw.
+    pub asset: AssetId,
 }
 
 impl ImagePlacement {
     /// Creates a placement.
     #[must_use]
-    pub fn new(area: Rect, image: Arc<Image>) -> Self {
-        ImagePlacement { area, image }
-    }
-
-    /// A cheap identity for change detection.
-    ///
-    /// Two placements are considered the same content when they cover the same
-    /// rectangle and share the same image allocation, which is the common case
-    /// for a screen that keeps its art around between frames.
-    #[must_use]
-    pub fn key(&self) -> u64 {
-        let ptr = Arc::as_ptr(&self.image) as usize as u64;
-        let (x, y, w, h) = (
-            u64::from(self.area.x),
-            u64::from(self.area.y),
-            u64::from(self.area.width),
-            u64::from(self.area.height),
-        );
-        ptr ^ (x << 8) ^ (y << 24) ^ (w << 40) ^ (h << 48)
+    pub const fn new(area: Rect, asset: AssetId) -> Self {
+        ImagePlacement { area, asset }
     }
 }
 
@@ -90,19 +71,19 @@ impl<'a> Frame<'a> {
         self.canvas.view(area)
     }
 
-    /// Records that `image` belongs at `area`.
+    /// Records that `asset` belongs at `area`.
     ///
-    /// The placement is intent only: whether anything is drawn depends on the
-    /// terminal's capabilities, and the screen must compose the same rectangle
-    /// sensibly with or without it (see `docs/renderer-design.md`).
-    pub fn place_image(&mut self, area: Rect, image: Arc<Image>) {
+    /// The placement is intent only. A screen must compose the same rectangle
+    /// sensibly without the image (see `docs/renderer-design.md`), because the
+    /// backend is allowed to paint nothing there at all.
+    pub fn place_image(&mut self, area: Rect, asset: AssetId) {
         if area.is_empty() {
             return;
         }
-        self.images.push(ImagePlacement::new(area, image));
+        self.images.push(ImagePlacement::new(area, asset));
     }
 
-    /// The placements recorded so far.
+    /// The placements recorded so far, in the order they were requested.
     #[must_use]
     pub fn images(&self) -> &[ImagePlacement] {
         self.images
@@ -112,8 +93,7 @@ impl<'a> Frame<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Frame, ImagePlacement};
-    use crate::render::{Canvas, Image, Rect, Style};
-    use std::sync::Arc;
+    use crate::render::{AssetId, Canvas, Rect, Style};
 
     #[test]
     fn begin_clears_previous_placements() {
@@ -121,7 +101,7 @@ mod tests {
         let mut images = Vec::new();
         {
             let mut frame = Frame::begin(&mut canvas, &mut images);
-            frame.place_image(Rect::new(0, 0, 4, 4), Arc::new(Image::new(8, 8)));
+            frame.place_image(Rect::new(0, 0, 4, 4), AssetId::new(1));
             assert_eq!(1, frame.images().len());
         }
         {
@@ -138,11 +118,14 @@ mod tests {
             let mut frame = Frame::begin(&mut canvas, &mut images);
             let mut view = frame.view(Rect::new(1, 1, 6, 3));
             view.put_str(0, 0, "hi", Style::PLAIN);
-            frame.place_image(Rect::new(10, 2, 6, 3), Arc::new(Image::new(48, 60)));
+            frame.place_image(Rect::new(10, 2, 6, 3), AssetId::new(2));
         }
         assert_eq!(Some('h'), canvas.get(1, 1).map(|cell| cell.ch));
         assert_eq!(1, images.len());
-        assert_eq!(Rect::new(10, 2, 6, 3), images[0].area);
+        assert_eq!(
+            ImagePlacement::new(Rect::new(10, 2, 6, 3), AssetId::new(2)),
+            images[0]
+        );
     }
 
     #[test]
@@ -150,20 +133,7 @@ mod tests {
         let mut canvas = Canvas::new(20, 10);
         let mut images = Vec::new();
         let mut frame = Frame::begin(&mut canvas, &mut images);
-        frame.place_image(Rect::new(0, 0, 0, 4), Arc::new(Image::new(8, 8)));
+        frame.place_image(Rect::new(0, 0, 0, 4), AssetId::new(1));
         assert!(frame.images().is_empty());
-    }
-
-    #[test]
-    fn placement_keys_track_rectangle_and_image_identity() {
-        let image = Arc::new(Image::new(8, 8));
-        let a = ImagePlacement::new(Rect::new(1, 1, 4, 4), image.clone());
-        let same = ImagePlacement::new(Rect::new(1, 1, 4, 4), image.clone());
-        let moved = ImagePlacement::new(Rect::new(2, 1, 4, 4), image.clone());
-        let other = ImagePlacement::new(Rect::new(1, 1, 4, 4), Arc::new(Image::new(8, 8)));
-
-        assert_eq!(a.key(), same.key());
-        assert_ne!(a.key(), moved.key());
-        assert_ne!(a.key(), other.key());
     }
 }

@@ -8,6 +8,7 @@ pub mod dialogue;
 pub mod exploration;
 pub mod help;
 pub mod layout;
+pub mod motion;
 pub mod screen;
 pub mod showcase;
 pub mod stage;
@@ -26,26 +27,30 @@ pub use theme::Palette;
 
 use std::time::Duration;
 
-use crate::terminal::{Capabilities, PresentStats};
+use crate::terminal::{Capabilities, GraphicsSupport, PresentStats};
+
+use self::art::Art;
 
 /// Read-only information about the current frame, passed to screens on compose.
 ///
-/// This is how screens learn about the terminal and the renderer without reaching
-/// into the application loop: capabilities, the resolved palette, the graphics
-/// backend in use, and the statistics of the previously presented frame.
+/// This is how screens learn about the terminal, the renderer, and the artwork
+/// without reaching into the application loop.
 #[derive(Debug, Clone, Copy)]
 pub struct FrameContext {
     /// The terminal's detected capabilities.
     pub capabilities: Capabilities,
     /// The palette resolved for those capabilities.
     pub palette: Palette,
-    /// The graphics backend currently in use. Screens must look right when this
-    /// is [`crate::terminal::ImageBackend::None`].
-    pub image_backend: crate::terminal::ImageBackend,
+    /// Whether terminal graphics are usable, and how confidently that is known.
+    pub graphics: GraphicsSupport,
+    /// The artwork the game can display.
+    pub art: Art,
     /// Statistics from the previously presented frame.
     pub stats: PresentStats,
     /// Time elapsed since the previous frame.
     pub frame_time: Duration,
     /// Whether the application currently has motion in progress.
     pub animating: bool,
+    /// Whether the terminal reports key releases, for diagnostics.
+    pub key_releases: bool,
 }

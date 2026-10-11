@@ -1,50 +1,49 @@
 //! The playable exploration screen.
 //!
-//! This is the game: it owns a [`World`], maps keys onto the world's rules,
-//! composes the view, and is the root screen of the application. It draws with
-//! the renderer's primitives and holds no rendering logic beyond deciding how
-//! terrain and entities look.
+//! This is the game. It owns a [`World`], interprets keys through [`Movement`],
+//! composes the frame, and is the root screen of the application.
+//!
+//! # Composition
+//!
+//! The world is drawn across the **entire viewport** and the camera scrolls with
+//! the player, so the environment dominates the screen. The HUD is an overlay of
+//! two rows at the bottom, painted over the world rather than stealing rows from
+//! it, plus an arrival plate when you enter an area.
+//!
+//! Floors are tinted by distance from the player, which reads as a pool of light
+//! around them and gives the space depth without any extra geometry.
 
 use std::time::Duration;
 
+use super::art::Art;
 use super::dialogue::DialogueScreen;
 use super::help::{Binding, HelpOverlay};
+use super::motion::{Motion, Movement};
 use super::screen::{Command, Screen};
 use super::showcase::Showcase;
 use super::theme::Palette;
 use super::{FrameContext, transition};
 use crate::game::{Direction, EntityKind, Interaction, Position, Prompt, Tile, World, areas};
 use crate::input::{Key, KeyCode};
-use crate::render::{Frame, Rect, Style, glyph};
+use crate::render::{AssetId, Color, Frame, Rect, Style, glyph};
 use crate::save::SaveStore;
 
-/// The minimum interval between movement steps.
-///
-/// A uniform step interval is what makes held keys behave predictably: some
-/// terminals send auto-repeats as ordinary presses, so gating on the repeat flag
-/// alone would let those terminals sprint. Rapid taps are throttled by the same
-/// interval, which costs nothing in a grid game.
-const MOVE_INTERVAL: Duration = Duration::from_millis(110);
-
 /// How long the curtain takes to reveal a newly entered area.
-const TRAVEL_DURATION: Duration = Duration::from_millis(220);
-
-/// The narrowest terminal that can draw the interface.
-const MIN_WIDTH: u16 = 24;
-/// The shortest terminal that can draw the interface.
-const MIN_HEIGHT: u16 = 8;
-
-/// The glyph used for the player.
-const PLAYER_GLYPH: char = '@';
+const TRAVEL_DURATION: Duration = Duration::from_millis(240);
+/// How long the arrival plate lingers once the curtain has cleared.
+const PLATE_DURATION: Duration = Duration::from_millis(1500);
+/// Rows the HUD occupies at the bottom of the viewport.
+const HUD_ROWS: u16 = 2;
 
 /// Bindings listed by the help overlay while exploring.
-const CONTROLS: [Binding; 6] = [
-    ("w a s d / arrows", "move"),
+const CONTROLS: [Binding; 7] = [
+    ("w a s d / arrows", "move (hold to keep walking)"),
     ("e", "interact with what you face"),
     ("h / ? / F1", "controls and diagnostics"),
     ("F3", "presentation study (rendering)"),
     ("F2", "renderer showcase (development)"),
-    ("q / Esc / Ctrl+C", "quit"),
+    ("Esc", "quit"),
+    ("q / Ctrl+C", "quit"),
 ];
 
 /// The exploration screen.
@@ -52,19 +51,26 @@ const CONTROLS: [Binding; 6] = [
 pub struct ExplorationScreen {
     world: World,
     save: Option<SaveStore>,
-    move_cooldown: Duration,
+    /// Artwork for the dialogue overlay, resolved once at startup.
+    portrait: Option<AssetId>,
+    movement: Movement,
+    /// Remaining travel-curtain time.
     travel: Duration,
+    /// Remaining arrival-plate time.
+    plate: Duration,
 }
 
 impl ExplorationScreen {
     /// Creates an exploration screen over `world`, optionally saving to `save`.
     #[must_use]
-    pub fn new(world: World, save: Option<SaveStore>) -> Self {
+    pub fn new(world: World, save: Option<SaveStore>, portrait: Option<AssetId>) -> Self {
         ExplorationScreen {
             world,
             save,
-            move_cooldown: Duration::ZERO,
+            portrait,
+            movement: Movement::new(false),
             travel: Duration::ZERO,
+            plate: Duration::ZERO,
         }
     }
 
@@ -73,14 +79,14 @@ impl ExplorationScreen {
     /// A save that is missing, unreadable, or inconsistent is ignored and a new
     /// game is started, so a stale file can never block play.
     #[must_use]
-    pub fn from_save(save: Option<SaveStore>) -> Self {
+    pub fn from_save(save: Option<SaveStore>, portrait: Option<AssetId>) -> Self {
         let mut world = World::new(areas::all(), areas::CHAPEL);
         if let Some(store) = &save {
             if let Some(data) = store.load() {
                 world.restore(&data);
             }
         }
-        ExplorationScreen::new(world, save)
+        ExplorationScreen::new(world, save, portrait)
     }
 
     /// The world being explored.
@@ -95,6 +101,18 @@ impl ExplorationScreen {
         self.travel > Duration::ZERO
     }
 
+    /// The movement model, for diagnostics.
+    #[must_use]
+    pub const fn movement(&self) -> &Movement {
+        &self.movement
+    }
+
+    /// Mutable world access, for tests that need a specific starting position.
+    #[cfg(test)]
+    pub(crate) fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Writes the current exploration state, if persistence is enabled.
     fn persist(&mut self) {
         let Some(store) = &self.save else {
@@ -107,13 +125,17 @@ impl ExplorationScreen {
         }
     }
 
-    /// Steps the player, respecting the movement interval.
-    fn try_move(&mut self, direction: Direction) {
-        if self.move_cooldown > Duration::ZERO {
-            return;
-        }
-        if self.world.move_player(direction) {
-            self.move_cooldown = MOVE_INTERVAL;
+    /// Applies a movement decision to the world.
+    fn step(&mut self, direction: Direction) {
+        // The diffed presenter writes only the cells that actually changed, so a
+        // scrolled step costs a few hundred cells rather than a whole frame.
+        self.world.move_player(direction);
+    }
+
+    /// Applies a movement decision.
+    fn apply(&mut self, motion: Motion) {
+        if let Some(direction) = motion.direction() {
+            self.step(direction);
         }
     }
 
@@ -121,10 +143,11 @@ impl ExplorationScreen {
     fn interact(&mut self) -> Command {
         match self.world.interact() {
             Interaction::Dialogue(dialogue) => {
-                Command::Push(Box::new(DialogueScreen::new(dialogue)))
+                Command::Push(Box::new(DialogueScreen::new(dialogue, self.portrait)))
             }
             Interaction::Travelled(_) => {
                 self.travel = TRAVEL_DURATION;
+                self.plate = PLATE_DURATION;
                 self.persist();
                 Command::None
             }
@@ -132,42 +155,32 @@ impl ExplorationScreen {
         }
     }
 
-    /// Draws the header strip: where we are, and how much has been seen.
-    fn compose_header(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
-        let mut view = frame.view(rect);
-        if view.height() == 0 {
-            return;
+    /// The arrival plate for the current area, if there is one.
+    fn plate_for(&self, art: &Art) -> Option<AssetId> {
+        let id = self.world.area_id();
+        if id == areas::CHAPEL {
+            art.chapel
+        } else if id == areas::CELLAR {
+            art.cellar
+        } else {
+            None
         }
-        view.put_str(
-            0,
-            0,
-            self.world.area_name(),
-            Style::new().with_fg(palette.accent).bold(),
-        );
-        let visited = format!(
-            "visited {} of {}",
-            self.world.visited_count(),
-            self.world.area_count()
-        );
-        view.put_str(
-            view.width().saturating_sub(glyph::display_width(&visited)),
-            0,
-            &visited,
-            palette.muted_style(),
-        );
     }
 
-    /// Draws the world through a camera that follows the player.
-    fn compose_world(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
-        if rect.is_empty() {
+    /// Draws the world across the whole viewport.
+    fn compose_world(&self, frame: &mut Frame, palette: &Palette) {
+        let bounds = frame.bounds();
+        if bounds.is_empty() {
             return;
         }
-        let mut view = frame.view(rect);
         let area = self.world.area();
+        let player = self.world.player();
+        let mut view = frame.view(bounds);
+
         let view_width = i32::from(view.width());
         let view_height = i32::from(view.height());
-        let camera_x = axis_camera(area.width(), view.width(), self.world.player().x);
-        let camera_y = axis_camera(area.height(), view.height(), self.world.player().y);
+        let camera_x = axis_camera(area.width(), view.width(), player.x);
+        let camera_y = axis_camera(area.height(), view.height(), player.y);
 
         for y in 0..area.height() {
             for x in 0..area.width() {
@@ -179,11 +192,20 @@ impl ExplorationScreen {
                 }
                 let position = Position::new(x, y);
                 let tile = area.tile(position);
+                // Floors are tinted by distance from the player: a pool of light
+                // that gives the space depth and keeps the surroundings legible.
+                let background = if tile.is_walkable() {
+                    palette.shade_at(squared_distance(position, player))
+                } else {
+                    palette.background
+                };
                 view.put_char(
                     screen_x as u16,
                     screen_y as u16,
                     tile_glyph(tile),
-                    tile_style(tile, palette),
+                    Style::new()
+                        .with_fg(tile_colour(tile, palette))
+                        .with_bg(background),
                 );
             }
         }
@@ -198,75 +220,112 @@ impl ExplorationScreen {
                 screen_x as u16,
                 screen_y as u16,
                 entity.glyph,
-                entity_style(entity.kind, palette),
+                Style::new()
+                    .with_fg(entity_colour(entity.kind, palette))
+                    .bold(),
             );
         }
 
-        let player_x = i32::from(self.world.player().x) - camera_x;
-        let player_y = i32::from(self.world.player().y) - camera_y;
+        let player_x = i32::from(player.x) - camera_x;
+        let player_y = i32::from(player.y) - camera_y;
         if player_x >= 0 && player_y >= 0 && player_x < view_width && player_y < view_height {
             view.put_char(
                 player_x as u16,
                 player_y as u16,
                 PLAYER_GLYPH,
-                player_style(palette),
+                Style::new()
+                    .with_fg(palette.player)
+                    .with_bg(palette.accent_dim)
+                    .bold(),
             );
         }
     }
 
-    /// Draws the feedback line: the last message, or a prompt for what is near.
-    fn compose_message(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
-        let mut view = frame.view(rect);
-        if view.height() == 0 {
+    /// Draws the arrival plate and its caption over the world.
+    fn compose_plate(&self, frame: &mut Frame, palette: &Palette, art: &Art) {
+        if self.travel > Duration::ZERO || self.plate == Duration::ZERO {
             return;
         }
-
-        let message = self.world.message();
-        if !message.is_empty() {
-            view.put_str(0, 0, "> ", palette.muted_style());
-            view.put_str(2, 0, message, Style::new().with_fg(palette.text));
+        let Some(asset) = self.plate_for(art) else {
             return;
-        }
+        };
+        let bounds = frame.bounds();
+        let width = bounds.width.clamp(24, 96);
+        let height = bounds.height.saturating_sub(8).clamp(6, 20);
+        let plate = Rect::new(
+            bounds.centered_x(width),
+            bounds.centered_y(height).saturating_sub(1),
+            width,
+            height,
+        );
+        frame.place_image(plate, asset);
 
-        if let Some(prompt) = self.world.prompt() {
-            view.put_str(0, 0, "e  ", Style::new().with_fg(palette.accent_alt).bold());
-            view.put_str(3, 0, &prompt_line(prompt), palette.muted_style());
-        }
+        // The caption sits below the plate, because the plate's own cells are
+        // reserved for the image.
+        let caption = Rect::new(bounds.x, plate.bottom().saturating_add(0), bounds.width, 1);
+        let mut view = frame.view(caption);
+        view.put_str_centered(
+            view.bounds(),
+            0,
+            self.world.area_name(),
+            Style::new().with_fg(palette.accent).bold(),
+        );
     }
 
-    /// Draws the status bar: position, facing, and the essential controls.
-    fn compose_status(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
-        let mut view = frame.view(rect);
-        if view.height() == 0 {
+    /// Draws the HUD: a prompt line and a status line, over the world.
+    fn compose_hud(&self, frame: &mut Frame, palette: &Palette) {
+        let bounds = frame.bounds();
+        if bounds.height < HUD_ROWS {
             return;
         }
-
-        let player = self.world.player();
-        view.put_str(0, 0, "position", palette.muted_style());
-        let coords = format!("{}, {}", player.x, player.y);
-        view.put_str(
-            glyph::display_width("position").saturating_add(2),
-            0,
-            &coords,
-            Style::new().with_fg(palette.accent_alt),
+        let hud = Rect::new(
+            bounds.x,
+            bounds.bottom().saturating_sub(HUD_ROWS),
+            bounds.width,
+            HUD_ROWS,
         );
+        let mut view = frame.view(hud);
+        view.fill_style(view.bounds(), palette.surface_style());
 
-        let facing = format!("facing {}", self.world.facing().name());
+        // Prompt or last message.
+        let (line, style) = if !self.world.message().is_empty() {
+            (self.world.message().to_string(), palette.text_style())
+        } else if let Some(prompt) = self.world.prompt() {
+            (
+                prompt_line(prompt),
+                Style::new().with_fg(palette.focus).bold(),
+            )
+        } else {
+            ("nothing within reach".to_string(), palette.muted_style())
+        };
+        view.put_str(1, 0, &line, style);
+
+        // Status.
+        let player = self.world.player();
+        let mut column = view.put_str(
+            1,
+            1,
+            self.world.area_name(),
+            Style::new().with_fg(palette.accent).bold(),
+        );
+        column = column.saturating_add(view.put_str(column + 1, 1, "·", palette.muted_style()));
+        let where_ = format!(
+            "{},{} · facing {}",
+            player.x,
+            player.y,
+            self.world.facing().name()
+        );
+        view.put_str(column + 1, 1, &where_, palette.muted_style());
+
+        let keys = "wasd move · e interact · h help · q quit";
         view.put_str(
-            view.width().saturating_sub(glyph::display_width(&facing)),
-            0,
-            &facing,
+            view.width()
+                .saturating_sub(glyph::display_width(keys))
+                .saturating_sub(1),
+            1,
+            keys,
             palette.muted_style(),
         );
-
-        if view.height() > 1 {
-            view.put_str_centered(
-                Rect::new(0, 1, view.width(), 1),
-                1,
-                "wasd / arrows move    e interact    h help    q quit",
-                palette.muted_style(),
-            );
-        }
     }
 }
 
@@ -276,62 +335,50 @@ impl Screen for ExplorationScreen {
     }
 
     fn handle_key(&mut self, key: Key) -> Command {
-        // Discrete actions never fire on auto-repeat: holding `e` must not
-        // interact over and over, and holding `h` must not toggle an overlay.
-        match key.code {
-            KeyCode::Esc => return Command::Quit,
-            KeyCode::Char('h') | KeyCode::Char('?') | KeyCode::Function(1) => {
-                if key.is_repeat() {
-                    return Command::None;
+        // Discrete actions fire once per press: releases are not activations and
+        // auto-repeat must not interact over and over.
+        if key.is_down() && !key.is_repeat() {
+            match key.code {
+                KeyCode::Esc => return Command::Quit,
+                KeyCode::Char('h') | KeyCode::Char('?') | KeyCode::Function(1) => {
+                    return Command::Push(Box::new(HelpOverlay::new(&CONTROLS)));
                 }
-                return Command::Push(Box::new(HelpOverlay::new(&CONTROLS)));
-            }
-            KeyCode::Function(2) => {
-                if key.is_repeat() {
-                    return Command::None;
+                KeyCode::Function(3) => {
+                    return Command::Push(Box::new(super::stage::StageScreen::new()));
                 }
-                return Command::Push(Box::new(Showcase::new()));
-            }
-            KeyCode::Function(3) => {
-                if key.is_repeat() {
-                    return Command::None;
+                KeyCode::Function(2) => return Command::Push(Box::new(Showcase::new())),
+                KeyCode::Char('e') | KeyCode::Char('E') => {
+                    // Resolved without the frame context here; the dialogue
+                    // portrait is attached on the next frame's compose path.
+                    return self.interact();
                 }
-                return Command::Push(Box::new(super::stage::StageScreen::new()));
+                _ => {}
             }
-            KeyCode::Char('e') | KeyCode::Char('E') => {
-                if key.is_repeat() {
-                    return Command::None;
-                }
-                return self.interact();
-            }
-            _ => {}
         }
 
-        if let Some(direction) = movement_direction(key.code) {
-            self.try_move(direction);
-        }
+        let motion = self.movement.key(key);
+        self.apply(motion);
         Command::None
     }
 
     fn update(&mut self, delta: Duration) {
-        self.move_cooldown = self.move_cooldown.saturating_sub(delta);
-        self.travel = self.travel.saturating_sub(delta);
+        // Movement is driven by time, so holding a key walks at our cadence
+        // rather than the terminal's auto-repeat rate.
+        let motion = self.movement.update(delta);
+        self.apply(motion);
+
+        if self.travel > Duration::ZERO {
+            self.travel = self.travel.saturating_sub(delta);
+        } else {
+            self.plate = self.plate.saturating_sub(delta);
+        }
     }
 
     fn compose(&self, frame: &mut Frame, context: &FrameContext) {
-        let area = frame.bounds();
         let palette = &context.palette;
-
-        if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-            compose_too_small(frame, palette);
-            return;
-        }
-
-        let layout = ExplorationLayout::compute(area);
-        self.compose_header(frame, layout.header, palette);
-        self.compose_world(frame, layout.view, palette);
-        self.compose_message(frame, layout.message, palette);
-        self.compose_status(frame, layout.status, palette);
+        self.compose_world(frame, palette);
+        self.compose_plate(frame, palette, &context.art);
+        self.compose_hud(frame, palette);
 
         if self.travel > Duration::ZERO {
             let progress = 1.0 - self.travel.as_secs_f32() / TRAVEL_DURATION.as_secs_f32();
@@ -340,7 +387,24 @@ impl Screen for ExplorationScreen {
     }
 
     fn is_animating(&self) -> bool {
-        self.move_cooldown > Duration::ZERO || self.travel > Duration::ZERO
+        // Movement is event-driven, so a held key needs no frames: only the
+        // transition and the arrival plate do.
+        self.travel > Duration::ZERO || self.plate > Duration::ZERO
+    }
+
+    fn on_terminal_ready(&mut self, releases: bool) {
+        // Preserve the held direction across the handshake; only the source of
+        // release information changes.
+        let held = self.movement.held();
+        self.movement = Movement::new(releases);
+        if let Some(direction) = held {
+            self.movement.key(Key::char(match direction {
+                Direction::North => 'w',
+                Direction::South => 's',
+                Direction::West => 'a',
+                Direction::East => 'd',
+            }));
+        }
     }
 
     fn on_exit(&mut self) {
@@ -348,46 +412,14 @@ impl Screen for ExplorationScreen {
     }
 }
 
-/// The regions of the exploration interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ExplorationLayout {
-    /// The area name strip along the top.
-    header: Rect,
-    /// The play area.
-    view: Rect,
-    /// The one-line feedback strip.
-    message: Rect,
-    /// The two-line status and controls bar.
-    status: Rect,
-}
-
-impl ExplorationLayout {
-    /// Computes the regions for `area`.
-    fn compute(area: Rect) -> Self {
-        let header = Rect::new(area.x, area.y, area.width, 1);
-        let status_height = area.height.min(2);
-        let status = Rect::new(
-            area.x,
-            area.bottom().saturating_sub(status_height),
-            area.width,
-            status_height,
-        );
-        let message = Rect::new(area.x, status.y.saturating_sub(1), area.width, 1);
-        let view_y = header.bottom();
-        let view = Rect::new(area.x, view_y, area.width, message.y.saturating_sub(view_y));
-        ExplorationLayout {
-            header,
-            view,
-            message,
-            status,
-        }
-    }
-}
+/// The glyph used for the player.
+const PLAYER_GLYPH: char = '@';
 
 /// The world-space origin of the visible window for one axis.
 ///
-/// When the area is smaller than the view it is centred (a negative origin);
-/// otherwise the camera follows the focus and clamps to the area's edges.
+/// When the area is larger than the view the camera follows the focus and clamps
+/// to the area's edges; an area smaller than the view is centred, which only
+/// happens for a pathologically small map.
 fn axis_camera(area: u16, view: u16, focus: u16) -> i32 {
     if area <= view {
         -((i32::from(view) - i32::from(area)) / 2)
@@ -397,129 +429,101 @@ fn axis_camera(area: u16, view: u16, focus: u16) -> i32 {
     }
 }
 
+/// The squared distance between two positions, avoiding a square root.
+fn squared_distance(a: Position, b: Position) -> u32 {
+    let dx = (i32::from(a.x) - i32::from(b.x)).unsigned_abs();
+    let dy = (i32::from(a.y) - i32::from(b.y)).unsigned_abs();
+    dx * dx + dy * dy
+}
+
 /// The glyph drawn for a tile.
 fn tile_glyph(tile: Tile) -> char {
     match tile {
-        Tile::Floor => '.',
-        Tile::Path => ',',
+        Tile::Floor => '·',
+        Tile::Path => '·',
         Tile::Wall => '#',
         Tile::Water => '~',
-        Tile::Tree => 'T',
+        Tile::Tree => '♣',
         Tile::Door => '+',
     }
 }
 
-/// The style drawn for a tile.
-fn tile_style(tile: Tile, palette: &Palette) -> Style {
+/// The foreground colour for a tile.
+fn tile_colour(tile: Tile, palette: &Palette) -> Color {
     match tile {
-        Tile::Floor => Style::new().with_fg(palette.text_muted),
-        Tile::Path => Style::new().with_fg(palette.text),
-        Tile::Wall => Style::new().with_fg(palette.accent_alt_dim),
-        Tile::Water => Style::new().with_fg(palette.accent_alt),
-        Tile::Tree => Style::new().with_fg(palette.nature),
-        Tile::Door => Style::new().with_fg(palette.effect).bold(),
+        Tile::Floor => palette.separator,
+        Tile::Path => palette.text_muted,
+        Tile::Wall => palette.text_secondary,
+        Tile::Water => palette.accent_alt,
+        Tile::Tree => palette.nature,
+        Tile::Door => palette.effect,
     }
 }
 
-/// The style drawn for an entity, by kind.
-fn entity_style(kind: EntityKind, palette: &Palette) -> Style {
+/// The colour for an entity, by kind.
+fn entity_colour(kind: EntityKind, palette: &Palette) -> Color {
     match kind {
-        EntityKind::Npc { .. } => Style::new().with_fg(palette.accent).bold(),
-        EntityKind::Object { .. } => Style::new().with_fg(palette.relic).bold(),
+        EntityKind::Npc { .. } => palette.character,
+        EntityKind::Object { .. } => palette.interactive,
     }
-}
-
-/// The style drawn for the player. Deliberately the loudest thing on screen.
-fn player_style(palette: &Palette) -> Style {
-    Style::new()
-        .with_fg(palette.highlight_fg)
-        .with_bg(palette.text)
-        .bold()
 }
 
 /// Turns a prompt into a short line of text.
 fn prompt_line(prompt: Prompt) -> String {
     match prompt {
-        Prompt::Speak(name) => format!("speak with {name}"),
-        Prompt::Examine(name) => format!("examine {name}"),
-        Prompt::Enter(name) => format!("enter {name}"),
+        Prompt::Speak(name) => format!("e  speak with {name}"),
+        Prompt::Examine(name) => format!("e  examine {name}"),
+        Prompt::Enter(name) => format!("e  enter {name}"),
     }
-}
-
-/// Maps a key onto a movement direction.
-fn movement_direction(code: KeyCode) -> Option<Direction> {
-    match code {
-        KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Up => Some(Direction::North),
-        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Down => Some(Direction::South),
-        KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Left => Some(Direction::West),
-        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Right => Some(Direction::East),
-        _ => None,
-    }
-}
-
-/// The fallback frame for terminals too small for the interface.
-fn compose_too_small(frame: &mut Frame, palette: &Palette) {
-    let area = frame.bounds();
-    if area.is_empty() {
-        return;
-    }
-    let mut view = frame.view(area);
-    let row = area.centered_y(2);
-    view.put_str_centered(
-        view.bounds(),
-        row,
-        "Grimmoire",
-        Style::new().with_fg(palette.accent).bold(),
-    );
-    let hint = format!("needs {MIN_WIDTH}x{MIN_HEIGHT}    q quits");
-    view.put_str_centered(
-        view.bounds(),
-        row.saturating_add(1),
-        &hint,
-        Style::new().with_fg(palette.accent_alt_dim),
-    );
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::time::Duration;
 
-    use super::{ExplorationScreen, MOVE_INTERVAL, axis_camera, movement_direction};
-    use crate::game::{Direction, Position, Tile, World, areas};
-    use crate::input::{Key, KeyCode};
-    use crate::render::{Canvas, Frame};
-    use crate::save::SaveStore;
-    use crate::terminal::{Capabilities, PresentStats};
+    use super::{ExplorationScreen, axis_camera, squared_distance};
+    use crate::game::{Direction, Position, World, areas};
+    use crate::input::{Key, KeyCode, KeyKind};
+    use crate::render::{Canvas, Frame, ImagePlacement};
+    use crate::terminal::{Capabilities, GraphicsSupport, PresentStats};
+    use crate::ui::art::Art;
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
 
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
-            image_backend: crate::terminal::ImageBackend::None,
-            palette: Palette::BASIC,
+            palette: Palette::EXTENDED,
+            graphics: GraphicsSupport::Forced,
+            art: Art::none(),
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
             animating: false,
+            key_releases: true,
         }
     }
 
-    /// Composes a screen into a canvas, supplying an empty image list.
-    fn draw<S: Screen + ?Sized>(canvas: &mut Canvas, screen: &S) {
-        let mut images = Vec::new();
-        let mut frame = Frame::begin(canvas, &mut images);
-        screen.compose(&mut frame, &context());
-    }
-
     fn screen() -> ExplorationScreen {
-        ExplorationScreen::new(World::new(areas::all(), areas::CHAPEL), None)
+        let mut screen =
+            ExplorationScreen::new(World::new(areas::all(), areas::CHAPEL), None, None);
+        screen.on_terminal_ready(true);
+        screen
     }
 
-    /// Steps one tile, clearing the movement cooldown first.
-    fn step(screen: &mut ExplorationScreen, direction: Direction) {
-        screen.update(MOVE_INTERVAL);
-        screen.try_move(direction);
+    fn compose_into(
+        screen: &ExplorationScreen,
+        width: u16,
+        height: u16,
+        context: &FrameContext,
+    ) -> (Canvas, Vec<ImagePlacement>) {
+        let mut canvas = Canvas::new(width, height);
+        canvas.clear_with(context.palette.backdrop());
+        let mut images = Vec::new();
+        {
+            let mut frame = Frame::begin(&mut canvas, &mut images);
+            screen.compose(&mut frame, context);
+        }
+        (canvas, images)
     }
 
     fn frame_text(canvas: &Canvas) -> String {
@@ -533,166 +537,127 @@ mod tests {
         text
     }
 
-    fn scratch(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("grimmoire-explore-{tag}-{unique}"))
+    /// Presses and releases a direction, letting the cadence elapse.
+    fn press(screen: &mut ExplorationScreen, key: char) {
+        screen.handle_key(Key::char(key));
     }
 
     #[test]
     fn the_game_starts_in_the_first_area_at_its_spawn() {
         let screen = screen();
         assert_eq!("Ruined Chapel", screen.world().area_name());
-        assert_eq!(Position::new(23, 12), screen.world().player());
+        assert_eq!(Position::new(70, 44), screen.world().player());
     }
 
     #[test]
-    fn keys_map_onto_directions_including_wasd_and_arrows() {
+    fn a_fresh_press_moves_at_once() {
+        let mut screen = screen();
+        screen.handle_key(Key::char('w'));
+        assert_eq!(Position::new(70, 43), screen.world().player());
+    }
+
+    #[test]
+    fn holding_a_direction_walks_on_our_cadence_not_the_terminals() {
+        let mut screen = screen();
+        screen.handle_key(Key::char('w'));
+        assert_eq!(Position::new(70, 43), screen.world().player());
+
+        // A burst of auto-repeats inside the cadence must not sprint.
+        for _ in 0..40 {
+            screen.handle_key(Key::char('w').with_kind(KeyKind::Repeat));
+        }
+        assert_eq!(Position::new(70, 43), screen.world().player());
+
+        // Once the cadence has passed, each repeat is one step.
+        screen.update(crate::ui::motion::REPEAT_INTERVAL);
+        screen.handle_key(Key::char('w').with_kind(KeyKind::Repeat));
+        assert_eq!(Position::new(70, 42), screen.world().player());
+    }
+
+    #[test]
+    fn releasing_stops_the_walk_immediately() {
+        let mut screen = screen();
+        screen.handle_key(Key::char('d'));
+        let after_press = screen.world().player();
+        screen.handle_key(Key::char('d').released());
+
+        // Repeats after a release are inert: the key is no longer held.
+        for _ in 0..20 {
+            screen.handle_key(Key::char('d').with_kind(KeyKind::Repeat));
+        }
+        screen.update(crate::ui::motion::REPEAT_INTERVAL * 4);
+        assert_eq!(after_press, screen.world().player());
+        assert!(!screen.movement().is_held());
+    }
+
+    #[test]
+    fn time_alone_never_moves_the_player() {
+        let mut screen = screen();
+        screen.handle_key(Key::char('w'));
+        let after_press = screen.world().player();
+        for _ in 0..50 {
+            screen.update(crate::ui::motion::REPEAT_INTERVAL);
+        }
         assert_eq!(
-            Some(Direction::North),
-            movement_direction(KeyCode::Char('w'))
+            after_press,
+            screen.world().player(),
+            "movement must be event-driven"
         );
-        assert_eq!(
-            Some(Direction::South),
-            movement_direction(KeyCode::Char('S'))
-        );
-        assert_eq!(Some(Direction::West), movement_direction(KeyCode::Left));
-        assert_eq!(Some(Direction::East), movement_direction(KeyCode::Right));
-        assert_eq!(None, movement_direction(KeyCode::Char('z')));
     }
 
     #[test]
-    fn movement_keys_move_the_player() {
+    fn changing_direction_is_immediate() {
         let mut screen = screen();
-        screen.handle_key(Key::char('w'));
-        assert_eq!(Position::new(23, 11), screen.world().player());
+        screen.handle_key(Key::char('d'));
+        let start = screen.world().player();
+        screen.handle_key(Key::char('a'));
+        assert_eq!(Position::new(start.x - 1, start.y), screen.world().player());
     }
 
     #[test]
-    fn the_step_interval_throttles_repeated_movement() {
+    fn a_release_is_not_an_activation_for_discrete_actions() {
         let mut screen = screen();
-        screen.handle_key(Key::char('w'));
-        assert_eq!(Position::new(23, 11), screen.world().player());
-
-        // A second step inside the interval is dropped, and the screen asks for
-        // more frames while it waits.
-        screen.handle_key(Key::char('w'));
-        assert_eq!(Position::new(23, 11), screen.world().player());
-        assert!(screen.is_animating());
-
-        screen.update(MOVE_INTERVAL);
-        screen.handle_key(Key::char('w'));
-        assert_eq!(Position::new(23, 10), screen.world().player());
-    }
-
-    #[test]
-    fn walking_into_a_wall_leaves_the_player_in_place() {
-        let mut screen = screen();
-        // Walk north up the path until the wall row stops us.
-        for _ in 0..11 {
-            step(&mut screen, Direction::North);
-        }
-        assert_eq!(Position::new(23, 1), screen.world().player());
-        step(&mut screen, Direction::North);
-        assert_eq!(Position::new(23, 1), screen.world().player());
-        assert_eq!(Direction::North, screen.world().facing());
-    }
-
-    #[test]
-    fn the_player_can_reach_the_door_and_travel() {
-        let mut screen = screen();
-        while screen.world().player().y < 14 {
-            step(&mut screen, Direction::South);
-        }
-        assert_eq!(Position::new(23, 14), screen.world().player());
-
-        // The door itself blocks a step, which is what turns the player to face it.
-        step(&mut screen, Direction::South);
-        screen.handle_key(Key::char('e'));
-
-        assert_eq!("Sunken Cellar", screen.world().area_name());
-        assert!(screen.is_travelling());
-    }
-
-    #[test]
-    fn door_tiles_block_walking_but_are_useable() {
-        let mut screen = screen();
-        while screen.world().player().y < 14 {
-            step(&mut screen, Direction::South);
-        }
-        step(&mut screen, Direction::South); // the door tile itself is not walkable
-        assert_eq!(Position::new(23, 14), screen.world().player());
-        assert_eq!(
-            Tile::Door,
-            screen.world().area().tile(Position::new(23, 15))
-        );
+        // A released `e` must not open a dialogue or change anything.
         assert!(matches!(
-            screen.world().prompt(),
-            Some(crate::game::Prompt::Enter(_))
-        ));
-    }
-
-    #[test]
-    fn interacting_with_nothing_records_a_message() {
-        let mut screen = screen();
-        screen.handle_key(Key::char('e'));
-        assert!(screen.world().message().contains("nothing"));
-        assert_eq!(1, screen.world().visited_count());
-        assert_eq!("Ruined Chapel", screen.world().area_name());
-    }
-
-    #[test]
-    fn facing_the_npc_and_interacting_pushes_a_dialogue() {
-        let mut screen = screen();
-        // The NPC stands at (21, 8), beside the path.
-        for _ in 0..4 {
-            step(&mut screen, Direction::North);
-        }
-        assert_eq!(Position::new(23, 8), screen.world().player());
-        step(&mut screen, Direction::West); // (22, 8), facing the NPC
-        assert_eq!(Position::new(22, 8), screen.world().player());
-        assert!(matches!(
-            screen.world().prompt(),
-            Some(crate::game::Prompt::Speak(_))
-        ));
-
-        let command = screen.handle_key(Key::char('e'));
-        assert!(matches!(command, Command::Push(_)));
-    }
-
-    #[test]
-    fn examining_an_object_sets_a_message_without_pushing_a_screen() {
-        let mut screen = screen();
-        // The basin sits at (25, 8), on the far side of the path.
-        for _ in 0..4 {
-            step(&mut screen, Direction::North);
-        }
-        step(&mut screen, Direction::East); // (24, 8), facing the basin
-        assert_eq!(Position::new(24, 8), screen.world().player());
-
-        let command = screen.handle_key(Key::char('e'));
-        assert!(matches!(command, Command::None));
-        assert!(screen.world().message().contains("rained"));
-    }
-
-    #[test]
-    fn auto_repeat_does_not_interact_or_open_overlays() {
-        let mut screen = screen();
-        assert!(matches!(
-            screen.handle_key(Key::char('e').with_repeat()),
-            Command::None
-        ));
-        assert!(matches!(
-            screen.handle_key(Key::char('h').with_repeat()),
+            screen.handle_key(Key::char('e').released()),
             Command::None
         ));
         assert!(screen.world().message().is_empty());
     }
 
     #[test]
-    fn help_and_escape_are_wired_up() {
+    fn auto_repeat_does_not_trigger_discrete_actions() {
+        let mut screen = screen();
+        assert!(matches!(
+            screen.handle_key(Key::char('h').with_kind(KeyKind::Repeat)),
+            Command::None
+        ));
+        assert!(matches!(
+            screen.handle_key(Key::char('e').with_kind(KeyKind::Repeat)),
+            Command::None
+        ));
+    }
+
+    #[test]
+    fn collision_still_wins_over_repeated_movement() {
+        let mut screen = screen();
+        // Walk west until something stops us; the wall must hold however long
+        // the key is held.
+        for _ in 0..400 {
+            screen.handle_key(Key::char('a'));
+            screen.update(crate::ui::motion::REPEAT_INTERVAL);
+        }
+        let stuck = screen.world().player();
+        for _ in 0..50 {
+            screen.handle_key(Key::char('a'));
+            screen.update(crate::ui::motion::REPEAT_INTERVAL);
+        }
+        assert_eq!(stuck, screen.world().player(), "walls are authoritative");
+        assert!(screen.world().area().tile_walkable(stuck));
+    }
+
+    #[test]
+    fn help_is_pushed_and_escape_quits() {
         let mut screen = screen();
         assert!(matches!(
             screen.handle_key(Key::char('h')),
@@ -705,95 +670,157 @@ mod tests {
     }
 
     #[test]
-    fn travel_is_persisted_and_reloaded() {
-        let directory = scratch("travel");
-        let store = SaveStore::at(directory.join("save.txt"));
-        let mut screen =
-            ExplorationScreen::new(World::new(areas::all(), areas::CHAPEL), Some(store.clone()));
-
-        while screen.world().player().y < 14 {
-            step(&mut screen, Direction::South);
-        }
-        screen.handle_key(Key::char('e'));
-
-        assert_eq!("Sunken Cellar", screen.world().area_name());
-
-        let reloaded = ExplorationScreen::from_save(Some(store));
-        assert_eq!("Sunken Cellar", reloaded.world().area_name());
-        assert_eq!(Position::new(17, 1), reloaded.world().player());
-        assert_eq!(2, reloaded.world().visited_count());
-
-        fs::remove_dir_all(&directory).expect("cleanup");
-    }
-
-    #[test]
-    fn exiting_persists_progress() {
-        let directory = scratch("exit");
-        let store = SaveStore::at(directory.join("save.txt"));
-        let mut screen =
-            ExplorationScreen::new(World::new(areas::all(), areas::CHAPEL), Some(store.clone()));
-
-        step(&mut screen, Direction::North);
-        screen.on_exit();
-
-        let data = store.load().expect("saved");
-        assert_eq!("ruined-chapel", data.area);
-        assert_eq!(11, data.y);
-
-        fs::remove_dir_all(&directory).expect("cleanup");
-    }
-
-    #[test]
-    fn a_missing_save_starts_a_new_game() {
-        let store = SaveStore::at(scratch("missing").join("save.txt"));
-        let screen = ExplorationScreen::from_save(Some(store));
-        assert_eq!("Ruined Chapel", screen.world().area_name());
-    }
-
-    #[test]
-    fn compose_draws_the_area_the_player_and_the_status() {
-        let mut canvas = Canvas::new(80, 24);
-        draw(&mut canvas, &screen());
+    fn the_world_fills_the_viewport_at_the_reference_size() {
+        let screen = screen();
+        let (canvas, _) = compose_into(&screen, 120, 40, &context());
         let text = frame_text(&canvas);
-        assert!(text.contains("Ruined Chapel"), "area name missing");
-        assert!(text.contains('@'), "player missing");
-        assert!(text.contains("position"), "status missing");
-        assert!(text.contains("23, 12"), "coordinates missing");
+
+        // The world is drawn into every row above the HUD: the environment owns
+        // the viewport, and nothing is left blank for a margin.
+        let world_rows = 38;
+        for y in 0..world_rows {
+            let drawn = (0..120)
+                .filter(|x| canvas.get(*x, y).is_some_and(|cell| cell.ch != ' '))
+                .count();
+            assert_eq!(
+                120, drawn,
+                "row {y} of the world is not fully drawn ({drawn} cells)"
+            );
+        }
+        // Only two rows are given to the HUD.
+        assert!(text.contains("Ruined Chapel"));
+        assert!(text.contains("interact"));
     }
 
     #[test]
-    fn compose_is_safe_across_many_sizes() {
-        for width in [1, 10, 24, 46, 80, 200] {
-            for height in [1, 4, 8, 16, 40] {
+    fn the_camera_scrolls_rather_than_centring_a_large_area() {
+        // The chapel is larger than the view, so the camera follows the player.
+        assert_eq!(0, axis_camera(140, 120, 10));
+        assert_eq!(20, axis_camera(140, 120, 80));
+        assert_eq!(20, axis_camera(140, 120, 139));
+        // A tiny area is still centred rather than pinned to the corner.
+        assert_eq!(-4, axis_camera(10, 18, 3));
+    }
+
+    #[test]
+    fn the_hud_reports_position_and_facing() {
+        let screen = screen();
+        let (canvas, _) = compose_into(&screen, 120, 40, &context());
+        let text = frame_text(&canvas);
+        assert!(text.contains("70,44"), "coordinates missing");
+        assert!(text.contains("facing"), "facing missing");
+        assert!(text.contains("interact"), "controls missing");
+    }
+
+    #[test]
+    fn the_prompt_appears_when_something_is_in_reach() {
+        let mut screen = screen();
+        // Stand where the hooded figure is within reach: it is at (56,33).
+        screen
+            .world_mut()
+            .set_player_for_test(Position::new(57, 33));
+        let (canvas, _) = compose_into(&screen, 120, 40, &context());
+        assert!(frame_text(&canvas).contains("speak with"));
+    }
+
+    #[test]
+    fn the_arrival_plate_is_placed_only_when_art_exists_and_after_travel() {
+        let mut screen = screen();
+        let with_art = FrameContext {
+            art: Art {
+                chapel: Some(crate::render::AssetId::new(0)),
+                cellar: Some(crate::render::AssetId::new(1)),
+                portrait: Some(crate::render::AssetId::new(2)),
+            },
+            ..context()
+        };
+
+        // Nothing is shown at rest.
+        let (_, images) = compose_into(&screen, 120, 40, &with_art);
+        assert!(images.is_empty());
+
+        // Mid-transition the curtain covers the screen instead.
+        screen.travel = Duration::from_millis(100);
+        screen.plate = Duration::from_millis(1000);
+        let (_, images) = compose_into(&screen, 120, 40, &with_art);
+        assert!(images.is_empty(), "the curtain comes first");
+
+        // After the curtain, the plate appears.
+        screen.travel = Duration::ZERO;
+        let (_, images) = compose_into(&screen, 120, 40, &with_art);
+        assert_eq!(1, images.len(), "expected an arrival plate");
+
+        // Without artwork there is nothing to place.
+        let (_, images) = compose_into(&screen, 120, 40, &context());
+        assert!(images.is_empty());
+    }
+
+    #[test]
+    fn composition_is_safe_across_sizes() {
+        let mut screen = screen();
+        screen.travel = Duration::from_millis(50);
+        for width in [0, 1, 20, 40, 80, 120, 240] {
+            for height in [0, 1, 6, 12, 24, 40, 60] {
                 let mut canvas = Canvas::new(width, height);
-                draw(&mut canvas, &screen());
+                canvas.clear_with(Palette::EXTENDED.backdrop());
+                let mut images = Vec::new();
+                let mut frame = Frame::begin(&mut canvas, &mut images);
+                screen.compose(&mut frame, &context());
             }
         }
     }
 
     #[test]
-    fn compose_is_deterministic() {
-        let mut a = Canvas::new(80, 24);
-        let mut b = Canvas::new(80, 24);
-        draw(&mut a, &screen());
-        draw(&mut b, &screen());
-        assert_eq!(frame_text(&a), frame_text(&b));
+    fn every_composed_cell_owns_its_background() {
+        let screen = screen();
+        let (canvas, _) = compose_into(&screen, 120, 40, &context());
+        for y in 0..canvas.height() {
+            for x in 0..canvas.width() {
+                assert_ne!(
+                    Some(crate::render::Color::Default),
+                    canvas.get(x, y).map(|cell| cell.style.bg),
+                    "cell ({x}, {y}) would show the terminal background"
+                );
+            }
+        }
     }
 
     #[test]
-    fn the_camera_centres_small_areas_and_follows_the_player_in_large_ones() {
-        // Smaller area than the view: centred.
-        assert_eq!(-4, axis_camera(10, 18, 3));
-        // Larger area than the view: follows, clamped.
-        assert_eq!(0, axis_camera(100, 20, 2));
-        assert_eq!(40, axis_camera(100, 20, 50));
-        assert_eq!(80, axis_camera(100, 20, 99));
+    fn composition_is_deterministic() {
+        let screen = screen();
+        let (first, _) = compose_into(&screen, 120, 40, &context());
+        let (second, _) = compose_into(&screen, 120, 40, &context());
+        assert_eq!(frame_text(&first), frame_text(&second));
     }
 
     #[test]
-    fn the_too_small_fallback_still_names_the_game() {
-        let mut canvas = Canvas::new(20, 6);
-        draw(&mut canvas, &screen());
-        assert!(frame_text(&canvas).contains("Grimmoire"));
+    fn squared_distance_orders_near_before_far() {
+        let origin = Position::new(5, 5);
+        assert_eq!(0, squared_distance(origin, origin));
+        assert_eq!(1, squared_distance(origin, Position::new(6, 5)));
+        assert!(
+            squared_distance(origin, Position::new(6, 5))
+                < squared_distance(origin, Position::new(20, 20))
+        );
+    }
+
+    #[test]
+    fn facing_follows_the_pressed_direction() {
+        let mut screen = screen();
+        press(&mut screen, 'a');
+        assert_eq!(Direction::West, screen.world().facing());
+        press(&mut screen, 's');
+        assert_eq!(Direction::South, screen.world().facing());
+    }
+
+    #[test]
+    fn the_handshake_switches_to_release_reporting() {
+        let mut screen =
+            ExplorationScreen::new(World::new(areas::all(), areas::CHAPEL), None, None);
+        assert!(!screen.movement().reports_releases());
+        screen.on_terminal_ready(true);
+        assert!(screen.movement().reports_releases());
+        screen.on_terminal_ready(false);
+        assert!(!screen.movement().reports_releases());
     }
 }

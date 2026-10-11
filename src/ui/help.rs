@@ -131,10 +131,7 @@ impl Screen for HelpOverlay {
             ("colour", context.capabilities.colors.label().to_string()),
             (
                 "graphics",
-                format!(
-                    "{} (detected, unused)",
-                    context.capabilities.graphics.label()
-                ),
+                format!("{} (graphics)", context.graphics.label()),
             ),
             ("renderer", "cell grid, diffed present".to_string()),
         ];
@@ -188,7 +185,9 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
-            image_backend: crate::terminal::ImageBackend::None,
+            graphics: crate::terminal::GraphicsSupport::Forced,
+            art: crate::ui::art::Art::none(),
+            key_releases: true,
             palette: Palette::BASIC,
             stats: PresentStats {
                 width: 80,

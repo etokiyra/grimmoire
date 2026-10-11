@@ -6,20 +6,33 @@ use std::time::{Duration, Instant};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{
     self, Event as TerminalEvent, KeyCode as TerminalKeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers as TerminalKeyModifiers,
+    KeyModifiers as TerminalKeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use crate::input::{Event, Key, KeyCode, KeyModifiers};
+use crate::input::{Event, Key, KeyCode, KeyKind, KeyModifiers};
+
+use super::kitty;
+
+/// The keyboard enhancements Grimmoire asks for when the terminal offers them.
+///
+/// `REPORT_EVENT_TYPES` is what makes key releases visible, which is what lets
+/// movement stop the moment a direction is let go. `DISAMBIGUATE_ESCAPE_CODES`
+/// keeps `Esc` distinguishable from the start of an escape sequence.
+const KEYBOARD_FLAGS: KeyboardEnhancementFlags = KeyboardEnhancementFlags::from_bits_truncate(
+    KeyboardEnhancementFlags::REPORT_EVENT_TYPES.bits()
+        | KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES.bits(),
+);
 
 /// Owns the process's terminal state and delivers terminal-independent events.
 ///
-/// The terminal is the single owner of raw mode and the alternate screen. Frame
-/// output is written through [`Terminal::writer`] by a
-/// [`crate::terminal::Presenter`], which keeps escape sequences in one layer.
+/// The terminal is the single owner of raw mode, the alternate screen, the Kitty
+/// keyboard protocol, and graphics cleanup. Frame output is written through
+/// [`Terminal::writer`] by a [`crate::terminal::Presenter`].
 ///
 /// Terminal restoration is layered: [`leave`](Terminal::leave) is idempotent and
 /// called on the normal exit path, [`Drop`] restores the terminal if the owner is
@@ -31,6 +44,7 @@ use crate::input::{Event, Key, KeyCode, KeyModifiers};
 pub struct Terminal {
     stdout: Stdout,
     active: bool,
+    keyboard_enhanced: bool,
 }
 
 impl Terminal {
@@ -39,12 +53,15 @@ impl Terminal {
         Ok(Terminal {
             stdout: io::stdout(),
             active: false,
+            keyboard_enhanced: false,
         })
     }
 
     /// Switches to the alternate screen with raw keyboard input enabled.
     ///
-    /// Calling this when already active is a no-op, so ownership stays clear.
+    /// Requests the Kitty keyboard protocol when the terminal answers for it, so
+    /// that press, repeat, and release events are all reported. Calling this when
+    /// already active is a no-op, so ownership stays clear.
     pub fn enter(&mut self) -> io::Result<()> {
         if self.active {
             return Ok(());
@@ -52,20 +69,44 @@ impl Terminal {
         enable_raw_mode()?;
         execute!(self.stdout, EnterAlternateScreen, Hide)?;
         self.active = true;
+
+        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+            && execute!(self.stdout, PushKeyboardEnhancementFlags(KEYBOARD_FLAGS)).is_ok()
+        {
+            self.keyboard_enhanced = true;
+        }
         Ok(())
+    }
+
+    /// Whether the Kitty keyboard protocol was enabled for this session.
+    #[must_use]
+    pub const fn keyboard_enhanced(&self) -> bool {
+        self.keyboard_enhanced
     }
 
     /// Restores the terminal to the state it was in before [`Terminal::enter`].
     ///
-    /// Idempotent, so calling it twice is harmless.
+    /// Pops the keyboard protocol, deletes any images this application created,
+    /// restores the cursor, and leaves the alternate screen. Idempotent, so
+    /// calling it twice is harmless.
     pub fn leave(&mut self) -> io::Result<()> {
         if !self.active {
             return Ok(());
         }
         self.active = false;
+        let mut outcome = Ok(());
+
+        if self.keyboard_enhanced {
+            self.keyboard_enhanced = false;
+            outcome = execute!(self.stdout, PopKeyboardEnhancementFlags);
+        }
+        // Safety net: never leave images behind, even if the presenter never got
+        // the chance to clean up. Terminals without graphics ignore this.
+        let _ = kitty::delete_all(&mut self.stdout);
+
         let restored = execute!(self.stdout, Show, LeaveAlternateScreen);
         let _ = disable_raw_mode();
-        restored
+        outcome.and(restored)
     }
 
     /// The current terminal size as `(columns, rows)`.
@@ -80,9 +121,9 @@ impl Terminal {
 
     /// Waits up to `timeout` for a supported input event.
     ///
-    /// Events the application does not use (mouse, paste, key releases) are
-    /// skipped rather than surfaced. Returns `Ok(None)` when the timeout expires,
-    /// which lets the caller keep animating while remaining input-driven.
+    /// Mouse, paste, and focus events are skipped rather than surfaced. Returns
+    /// `Ok(None)` when the timeout expires, which lets the caller keep animating
+    /// while remaining input-driven.
     pub fn poll_event(&self, timeout: Duration) -> io::Result<Option<Event>> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -110,7 +151,13 @@ pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            PopKeyboardEnhancementFlags,
+            Show,
+            LeaveAlternateScreen
+        );
+        let _ = kitty::delete_all(&mut io::stdout());
         previous(info);
     }));
 }
@@ -118,11 +165,7 @@ pub fn install_panic_hook() {
 /// Translates a terminal library event, dropping events the app does not use.
 fn translate(event: TerminalEvent) -> Option<Event> {
     match event {
-        TerminalEvent::Key(key)
-            if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-        {
-            map_key(key).map(Event::Key)
-        }
+        TerminalEvent::Key(key) => map_key(key).map(Event::Key),
         TerminalEvent::Resize(width, height) => Some(Event::Resize { width, height }),
         _ => None,
     }
@@ -150,6 +193,12 @@ fn map_key(key: KeyEvent) -> Option<Key> {
         _ => return None,
     };
 
+    let kind = match key.kind {
+        KeyEventKind::Press => KeyKind::Press,
+        KeyEventKind::Repeat => KeyKind::Repeat,
+        KeyEventKind::Release => KeyKind::Release,
+    };
+
     Some(Key {
         code,
         modifiers: KeyModifiers {
@@ -157,14 +206,14 @@ fn map_key(key: KeyEvent) -> Option<Key> {
             alt: key.modifiers.contains(TerminalKeyModifiers::ALT),
             shift: key.modifiers.contains(TerminalKeyModifiers::SHIFT),
         },
-        repeat: key.kind == KeyEventKind::Repeat,
+        kind,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{TerminalEvent, map_key, translate};
-    use crate::input::{Event, Key, KeyCode};
+    use crate::input::{Event, Key, KeyCode, KeyKind};
     use crossterm::event::{
         KeyCode as TerminalKeyCode, KeyEvent, KeyEventKind, KeyModifiers as TerminalKeyModifiers,
     };
@@ -205,14 +254,22 @@ mod tests {
     }
 
     #[test]
-    fn auto_repeat_is_flagged() {
+    fn all_three_event_types_are_mapped() {
+        let mut pressed = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
+        pressed.kind = KeyEventKind::Press;
+        assert_eq!(KeyKind::Press, map_key(pressed).expect("mapped").kind);
+
         let mut repeated = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
         repeated.kind = KeyEventKind::Repeat;
         let mapped = map_key(repeated).expect("mapped");
         assert!(mapped.is_repeat());
+        assert!(mapped.is_down());
 
-        let pressed = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
-        assert!(!map_key(pressed).expect("mapped").is_repeat());
+        let mut released = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
+        released.kind = KeyEventKind::Release;
+        let mapped = map_key(released).expect("mapped");
+        assert!(mapped.is_release(), "releases must reach the application");
+        assert!(!mapped.is_char('a'));
     }
 
     #[test]
@@ -224,13 +281,6 @@ mod tests {
             }),
             translate(TerminalEvent::Resize(80, 24))
         );
-    }
-
-    #[test]
-    fn key_release_events_are_ignored() {
-        let mut release = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
-        release.kind = KeyEventKind::Release;
-        assert_eq!(None, translate(TerminalEvent::Key(release)));
     }
 
     #[test]

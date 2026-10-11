@@ -29,7 +29,7 @@ impl AreaId {
 }
 
 /// A grid position within an area, measured in cells from the top-left.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Position {
     /// Column, increasing to the right.
     pub x: u16,

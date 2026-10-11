@@ -5,10 +5,11 @@ current.
 
 ## What Grimmoire is
 
-A terminal-native, ASCII-first dark-fantasy wizard RPG written in Rust. The
-project is in early development: it currently provides a playable exploration
-prototype — two connected areas, tile movement, interaction, one NPC, and
-fail-soft saving — on top of a cell-based renderer, animation system, and screen
+A terminal-native, ASCII-first dark-fantasy wizard RPG written in Rust, targeting
+the Kitty terminal. The project is in early development: it currently provides a
+playable exploration prototype — two large connected areas, responsive movement, an
+overlay HUD, interaction, one NPC, and fail-soft saving — on top of a cell-based
+renderer with an optional Kitty graphics layer, an animation system, and a screen
 stack. It is not a complete game.
 
 ## Vision and confirmed decisions
@@ -21,9 +22,13 @@ These are settled and should guide new work:
 - **Cells are the baseline; images are optional.** The cell renderer must always
   produce a complete, correct screen. Any graphics capability is an additive
   layer behind the `Frame`/`ImagePlacement` boundary, never a requirement.
-- **Sixel is the only graphics protocol implemented.** Kitty and iTerm2 are
-  detected and reported but select no backend. Do not add a second protocol
-  without evidence that it is needed and can be verified.
+- **Kitty is the supported terminal, and Kitty graphics is the only protocol
+  implemented.** This is a deliberate product decision: visual quality and control
+  over breadth of compatibility. Other Kitty-protocol terminals are untested and
+  tmux/zellij may intercept the protocol. Do not add a second protocol, or a
+  fallback rendering mode, without evidence that it is needed and can be verified.
+  When Kitty cannot be established, the application prints an actionable error and
+  exits; it never silently degrades.
 - **Magic-only, turn-based combat** (planned; not implemented).
 - **Knowledge-driven progression.** A hybrid of discoveries/story milestones and
   gameplay mastery. Items support exploration, puzzles, quests, and storytelling
@@ -37,10 +42,11 @@ These are settled and should guide new work:
   particular would own the drawing model.
 - **No ECS, no scripting engine, no widget toolkit** until a phase concretely
   needs one. The current world is a grid plus lists.
-- **No graphics protocol is implemented beyond sixel.** The capability probe is
-  three-valued and must stay that way: treat `Unknown` as "no", never as support.
-  A detected-but-unimplemented protocol must select no backend rather than a
-  half-working one.
+- **Graphics capability is never assumed.** Classification is `Confirmed`,
+  `Forced` (the documented development override), `Unverified`, or `Unsupported`.
+  `Unsupported` is fatal, `Unverified` warns, and `$TERM` alone is never proof.
+  Do not treat a successful build, or a detection heuristic, as evidence that
+  rendering works.
 - **Minimal dependencies.** Two direct dependencies is the current bar:
   `crossterm` and `unicode-width`. Every new direct dependency needs a
   justification in the pull request or commit message and in `Cargo.toml`.
@@ -62,16 +68,20 @@ Respect these; they are the point of the current structure:
   save file. Saving must stay fail-soft: anything unrecognised means "start a new
   game", never a half-loaded state. Only essential exploration state is stored.
 - `src/render/` — pure, terminal-agnostic drawing (`Canvas`, `CanvasView`,
-  `Frame`, `ImagePlacement`, `Cell`, `Style`, `Color`, `Rect`, `Image`, `glyph`).
+  `Frame`, `ImagePlacement`, `AssetId`, `Cell`, `Style`, `Color`, `Rect`, `glyph`).
   **No** terminal or game code, and no dependency on a terminal library.
 - `src/anim/` — time-based animation. **No** terminal or UI code. Progress is a
   function of elapsed time, advanced explicitly; never frame counts.
 - `src/terminal/` — the **only** module allowed to talk to the terminal, and the
-  **only** place that emits graphics-protocol bytes (`sixel::encode`).
+  **only** place that emits graphics-protocol bytes (`terminal::kitty`). It is
+  also the only place that owns the image lifecycle: transmitting an asset once,
+  placing it by cell, replacing a placement in place, and deleting images on
+  every exit path.
 - `src/ui/viewport.rs` — owns the minimum-viewport policy. Screens must not grow
   their own "too small" behaviour; the application suspends for them.
 - `src/input.rs` — terminal-independent `Key`/`Event` types. The backend
-  translates library events into these, including the auto-repeat flag.
+  translates library events into these, including the event kind
+  (press/repeat/release).
 - `src/ui/` — composes frames from state and owns the screen stack. No I/O, no
   escape sequences, no game rules.
 - `src/app.rs` — wires input → update → compose → present and drives the loop.
@@ -80,17 +90,28 @@ Additional rules:
 
 - Screens must never write to the terminal; they compose into a `Frame` and
   return `Command`s from `handle_key`.
-- Screens never encode or position an image. They record an `ImagePlacement` and
-  draw a fallback in the same rectangle; the presenter reserves the rectangle and
-  decides whether to paint pixels there.
+- Screens never encode or position an image, and never see image bytes. They
+  record an `ImagePlacement` naming an `AssetId` and a rectangle, and draw a
+  fallback in the same rectangle; the presenter reserves the rectangle and the
+  graphics layer decides whether to paint pixels there. Kitty draws an image at
+  the cursor, so a placement must move the cursor to the rectangle first.
 - Input goes to the active (top) screen only; composition runs bottom to top.
   This is what stops movement while a dialogue panel is open — do not replace it
   with a mode flag inside the game.
-- Discrete actions (`e`, help, screen changes) must ignore auto-repeat. Movement
-  is paced by a fixed step interval instead of the repeat flag, because classic
-  terminals report repeats as ordinary presses.
+- Discrete actions (`e`, help, screen changes) fire only on a non-repeat press:
+  releases are not activations, and auto-repeat must never re-trigger them.
+- **Movement is event-driven; time never moves the player.** A press steps at
+  once, auto-repeats step again at a tuned cadence (`ui::motion::REPEAT_INTERVAL`),
+  and a release stops the walk. Do not reintroduce timer-driven stepping: it is
+  what lets a lost release walk the player onward. A stall guard may clear the
+  reported held state, but must never take a step.
 - The text width policy in `render::glyph` is the single source of truth for what
   may be drawn.
+- **Artwork is loaded, not embedded.** `assets` is the only module that reads
+  image files; it validates them and hands out `AssetId` handles. The PNGs are
+  generated by `tools/generate-assets.sh` and carry no third-party rights. Artwork
+  is used where a picture materially helps, never for terrain, and the game must
+  look right when it is absent.
 - **Backgrounds are inherited, not defaulted.** A draw that leaves `Style::bg` at
   `Color::Default` keeps whatever background the cell already had. That is what
   makes the viewport opaque. Only paint an explicit background when a component
@@ -102,7 +123,8 @@ Additional rules:
 If a change crosses a boundary, call it out and explain why. Read
 `docs/gameplay.md` before changing the world model, and
 `docs/renderer-design.md` before changing rendering, presentation, animation, or
-graphics.
+graphics. `tools/smoke.sh` and `examples/bench` exist so claims about terminal
+lifecycle and performance can be re-checked instead of asserted.
 
 ## Code quality
 
@@ -136,16 +158,21 @@ that exercises the save store — never the real user data directory.
   not. Distinguish "the protocol is implemented and tested" from "it renders
   correctly on a real terminal".
 - Do not claim remote CI passed unless you have seen its result.
+- A rendering change is not verified until it has been seen in a real Kitty
+  session: launch it, drive it, and capture it. `tools/smoke.sh` covers terminal
+  lifecycle through a pty; `examples/bench` covers the numbers.
 
 ## Documentation
 
 After substantial changes, update the documentation in the same change:
 
-- `README.md` — user-facing status, controls, build/run, architecture.
+- `README.md` — user-facing status, requirements, controls, build/run,
+  architecture.
+- `assets/README.md` — the artwork, its provenance, and how to regenerate it.
 - `docs/gameplay.md` — the world model, controls, interaction rules, save format,
   and where the code lives.
-- `docs/renderer-design.md` — rendering, presentation, animation, and backend
-  decisions.
+- `docs/renderer-design.md` — rendering, presentation, animation, the Kitty
+  protocol, the image and input models, measurements, and verification.
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

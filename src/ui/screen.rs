@@ -52,6 +52,12 @@ pub trait Screen {
     /// the screen) decides when the application is finished.
     fn on_exit(&mut self) {}
 
+    /// Called once after the terminal is entered, with what it reported.
+    ///
+    /// Screens that behave differently depending on the terminal's capabilities
+    /// use this rather than reading the environment themselves.
+    fn on_terminal_ready(&mut self, _key_releases: bool) {}
+
     /// Whether this screen currently has motion in progress.
     fn is_animating(&self) -> bool {
         false
@@ -150,6 +156,13 @@ impl ScreenStack {
     pub fn on_exit(&mut self) {
         for screen in &mut self.screens {
             screen.on_exit();
+        }
+    }
+
+    /// Notifies every screen of what the entered terminal reported.
+    pub fn on_terminal_ready(&mut self, key_releases: bool) {
+        for screen in &mut self.screens {
+            screen.on_terminal_ready(key_releases);
         }
     }
 
@@ -277,7 +290,9 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
-            image_backend: crate::terminal::ImageBackend::None,
+            graphics: crate::terminal::GraphicsSupport::Forced,
+            art: crate::ui::art::Art::none(),
+            key_releases: true,
             palette: Palette::BASIC,
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,

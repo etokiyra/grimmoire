@@ -9,6 +9,97 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — Kitty-first rendering, a full-screen world, and responsive movement
+
+- **Kitty graphics backend, replacing sixel.** Images are PNG transmitted inline
+  (`a=t,f=100,t=d`), placed by cell (`c`/`r`) with a stable image and placement id
+  so a moved image is replaced without flicker, and deleted on every exit path.
+  The PNG bytes are copied through untouched, so the project has no image codec.
+  The old sixel encoder, the CPU-side `Image` type, and the cell-metrics
+  requirement were removed rather than kept as a second path.
+- **A strict startup contract.** Grimmoire now checks for Kitty before entering the
+  alternate screen and, if it cannot establish support, prints an actionable error
+  and exits — there is no silent fallback to a broken render mode. Capability is
+  classified as `Confirmed`, `Forced`, `Unverified`, or `Unsupported`, `$TERM` is
+  never treated as proof, and `GRIMMOIRE_ASSUME_KITTY=1` is a documented
+  development override.
+- **Kitty keyboard protocol.** `Terminal::enter` requests event-type reporting when
+  the terminal answers for it, so press, repeat, and release are all visible, and
+  the protocol is released on the normal path, the error path, and from the panic
+  hook.
+- **An explicit movement model** (`ui::motion`, `REPEAT_INTERVAL` 125 ms). A fresh
+  press steps immediately, holding walks at a tuned cadence, releasing stops at
+  once, and repeats that do not continue a hold are ignored. Motion is
+  **event-driven**: time alone never moves the player, so a lost release or a
+  pasted key cannot start a runaway, and a tap is exactly one step. `Key` now
+  carries a `KeyKind` (`Press`/`Repeat`/`Release`).
+- **The world now fills the viewport.** Both areas were rebuilt larger than the
+  reference size (140×52 and 136×44) with recognisable architecture, and the camera
+  scrolls. The HUD became a two-row overlay painted over the world instead of four
+  chrome rows framing it, so the environment dominates the screen.
+- **Ambient lighting.** Floors are tinted by squared distance from the player,
+  which reads as a pool of light and gives the space depth, with new `shade_*`
+  theme roles.
+- **A role-based theme extension**: `separator`, `text_secondary`, `focus`,
+  `interactive`, `player`, `character`, `warning`, and the ambient ramp, alongside
+  the existing roles.
+- **Original artwork and the arrival plate.** `tools/generate-assets.sh` produces
+  two area plates and a portrait procedurally (so the repository carries no
+  third-party imagery and no rights to track). A plate is shown when you enter an
+  area, after the travel curtain, and removed shortly after. Dialogue now shows an
+  image-backed portrait beside the speaker.
+- `tools/smoke.sh`, a quoted pty smoke test asserting terminal lifecycle and image
+  cleanup, and `examples/bench`, which measures the exploration path.
+- Content tests that every walkable tile is reachable, that entities can be walked
+  up to, that doorways sit on doors, that arrival tiles are clear, and that each
+  area is larger than the reference viewport.
+
+### Changed
+
+- `Screen::compose` takes a `&mut Frame`; screens record image placements as
+  `AssetId` handles rather than image data.
+- `Screen` gained `on_terminal_ready`, so a screen can learn whether the terminal
+  reports key releases.
+- `PresentStats` reports images transmitted, placed, and removed separately.
+- `FrameContext` carries graphics support, the artwork, and whether key releases
+  are reported, replacing the old image-backend field.
+- The render loop no longer runs continuously while a direction is held: movement
+  is event-driven, so an idle game asks for no frames at all.
+- `input::Key::repeat` became `Key::kind`, with `is_repeat`/`is_release` helpers
+  that make releases non-activations everywhere.
+
+### Removed
+
+- The sixel encoder, the CPU-side `Image`/`Rgb` types, the `ImageBackend`
+  abstraction, and the cell-metrics requirement.
+
+### Fixed
+
+- Kitty draws an image at the **cursor**, not at an arbitrary rectangle. Placements
+  now move the cursor to the rectangle first and then hold it there (`C=1`), which
+  was found by live verification: without it, images were reserved but never
+  painted.
+- Holding a direction could walk forever if a release was missed, because
+  self-driven cadence had no upper bound; movement is now event-driven.
+- Auto-repeat could re-trigger discrete actions, because the `repeat` flag was
+  never set on terminals without the enhanced keyboard protocol; the flag is now
+  real, and releases are non-activations.
+- The cellar's stair landed in a disconnected pocket, making the way back a long
+  detour; the generator now seals unreachable pockets and short-circuits the stair
+  into the chamber.
+
+### Notes
+
+- Verified live in Kitty 0.49.2: launching into the world, moving in every
+  direction, holding and releasing, travelling both ways, the arrival plate, the
+  dialogue portrait, and the keyboard protocol and images being released on exit.
+- No license has been chosen yet, so none is included.
+- The story, setting, characters, and detailed mechanics remain undecided. All
+  current area names, entities, dialogue, and art are placeholder content.
+- The Kitty decision, the image and input models, the measured numbers, and what
+  was and was not verified live are recorded in `docs/renderer-design.md`. The
+  audit that started the phase is `docs/phase5-audit.md`.
+
 ### Added — rendering architecture and visual freedom
 
 - **Opaque, application-owned background.** `Canvas::set` now inherits the

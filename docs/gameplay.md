@@ -18,7 +18,7 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 
 | Key | Action |
 | --- | --- |
-| `w` `a` `s` `d` or arrow keys | Move one tile (and face that way) |
+| `w` `a` `s` `d` or arrow keys | Move (and face that way). Hold to keep walking. |
 | `e` | Interact with whatever you are facing, or whatever is adjacent |
 | `h`, `?`, `F1` | Help and renderer diagnostics |
 | `F3` | The presentation study (a rendering prototype) |
@@ -26,9 +26,15 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 | `Esc` | Quit |
 | `q`, `Ctrl`+`C` | Quit |
 
-The bottom of the screen always shows your position, the direction you face, and
-the essential controls. The line above it shows the result of your last action,
-or a prompt for whatever is within reach.
+The world is drawn across the **whole screen**, and the camera follows you: the
+two areas are larger than a normal terminal, so walking scrolls the view.
+Grimmoire draws its own background, so the terminal's theme never shows through.
+
+The bottom two rows are an overlay, not part of the world. The upper row shows a
+prompt for whatever is within reach, or the result of your last action. The lower
+row shows the area you are in, your position, the direction you face, and the
+essential controls. When you enter an area, an illustrated plate is shown briefly
+and then removed.
 
 Play needs a viewport of at least 80×24. Below that the game suspends to a short
 explanation, ignores input, keeps all of its state, and resumes by itself when the
@@ -78,13 +84,25 @@ an out-of-bounds grid.
   - A doorway moves you to the other area, which is saved immediately.
   - Nothing within reach produces a message saying so. This is not an error.
 - **Dialogue.** The panel is a screen pushed on top of the game, so input goes
-  to it and you cannot walk while talking. It closes on `Enter`, `Space`, or
+  to it and you cannot walk while talking. It is an overlay: the world stays
+  visible around it, and the speaker's portrait is drawn beside their words when
+  artwork is available. It closes on `Enter`, `Space`, or
   `Esc` — deliberately *not* on `e`, the key that opens it, because a terminal
   that reports auto-repeats as ordinary presses would otherwise close it the
   instant it appeared.
-- **Auto-repeat.** Movement is paced by a fixed step interval, so held keys and
-  rapid taps walk at the same predictable speed on every terminal. Discrete
-  actions (`e`, help, the showcase) ignore repeats entirely.
+- **Movement and repeat.** Movement is **event-driven**, not timer-driven. A press
+  steps immediately, with no delay. While a direction is held, the terminal's
+  auto-repeats step again but no faster than one step every **125 ms**, so holding
+  cannot sprint and the pace is Grimmoire's rather than the terminal's. Releasing
+  stops at once. Because steps come only from key events, a tap is always exactly
+  one step, and no lost or missing event can leave you walking on your own.
+- **Releases.** Grimmoire asks Kitty for the keyboard protocol's event types, so it
+  sees press, repeat, and release separately. Releasing a key stops the walk
+  immediately. If a release is ever missed, the walk stops anyway once events stop
+  arriving.
+- **Discrete actions.** `e`, help, and screen changes fire only on a genuine press:
+  releases are not activations and auto-repeat is ignored, so holding `e` cannot
+  interact over and over.
 
 ## Persistence
 
@@ -125,8 +143,10 @@ need a different design, and inventing one now would be premature.
 | `src/game/world.rs` | The player's place in the world: movement, collision, interaction, travel, snapshots |
 | `src/game/areas.rs` | The two prototype areas (temporary content) |
 | `src/save.rs` | The versioned save format and the file store |
-| `src/ui/exploration.rs` | The exploration screen: key mapping, camera, and drawing |
-| `src/ui/dialogue.rs` | The dialogue panel |
+| `src/ui/motion.rs` | The movement model: press, cadence, release, stall guard |
+| `src/ui/exploration.rs` | The exploration screen: key mapping, camera, lighting, and the HUD overlay |
+| `src/ui/dialogue.rs` | The dialogue overlay and its portrait |
+| `src/assets.rs` | Loading and validating the artwork |
 
 The `game` and `save` modules never draw and never touch a terminal. The UI maps
 tiles and entity kinds onto glyphs and colours; the game model never decides how
@@ -140,12 +160,19 @@ anything looks.
    walkable ground.
 3. Add it to `areas::all()` and point an existing portal at it.
 
+`tools/generate-areas.py` draws the two areas and prints them; it seals off any
+pocket that is not reachable from the main space, so a map cannot contain a region
+the player can see but never enter.
+
 The tests in `areas.rs` check that every spawn and arrival is on walkable ground,
-that every portal sits on a door tile, and that entity glyphs are printable
-ASCII, so most authoring mistakes are caught without launching the game.
+that every portal sits on a door tile and is reachable from both sides, that every
+entity can be walked up to, that most of each area is one connected space, that
+each area is at least as large as the reference viewport, and that entity glyphs
+are printable ASCII — so most authoring mistakes are caught without launching the
+game.
 
 ## Not implemented
 
 No combat, spells, inventory, quests, skill trees, or story. Items cannot be
-picked up. Areas are hand-authored and tiny. There is exactly one NPC. Save data
-covers position and discovery only.
+picked up. There are two hand-authored areas and exactly one NPC, with no dialogue
+branching. Save data covers position and discovery only.

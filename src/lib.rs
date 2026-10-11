@@ -17,6 +17,8 @@
 //! * [`input`] defines terminal-independent input events.
 //! * [`game`] owns the world model and its rules — movement, collision,
 //!   interaction, and area travel — with no rendering or I/O.
+//! * [`assets`] loads image artwork; only the terminal layer turns it into
+//!   protocol output.
 //! * [`save`] persists essential exploration state in a small versioned format.
 //! * [`ui`] composes frames from state and owns the screen stack.
 //! * [`app`] wires input, update, compose, and present together.
@@ -25,6 +27,7 @@
 
 pub mod anim;
 pub mod app;
+pub mod assets;
 pub mod game;
 pub mod input;
 pub mod render;

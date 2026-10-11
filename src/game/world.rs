@@ -274,6 +274,14 @@ impl World {
         }
     }
 
+    /// Moves the player without applying any rules.
+    ///
+    /// Test-only: play always goes through [`World::move_player`].
+    #[cfg(test)]
+    pub fn set_player_for_test(&mut self, position: Position) {
+        self.player = position;
+    }
+
     /// Finds the index of an area by id.
     fn index_of(&self, id: AreaId) -> Option<usize> {
         self.areas.iter().position(|area| area.id() == id)

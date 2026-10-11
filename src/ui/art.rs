@@ -4,7 +4,8 @@
 //! [`draw_stencil`] to draw art over an existing scene: it leaves space glyphs
 //! transparent so the layer underneath shows through.
 
-use crate::render::{CanvasView, Image, Rgb, Style};
+use crate::assets::{Asset, Assets};
+use crate::render::{AssetId, CanvasView, Style};
 
 /// The full "GRIMMOIRE" banner (generated with figlet's `standard` font).
 pub const BANNER_FULL: [&str; 5] = [
@@ -163,89 +164,64 @@ pub fn draw_stencil(view: &mut CanvasView, x: u16, y: u16, lines: &[&str], style
     }
 }
 
-/// A procedural portrait plate: a hooded figure lit from behind.
+/// The named artwork the game uses.
 ///
-/// This is placeholder art for the graphics proof of concept. It is generated
-/// rather than loaded, so the project needs no image decoder and the result is
-/// deterministic and testable. If image-backed art becomes central, this is
-/// where a real decoder and real art would replace it.
-#[must_use]
-pub fn portrait(width: u32, height: u32) -> Image {
-    let glow = Rgb::new(255, 206, 122);
-    let deep = Rgb::new(14, 10, 22);
-    let violet = Rgb::new(48, 32, 78);
-    let mut image = Image::radial(width, height, violet, deep);
+/// Screens refer to artwork by role rather than by filename, so renaming a file
+/// changes one line here. Every field is optional: a missing asset degrades to
+/// the screen's cell-based fallback rather than failing at draw time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Art {
+    /// The establishing plate for the Ruined Chapel.
+    pub chapel: Option<AssetId>,
+    /// The establishing plate for the Sunken Cellar.
+    pub cellar: Option<AssetId>,
+    /// The hooded figure, for the dialogue overlay.
+    pub portrait: Option<AssetId>,
+}
 
-    if width == 0 || height == 0 {
-        return image;
-    }
-
-    let w = width as f32;
-    let h = height as f32;
-    let cx = (w - 1.0) / 2.0;
-
-    // A soft halo behind the figure.
-    let halo_cy = h * 0.42;
-    let halo_r = h * 0.46;
-    for y in 0..height {
-        for x in 0..width {
-            let dy = y as f32 - halo_cy;
-            let dx = (x as f32 - cx) * 0.85;
-            let distance = (dx * dx + dy * dy).sqrt() / halo_r;
-            if distance < 1.0 {
-                let falloff = (1.0 - distance).powi(2);
-                let base = image.pixel(x, y);
-                image.set_pixel(x, y, base.lerp(glow, falloff * 0.6));
-            }
+impl Art {
+    /// No artwork at all; every screen falls back to cells.
+    #[must_use]
+    pub const fn none() -> Self {
+        Art {
+            chapel: None,
+            cellar: None,
+            portrait: None,
         }
     }
 
-    // The figure: a hood over shoulders, drawn as a stencil so the halo reads
-    // around it.
-    let hood_cy = h * 0.40;
-    let hood_rx = w * 0.17;
-    let hood_ry = h * 0.21;
-    let shoulder_top = h * 0.58;
-    for y in 0..height {
-        for x in 0..width {
-            let dx = (x as f32 - cx) / hood_rx;
-            let dy = (y as f32 - hood_cy) / hood_ry;
-            let in_hood = dx * dx + dy * dy < 1.0;
-
-            let in_shoulders = if (y as f32) > shoulder_top {
-                let spread = (y as f32 - shoulder_top) / (h - shoulder_top).max(1.0);
-                (x as f32 - cx).abs() < w * (0.10 + 0.22 * spread)
-            } else {
-                false
-            };
-
-            if in_hood || in_shoulders {
-                image.set_pixel(x, y, Rgb::new(9, 7, 14));
-            }
+    /// Resolves the named assets from a loaded store.
+    #[must_use]
+    pub fn resolve(assets: &Assets) -> Art {
+        Art {
+            chapel: assets.named("chapel").map(Asset::id),
+            cellar: assets.named("cellar").map(Asset::id),
+            portrait: assets.named("portrait").map(Asset::id),
         }
     }
 
-    // A warm rim on the leading edge of the hood.
-    let rim_radius = w * 0.19;
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - hood_cy;
-            let distance = (dx * dx + dy * dy).sqrt();
-            if (distance - rim_radius).abs() < 1.2 && dy < 0.0 {
-                image.set_pixel(x, y, Rgb::new(190, 150, 96));
-            }
+    /// The names of the required assets that are missing.
+    #[must_use]
+    pub fn missing(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if self.chapel.is_none() {
+            missing.push("chapel.png");
         }
+        if self.cellar.is_none() {
+            missing.push("cellar.png");
+        }
+        if self.portrait.is_none() {
+            missing.push("portrait.png");
+        }
+        missing
     }
-
-    image
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        BANNER_FULL, BANNER_FULL_WIDTH, BANNER_MINI, BANNER_MINI_WIDTH, BANNER_SMALL,
-        BANNER_SMALL_WIDTH, Banner, TOWER, TOWER_WIDTH, banner_for_width, draw_stencil, portrait,
+        Art, BANNER_FULL, BANNER_FULL_WIDTH, BANNER_MINI, BANNER_MINI_WIDTH, BANNER_SMALL,
+        BANNER_SMALL_WIDTH, Banner, TOWER, TOWER_WIDTH, banner_for_width, draw_stencil,
     };
     use crate::render::{Canvas, Rect, Style};
 
@@ -303,29 +279,29 @@ mod tests {
     }
 
     #[test]
-    fn the_portrait_is_a_lit_silhouette() {
-        let image = portrait(64, 64);
-        assert_eq!(64, image.width());
-        assert_eq!(64, image.height());
+    fn art_names_resolve_to_handles() {
+        use crate::assets::Assets;
+        let dir = std::env::temp_dir().join(format!(
+            "grimmoire-art-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend_from_slice(&[0, 0, 0, 0]);
+        for name in ["chapel", "cellar", "portrait"] {
+            std::fs::write(dir.join(format!("{name}.png")), &png).expect("write");
+        }
+        let assets = Assets::load_dir(&dir).expect("load");
+        let art = Art::resolve(&assets);
+        assert!(art.chapel.is_some() && art.cellar.is_some() && art.portrait.is_some());
+        assert!(art.missing().is_empty());
 
-        // The halo beside the figure is far brighter than a corner.
-        let halo = image.pixel(12, 26);
-        let corner = image.pixel(0, 0);
-        let brightness = |c: crate::render::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
-        assert!(
-            brightness(halo) > brightness(corner) + 60,
-            "expected a glow around the figure"
-        );
+        let empty = Art::none();
+        assert_eq!(3, empty.missing().len());
 
-        // The figure itself is near-black.
-        let figure = image.pixel(32, 30);
-        assert!(brightness(figure) < 80, "the figure should be a silhouette");
-    }
-
-    #[test]
-    fn the_portrait_is_deterministic_and_size_safe() {
-        assert_eq!(portrait(32, 32), portrait(32, 32));
-        let empty = portrait(0, 0);
-        assert_eq!(0, empty.width());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }

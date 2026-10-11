@@ -1,12 +1,18 @@
-//! The `grimmoire` executable: parses its arguments, sets up the terminal, and
+//! The `grimmoire` executable: checks the environment, sets up the terminal, and
 //! runs the application.
+//!
+//! Startup is deliberately strict. Grimmoire targets Kitty, and rather than
+//! silently falling back to a degraded or misleading rendering mode it reports
+//! what is wrong and exits before touching the terminal.
 
 use std::io;
 use std::process::ExitCode;
 
-use grimmoire::app::App;
-use grimmoire::terminal::{self, Capabilities, Terminal};
+use grimmoire::app::{App, Startup};
+use grimmoire::assets::Assets;
+use grimmoire::terminal::{self, Capabilities, GraphicsSupport, Terminal};
 use grimmoire::ui::StageScreen;
+use grimmoire::ui::art::Art;
 
 /// What the user asked to launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,8 +36,8 @@ fn main() -> ExitCode {
             match run(mode) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    // The terminal has already been restored by the time the
-                    // error surfaces here.
+                    // Nothing has been written to the terminal yet, so this lands
+                    // on an ordinary screen.
                     eprintln!("grimmoire: {error}");
                     ExitCode::FAILURE
                 }
@@ -55,14 +61,81 @@ impl Mode {
     }
 }
 
-/// Creates the terminal and runs the application to completion.
+/// Resolves the environment, then runs the requested screen to completion.
 fn run(mode: Mode) -> io::Result<()> {
+    let capabilities = Capabilities::detect();
+    let graphics = terminal::detect();
+
+    // Fail before the alternate screen, so the message is readable.
+    match graphics {
+        GraphicsSupport::Unsupported => return Err(graphics_error()),
+        GraphicsSupport::Unverified => {
+            eprintln!(
+                "grimmoire: warning: this terminal looks like Kitty but did not confirm the \
+                 protocol; images may not appear. Set GRIMMOIRE_ASSUME_KITTY=1 to silence this."
+            );
+        }
+        GraphicsSupport::Confirmed | GraphicsSupport::Forced => {}
+    }
+
+    let assets = load_assets()?;
+    let art = Art::resolve(&assets);
+    let missing = art.missing();
+    if !missing.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "artwork is missing: {}\n\
+                 set GRIMMOIRE_ASSETS to the directory containing the PNG files, or run\n\
+                 tools/generate-assets.sh from the repository root.",
+                missing.join(", ")
+            ),
+        ));
+    }
+
+    let startup = Startup {
+        capabilities,
+        graphics,
+        assets,
+        art,
+        save: grimmoire::save::SaveStore::default_location(),
+    };
+
     let mut terminal = Terminal::new()?;
     let mut app = match mode {
-        Mode::Study => App::with_root(Capabilities::detect(), Box::new(StageScreen::new())),
-        Mode::Play | Mode::Help => App::new(),
+        Mode::Study => App::with_root(startup, Box::new(StageScreen::new())),
+        Mode::Play | Mode::Help => App::new(startup),
     };
     app.run(&mut terminal)
+}
+
+/// Loads the artwork, naming the directory it looked in when it fails.
+fn load_assets() -> io::Result<Assets> {
+    let Some(dir) = Assets::default_dir() else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not find the artwork directory.\n\
+             Grimmoire looks in $GRIMMOIRE_ASSETS, then for an `assets` directory beside the\n\
+             executable, then for `assets` in the working directory. Run from the repository\n\
+             root, or run tools/generate-assets.sh to create the files.",
+        ));
+    };
+    Assets::load_dir(&dir)
+}
+
+/// The error shown when the terminal cannot draw Grimmoire at all.
+fn graphics_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "this terminal cannot draw Grimmoire.\n\n\
+         Grimmoire targets the Kitty terminal emulator and uses its graphics protocol for\n\
+         artwork, so it will not start somewhere it would look broken. Launch it in Kitty:\n\n\
+             kitty grimmoire\n\n\
+         If you are already in Kitty, check that $KITTY_WINDOW_ID is set and that no\n\
+         multiplexer is stripping the protocol.\n\n\
+         For development in another terminal, set GRIMMOIRE_ASSUME_KITTY=1 to render the\n\
+         cell layer only; images will not appear, and that is expected.",
+    )
 }
 
 /// Prints usage.
@@ -73,8 +146,37 @@ fn print_usage() {
     println!();
     println!("  (no arguments)  play the exploration prototype");
     println!("  --study         open the presentation study: a rendering prototype");
-    println!("                  for judging the visual direction and graphics support");
     println!("  -h, --help      show this message");
     println!();
-    println!("Grimmoire needs a terminal of at least 80x24.");
+    println!("Requires the Kitty terminal emulator (graphics protocol) and a viewport of");
+    println!("at least 80x24.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Mode;
+
+    fn parse(args: &[&str]) -> Mode {
+        Mode::from_args(args.iter().map(|arg| (*arg).to_string()))
+    }
+
+    #[test]
+    fn the_default_mode_is_the_game() {
+        assert_eq!(Mode::Play, parse(&[]));
+        assert_eq!(Mode::Play, parse(&["--unknown"]));
+    }
+
+    #[test]
+    fn the_study_flags_select_the_study() {
+        assert_eq!(Mode::Study, parse(&["--study"]));
+        assert_eq!(Mode::Study, parse(&["--stage"]));
+        assert_eq!(Mode::Study, parse(&["--study", "--anything"]));
+    }
+
+    #[test]
+    fn help_wins() {
+        assert_eq!(Mode::Help, parse(&["--help"]));
+        assert_eq!(Mode::Help, parse(&["-h"]));
+        assert_eq!(Mode::Help, parse(&["--study", "-h"]));
+    }
 }

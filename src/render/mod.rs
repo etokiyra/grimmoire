@@ -10,6 +10,7 @@
 //! * [`Canvas`] is a grid of [`Cell`]s with clipping drawing primitives.
 //! * [`Frame`] bundles the cell canvas with any [`ImagePlacement`]s a screen
 //!   wants drawn, separating cell rendering from graphics-protocol rendering.
+//! * [`AssetId`] names an image without carrying its data; see `crate::assets`.
 //! * [`CanvasView`] is a clipped, local-coordinate window onto a canvas, used to
 //!   lay out independent visual regions without leaking between them.
 //! * [`Canvas::crop`] and [`Canvas::blit`] compose separate canvases; blitting in
@@ -32,7 +33,7 @@ pub use canvas::Canvas;
 pub use cell::Cell;
 pub use color::Color;
 pub use frame::{Frame, ImagePlacement};
-pub use image::{Image, Rgb};
+pub use image::AssetId;
 pub use rect::Rect;
 pub use style::Style;
 pub use view::CanvasView;

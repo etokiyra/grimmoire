@@ -16,26 +16,19 @@
 //! * an image-backed portrait when the terminal supports one, with an ASCII
 //!   fallback that is drawn whenever it does not.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use super::FrameContext;
-use super::art;
 use super::help::{Binding, HelpOverlay};
 use super::screen::{Command, Screen};
 use super::showcase::Showcase;
 use super::theme::Palette;
 use crate::anim::{Animation, Animator, Easing};
 use crate::input::{Key, KeyCode};
-use crate::render::{CanvasView, Frame, Image, Rect, Style, glyph};
+use crate::render::{CanvasView, Frame, Rect, Style, glyph};
 
 /// How long the opening reveal takes.
 const REVEAL: Duration = Duration::from_millis(520);
-/// The base resolution of the generated portrait, before scaling to the panel.
-const PORTRAIT_WIDTH: u32 = 240;
-/// See [`PORTRAIT_WIDTH`].
-const PORTRAIT_HEIGHT: u32 = 144;
-
 /// Bindings listed by the help overlay while the study is open.
 const CONTROLS: [Binding; 7] = [
     ("g", "toggle the image-backed portrait"),
@@ -60,7 +53,6 @@ pub struct StageScreen {
     animator: Animator<StageKey>,
     scene_time: Duration,
     motion: bool,
-    portrait: Arc<Image>,
     show_image: bool,
     frames: u64,
 }
@@ -75,7 +67,6 @@ impl StageScreen {
             animator,
             scene_time: Duration::ZERO,
             motion: true,
-            portrait: Arc::new(art::portrait(PORTRAIT_WIDTH, PORTRAIT_HEIGHT)),
             show_image: true,
             frames: 0,
         }
@@ -180,11 +171,14 @@ impl StageScreen {
             return;
         }
 
-        if self.show_image && context.image_backend.is_available() {
-            // Intent only: whether these pixels are painted is the terminal's
-            // business, and the presenter reserves the rectangle either way.
-            frame.place_image(inner, Arc::clone(&self.portrait));
-            return;
+        if self.show_image {
+            if let (true, Some(portrait)) = (context.graphics.is_available(), context.art.portrait)
+            {
+                // Intent only: whether these pixels are painted is the terminal's
+                // business, and the presenter reserves the rectangle either way.
+                frame.place_image(inner, portrait);
+                return;
+            }
         }
 
         let mut view = frame.view(inner);
@@ -246,26 +240,32 @@ impl StageScreen {
         row = row.saturating_add(1);
         row = heading(&mut view, area, row, "render path", palette);
         let stats = context.stats;
-        let backend = context.image_backend.label();
-        let metrics = match context.capabilities.cell_metrics {
-            Some(metrics) => format!("{}x{} px", metrics.width, metrics.height),
-            None => "unreported".to_string(),
-        };
         let lines = [
             ("surface", "opaque, owned".to_string()),
             ("colour", context.capabilities.colors.label().to_string()),
+            ("graphics", context.graphics.label().to_string()),
             (
-                "graphics",
-                context.capabilities.graphics.label().to_string(),
+                "art",
+                format!(
+                    "{} loaded",
+                    if context.art.portrait.is_some() { 1 } else { 0 }
+                ),
             ),
-            ("backend", backend.to_string()),
-            ("cell", metrics),
+            (
+                "keys",
+                if context.key_releases {
+                    "press/repeat/release"
+                } else {
+                    "press only"
+                }
+                .to_string(),
+            ),
             (
                 "cells",
                 format!("{} / {}", stats.cells_written, stats.total_cells()),
             ),
             ("runs", format!("{}", stats.runs)),
-            ("images", format!("{}", stats.images_drawn)),
+            ("images", format!("{}", stats.images_placed)),
             ("frame", format!("{}", self.frames)),
         ];
         for (label, value) in lines {
@@ -298,11 +298,13 @@ impl StageScreen {
         view.fill_style(view.bounds(), palette.raised_style());
 
         let mode = if self.motion { "in motion" } else { "paused" };
-        let portrait = if self.show_image && context.image_backend.is_available() {
-            "portrait: image"
-        } else {
-            "portrait: ascii"
-        };
+        let portrait =
+            if self.show_image && context.graphics.is_available() && context.art.portrait.is_some()
+            {
+                "portrait: image"
+            } else {
+                "portrait: ascii"
+            };
         let left = format!("{mode}   {portrait}");
         view.put_str(1, 0, &left, palette.muted_style());
 
@@ -757,8 +759,8 @@ mod tests {
 
     use super::{StageLayout, StageScreen};
     use crate::input::{Key, KeyCode};
-    use crate::render::{Canvas, Color, Frame};
-    use crate::terminal::{Capabilities, ImageBackend, PresentStats};
+    use crate::render::{AssetId, Canvas, Color, Frame};
+    use crate::terminal::{Capabilities, GraphicsSupport, PresentStats};
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
 
@@ -766,13 +768,14 @@ mod tests {
         FrameContext {
             capabilities: Capabilities::conservative(),
             palette: Palette::EXTENDED,
-            image_backend: ImageBackend::None,
+            graphics: GraphicsSupport::Unsupported,
+            art: crate::ui::art::Art::none(),
+            key_releases: true,
             stats: PresentStats {
                 width: 100,
                 height: 30,
                 cells_written: 640,
                 runs: 9,
-                images_drawn: 0,
                 ..PresentStats::default()
             },
             frame_time: Duration::from_millis(8),
@@ -891,7 +894,12 @@ mod tests {
         screen.update(Duration::from_secs(2));
 
         let with_backend = FrameContext {
-            image_backend: ImageBackend::Sixel,
+            graphics: GraphicsSupport::Forced,
+            art: crate::ui::art::Art {
+                chapel: None,
+                cellar: None,
+                portrait: Some(AssetId::new(0)),
+            },
             ..context()
         };
         let (_, images) = compose_into(&screen, 100, 30, &with_backend);
@@ -910,7 +918,12 @@ mod tests {
         let mut screen = StageScreen::new();
         screen.update(Duration::from_secs(2));
         let with_backend = FrameContext {
-            image_backend: ImageBackend::Sixel,
+            graphics: GraphicsSupport::Forced,
+            art: crate::ui::art::Art {
+                chapel: None,
+                cellar: None,
+                portrait: Some(AssetId::new(0)),
+            },
             ..context()
         };
         screen.handle_key(Key::char('g'));

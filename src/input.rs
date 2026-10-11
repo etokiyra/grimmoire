@@ -61,20 +61,31 @@ impl KeyModifiers {
     };
 }
 
-/// A single key press.
+/// What kind of key event this is.
+///
+/// Terminals only report presses unless they implement the Kitty keyboard
+/// protocol's event-type reporting, which the backend requests when it can. The
+/// distinction is what makes "hold to walk, release to stop" possible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum KeyKind {
+    /// The key was pressed.
+    #[default]
+    Press,
+    /// The key is being held and the terminal reported an auto-repeat.
+    Repeat,
+    /// The key was released.
+    Release,
+}
+
+/// A single key event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key {
     /// Which key was pressed.
     pub code: KeyCode,
     /// Which modifiers were held.
     pub modifiers: KeyModifiers,
-    /// Whether the terminal reported this as an auto-repeat of a held key.
-    ///
-    /// Only some terminals advertise repeats; the ones that do so via the
-    /// enhanced keyboard protocol are reported here. Screens must not rely on
-    /// this flag alone to debounce input, because a classic terminal sends
-    /// auto-repeats as ordinary presses.
-    pub repeat: bool,
+    /// Whether this is a press, an auto-repeat, or a release.
+    pub kind: KeyKind,
 }
 
 impl Key {
@@ -84,7 +95,7 @@ impl Key {
         Key {
             code,
             modifiers: KeyModifiers::NONE,
-            repeat: false,
+            kind: KeyKind::Press,
         }
     }
 
@@ -92,6 +103,25 @@ impl Key {
     #[must_use]
     pub const fn char(ch: char) -> Self {
         Key::new(KeyCode::Char(ch))
+    }
+
+    /// Returns a copy with the kind replaced.
+    #[must_use]
+    pub const fn with_kind(mut self, kind: KeyKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    /// Returns a copy marked as an auto-repeat of a held key.
+    #[must_use]
+    pub const fn with_repeat(self) -> Self {
+        self.with_kind(KeyKind::Repeat)
+    }
+
+    /// Returns a copy marked as a key release.
+    #[must_use]
+    pub const fn released(self) -> Self {
+        self.with_kind(KeyKind::Release)
     }
 
     /// Returns a copy with the Control modifier set.
@@ -115,29 +145,36 @@ impl Key {
         self
     }
 
-    /// Returns a copy marked as an auto-repeat of a held key.
+    /// Whether this is a press or an auto-repeat - that is, the key is down.
     #[must_use]
-    pub const fn with_repeat(mut self) -> Self {
-        self.repeat = true;
-        self
+    pub const fn is_down(&self) -> bool {
+        !matches!(self.kind, KeyKind::Release)
     }
 
-    /// Whether this event is an auto-repeat of a held key.
+    /// Whether this is an auto-repeat.
     #[must_use]
     pub const fn is_repeat(&self) -> bool {
-        self.repeat
+        matches!(self.kind, KeyKind::Repeat)
     }
 
-    /// Whether this is `ch` without modifiers.
+    /// Whether the key was released.
+    #[must_use]
+    pub const fn is_release(&self) -> bool {
+        matches!(self.kind, KeyKind::Release)
+    }
+
+    /// Whether this activates `ch` without modifiers.
+    ///
+    /// Releases are not activations, so this is false for them.
     #[must_use]
     pub fn is_char(&self, ch: char) -> bool {
-        self.code == KeyCode::Char(ch) && self.modifiers == KeyModifiers::NONE
+        self.is_down() && self.code == KeyCode::Char(ch) && self.modifiers == KeyModifiers::NONE
     }
 
-    /// Whether this is `Ctrl`+`ch`.
+    /// Whether this activates `Ctrl`+`ch`. False for releases.
     #[must_use]
     pub fn is_ctrl(&self, ch: char) -> bool {
-        self.modifiers.ctrl && self.code == KeyCode::Char(ch)
+        self.is_down() && self.modifiers.ctrl && self.code == KeyCode::Char(ch)
     }
 }
 
@@ -205,13 +242,23 @@ mod tests {
     }
 
     #[test]
-    fn auto_repeat_is_flagged_independently_of_code() {
+    fn auto_repeat_and_release_are_distinguished_from_a_press() {
         assert!(!Key::char('a').is_repeat());
+        assert!(Key::char('a').is_down());
+
         let repeated = Key::char('a').with_repeat();
         assert!(repeated.is_repeat());
+        assert!(repeated.is_down());
         assert!(
             repeated.is_char('a'),
             "repeat must not change the key identity"
         );
+
+        let released = Key::char('a').released();
+        assert!(released.is_release());
+        assert!(!released.is_down());
+        assert!(!released.is_char('a'), "a release is not an activation");
+        assert!(!Key::char('q').released().is_char('q'));
+        assert!(!Key::char('c').with_ctrl().released().is_ctrl('c'));
     }
 }
