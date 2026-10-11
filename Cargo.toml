@@ -18,9 +18,12 @@ publish = false
 # that would own the drawing model Grimmoire wants to keep for itself).
 crossterm = "0.29"
 # Display width of a `char`/`str` according to Unicode Standard Annex #11. Used
-# only by `render::glyph` to enforce the ASCII-first width policy, so text can
-# never desynchronise the cell grid. No dependencies of its own.
-unicode-width = "0.2"
+# only by `render::glyph` to enforce the width policy, so text can never
+# desynchronise the cell grid. The default `cjk` feature is disabled because it
+# only adds the `*_cjk` variants, which resolve East Asian Ambiguous characters
+# (box-drawing and block glyphs) as two columns — the opposite of what a
+# non-CJK-terminal renderer wants.
+unicode-width = { version = "0.2", default-features = false }
 
 [profile.release]
 lto = true

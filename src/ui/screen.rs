@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use crate::input::Key;
-use crate::render::{Canvas, Rect};
+use crate::render::{Frame, Rect};
 
 use super::FrameContext;
 
@@ -41,7 +41,7 @@ pub trait Screen {
     fn update(&mut self, _delta: Duration) {}
 
     /// Composes this screen into `frame`.
-    fn compose(&self, frame: &mut Canvas, context: &FrameContext);
+    fn compose(&self, frame: &mut Frame, context: &FrameContext);
 
     /// Called when the terminal size changes, before the next compose.
     fn on_resize(&mut self, _area: Rect) {}
@@ -93,6 +93,11 @@ impl ScreenStack {
         self.screens.push(Box::new(screen));
     }
 
+    /// Pushes an already boxed screen.
+    pub fn push_boxed(&mut self, screen: Box<dyn Screen>) {
+        self.screens.push(screen);
+    }
+
     /// Pops the active screen, refusing to remove the last (root) screen.
     pub fn pop(&mut self) -> Option<Box<dyn Screen>> {
         if self.screens.len() > 1 {
@@ -128,7 +133,7 @@ impl ScreenStack {
     }
 
     /// Composes every screen from the bottom up; later screens draw on top.
-    pub fn compose(&self, frame: &mut Canvas, context: &FrameContext) {
+    pub fn compose(&self, frame: &mut Frame, context: &FrameContext) {
         for screen in &self.screens {
             screen.compose(frame, context);
         }
@@ -206,7 +211,7 @@ mod tests {
 
     use super::{Command, Screen, ScreenStack};
     use crate::input::{Key, KeyCode};
-    use crate::render::{Canvas, Rect};
+    use crate::render::{Canvas, Frame, Rect};
     use crate::terminal::{Capabilities, PresentStats};
     use crate::ui::{FrameContext, Palette};
 
@@ -260,7 +265,7 @@ mod tests {
             self.log.push(format!("{}:update", self.name));
         }
 
-        fn compose(&self, _frame: &mut Canvas, _context: &FrameContext) {
+        fn compose(&self, _frame: &mut Frame, _context: &FrameContext) {
             self.log.push(format!("{}:compose", self.name));
         }
 
@@ -272,6 +277,7 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
+            image_backend: crate::terminal::ImageBackend::None,
             palette: Palette::BASIC,
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
@@ -383,7 +389,9 @@ mod tests {
             mode: Mode::Stay,
         });
 
-        let mut frame = Canvas::new(20, 5);
+        let mut canvas = Canvas::new(20, 5);
+        let mut images = Vec::new();
+        let mut frame = Frame::begin(&mut canvas, &mut images);
         stack.compose(&mut frame, &context());
 
         let composes: Vec<String> = log

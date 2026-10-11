@@ -22,7 +22,7 @@ use super::screen::{Command, Screen};
 use super::theme::Palette;
 use crate::anim::{Animation, Animator, Easing};
 use crate::input::{Key, KeyCode};
-use crate::render::{Canvas, CanvasView, Rect, Style, glyph};
+use crate::render::{CanvasView, Frame, Rect, Style, glyph};
 
 /// How long the title reveal takes.
 const TITLE_REVEAL: Duration = Duration::from_millis(1100);
@@ -161,7 +161,7 @@ impl Showcase {
     }
 
     /// Draws the full interface.
-    fn compose_full(&self, frame: &mut Canvas, layout: &Layout, context: &FrameContext) {
+    fn compose_full(&self, frame: &mut Frame, layout: &Layout, context: &FrameContext) {
         let palette = &context.palette;
         let time = self.effect_time.as_secs_f32();
 
@@ -173,14 +173,14 @@ impl Showcase {
                 layout.banner,
                 0,
                 reveal,
-                Style::new().with_fg(palette.arcane).bold(),
-                Style::new().with_fg(palette.frost).bold(),
+                Style::new().with_fg(palette.accent).bold(),
+                Style::new().with_fg(palette.accent_alt).bold(),
             );
             view.put_str_centered(
                 view.bounds(),
                 layout.banner.height(),
                 "a terminal-native dark-fantasy wizard RPG",
-                Style::new().with_fg(palette.frost_dim).italic(),
+                Style::new().with_fg(palette.accent_alt_dim).italic(),
             );
         }
 
@@ -234,10 +234,12 @@ impl Showcase {
         if revealed >= width {
             return;
         }
-        let mask = Style::new().with_fg(palette.night).with_bg(palette.night);
+        let mask = Style::new()
+            .with_fg(palette.background)
+            .with_bg(palette.background);
         let edge = Style::new()
-            .with_fg(palette.frost)
-            .with_bg(palette.night)
+            .with_fg(palette.accent_alt)
+            .with_bg(palette.background)
             .bold();
         for y in 0..height {
             for x in revealed..width {
@@ -267,8 +269,8 @@ impl Showcase {
         view.draw_titled_border(
             view.bounds(),
             "renderer",
-            Style::new().with_fg(palette.shadow),
-            Style::new().with_fg(palette.arcane).bold(),
+            Style::new().with_fg(palette.text_muted),
+            Style::new().with_fg(palette.accent).bold(),
         );
 
         let inner = Rect::new(2, 1, width.saturating_sub(4), height.saturating_sub(2));
@@ -286,7 +288,7 @@ impl Showcase {
             let (marker, style) = if selected {
                 ("> ", pulse)
             } else {
-                ("  ", palette.muted())
+                ("  ", palette.muted_style())
             };
             let marker_width = glyph::display_width(marker);
             view.put_str(inner.x, row, marker, style);
@@ -308,7 +310,7 @@ impl Showcase {
                 inner.x,
                 row,
                 &line,
-                Style::new().with_fg(palette.frost_dim).italic(),
+                Style::new().with_fg(palette.accent_alt_dim).italic(),
             );
             row = row.saturating_add(1);
         }
@@ -336,12 +338,12 @@ impl Showcase {
             if row >= inner.bottom() {
                 break;
             }
-            view.put_str(inner.x, row, label, palette.muted());
+            view.put_str(inner.x, row, label, palette.muted_style());
             view.put_str(
                 inner.x.saturating_add(10),
                 row,
                 value,
-                Style::new().with_fg(palette.frost),
+                Style::new().with_fg(palette.accent_alt),
             );
             row = row.saturating_add(1);
         }
@@ -356,12 +358,12 @@ impl Showcase {
         }
 
         let title = "GRIMMOIRE";
-        view.put_str(0, 0, title, Style::new().with_fg(palette.arcane).bold());
+        view.put_str(0, 0, title, Style::new().with_fg(palette.accent).bold());
         view.put_str(
             glyph::display_width(title),
             0,
             "  renderer showcase",
-            Style::new().with_fg(palette.shadow),
+            Style::new().with_fg(palette.text_muted),
         );
 
         let fps = if context.frame_time.is_zero() {
@@ -377,7 +379,7 @@ impl Showcase {
             width.saturating_sub(glyph::display_width(&right)),
             0,
             &right,
-            Style::new().with_fg(palette.frost_dim),
+            Style::new().with_fg(palette.accent_alt_dim),
         );
 
         if height > 1 {
@@ -392,13 +394,13 @@ impl Showcase {
                 Rect::new(0, 1, width, 1),
                 1,
                 hints,
-                Style::new().with_fg(palette.shadow),
+                Style::new().with_fg(palette.text_muted),
             );
         }
     }
 
     /// Draws the fallback for terminals too small for the interface.
-    fn compose_minimal(&self, frame: &mut Canvas, context: &FrameContext) {
+    fn compose_minimal(&self, frame: &mut Frame, context: &FrameContext) {
         let area = frame.bounds();
         if area.is_empty() {
             return;
@@ -414,20 +416,20 @@ impl Showcase {
             view.bounds(),
             row,
             &title,
-            Style::new().with_fg(palette.arcane).bold(),
+            Style::new().with_fg(palette.accent).bold(),
         );
         view.put_str_centered(
             view.bounds(),
             row.saturating_add(1),
             "terminal too small",
-            Style::new().with_fg(palette.shadow),
+            Style::new().with_fg(palette.text_muted),
         );
         let hint = format!("{MIN_WIDTH}x{MIN_HEIGHT} minimum    q quits");
         view.put_str_centered(
             view.bounds(),
             row.saturating_add(2),
             &hint,
-            Style::new().with_fg(palette.frost_dim),
+            Style::new().with_fg(palette.accent_alt_dim),
         );
     }
 }
@@ -501,7 +503,7 @@ impl Screen for Showcase {
         }
     }
 
-    fn compose(&self, frame: &mut Canvas, context: &FrameContext) {
+    fn compose(&self, frame: &mut Frame, context: &FrameContext) {
         let layout = Layout::compute(frame.bounds());
         if layout.mode == LayoutMode::Minimal {
             self.compose_minimal(frame, context);
@@ -531,9 +533,9 @@ fn scene_wipe() -> Animation {
 fn pulse_style(palette: &Palette, time: f32) -> Style {
     let phase = (time * 0.8).rem_euclid(1.0);
     let color = if phase < 0.5 {
-        palette.arcane
+        palette.accent
     } else {
-        palette.frost
+        palette.accent_alt
     };
     Style::new().with_fg(color).bold()
 }
@@ -576,11 +578,11 @@ mod scenes {
             let phase = unit(i.wrapping_mul(11).wrapping_add(3)) * TAU;
             let blink = (time * 2.0 + phase).sin() * 0.5 + 0.5;
             let (ch, color) = if blink > 0.8 {
-                ('*', palette.frost)
+                ('*', palette.accent_alt)
             } else if blink > 0.45 {
-                ('.', palette.frost_dim)
+                ('.', palette.accent_alt_dim)
             } else {
-                (',', palette.shadow)
+                (',', palette.text_muted)
             };
             view.put_char(x, y, ch, Style::new().with_fg(color));
         }
@@ -594,11 +596,11 @@ mod scenes {
             let row = (h as f32 - 1.0 - y).max(0.0) as u16;
             let brightness = 1.0 - (y / h as f32).clamp(0.0, 1.0);
             let (ch, color) = if brightness > 0.66 {
-                ('*', palette.ember)
+                ('*', palette.effect)
             } else if brightness > 0.33 {
-                ('o', palette.ember_dim)
+                ('o', palette.effect_dim)
             } else {
-                ('.', palette.shadow)
+                ('.', palette.text_muted)
             };
             view.put_char(x, row, ch, Style::new().with_fg(color));
         }
@@ -610,7 +612,7 @@ mod scenes {
             tower_x,
             tower_top,
             &art::TOWER,
-            Style::new().with_fg(palette.shadow).dim(),
+            Style::new().with_fg(palette.text_muted).dim(),
         );
     }
 
@@ -638,9 +640,9 @@ mod scenes {
             let direction = if ring % 2 == 0 { 1.0 } else { -1.0 };
             let spin = direction * time * (0.5 + ring as f32 * 0.35);
             let color = if ring % 2 == 0 {
-                palette.arcane_dim
+                palette.accent_dim
             } else {
-                palette.frost_dim
+                palette.accent_alt_dim
             };
             for k in 0..rune_count {
                 let angle = spin + TAU * (k as f32) / rune_count as f32;
@@ -656,13 +658,13 @@ mod scenes {
 
         let beat = (time * 1.6).sin() * 0.5 + 0.5;
         let (ch, color) = if beat > 0.85 {
-            ('@', palette.frost)
+            ('@', palette.accent_alt)
         } else if beat > 0.6 {
-            ('O', palette.arcane)
+            ('O', palette.accent)
         } else if beat > 0.35 {
-            ('o', palette.arcane_dim)
+            ('o', palette.accent_dim)
         } else {
-            ('.', palette.frost_dim)
+            ('.', palette.accent_alt_dim)
         };
         view.put_char(cx as u16, cy as u16, ch, Style::new().with_fg(color).bold());
     }
@@ -679,9 +681,9 @@ mod scenes {
 
         for layer in 0..3u32 {
             let (speed, color, ch) = match layer {
-                0 => (0.25, palette.shadow, '.'),
-                1 => (0.6, palette.frost_dim, '.'),
-                _ => (1.2, palette.frost, '*'),
+                0 => (0.25, palette.text_muted, '.'),
+                1 => (0.6, palette.accent_alt_dim, '.'),
+                _ => (1.2, palette.accent_alt, '*'),
             };
             let count = (w * h / (70 + layer * 30)).clamp(12, 140);
             for i in 0..count {
@@ -714,7 +716,7 @@ mod tests {
 
     use super::{Scene, Showcase};
     use crate::input::{Key, KeyCode};
-    use crate::render::Canvas;
+    use crate::render::{Canvas, Frame};
     use crate::terminal::{Capabilities, PresentStats};
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
@@ -722,6 +724,7 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
+            image_backend: crate::terminal::ImageBackend::None,
             palette: Palette::BASIC,
             stats: PresentStats {
                 width: 100,
@@ -732,6 +735,13 @@ mod tests {
             frame_time: Duration::from_millis(5),
             animating: true,
         }
+    }
+
+    /// Composes a screen into a canvas, supplying an empty image list.
+    fn draw<S: Screen + ?Sized>(canvas: &mut Canvas, screen: &S) {
+        let mut images = Vec::new();
+        let mut frame = Frame::begin(canvas, &mut images);
+        screen.compose(&mut frame, &context());
     }
 
     fn frame_text(canvas: &Canvas) -> String {
@@ -747,7 +757,7 @@ mod tests {
 
     fn render(showcase: &Showcase, width: u16, height: u16) -> String {
         let mut canvas = Canvas::new(width, height);
-        showcase.compose(&mut canvas, &context());
+        draw(&mut canvas, showcase);
         frame_text(&canvas)
     }
 

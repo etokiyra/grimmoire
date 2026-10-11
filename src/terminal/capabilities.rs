@@ -1,9 +1,18 @@
 //! Runtime detection of what the current terminal can do.
 //!
-//! Detection is deliberately best-effort and only informs presentation choices
-//! and diagnostics; nothing here changes the rendering model. The colour result
-//! selects the palette, and the graphics result is reported to the user without
-//! being used, because Grimmoire renders in cells (see `docs/renderer-design.md`).
+//! Detection is best-effort and never authoritative, so every value here is
+//! expressed as something a caller can act on *safely*:
+//!
+//! * colour support selects the palette;
+//! * graphics support is three-valued, so "we could not tell" is never confused
+//!   with "yes" or "no"; and
+//! * cell metrics are `Option`, because a terminal that cannot report pixel
+//!   dimensions cannot size an image to a rectangle of cells.
+//!
+//! Nothing here changes the rendering model on its own.
+
+use crossterm::style::available_color_count;
+use crossterm::terminal::window_size;
 
 /// How many colours the terminal can display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -28,19 +37,16 @@ impl ColorSupport {
         }
     }
 
-    /// Whether the palette has more than the classic 16 colours available.
+    /// Whether more than the classic 16 colours are available.
     #[must_use]
     pub const fn has_extended_palette(self) -> bool {
         matches!(self, ColorSupport::Ansi256 | ColorSupport::TrueColor)
     }
 }
 
-/// A terminal graphics protocol that was detected but is not used for rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GraphicsSupport {
-    /// No known graphics protocol was detected.
-    #[default]
-    None,
+/// A terminal graphics protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphicsProtocol {
     /// The Kitty graphics protocol.
     Kitty,
     /// The iTerm2 inline image protocol.
@@ -49,49 +55,148 @@ pub enum GraphicsSupport {
     Sixel,
 }
 
-impl GraphicsSupport {
+impl GraphicsProtocol {
     /// A short human-readable label.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            GraphicsSupport::None => "none",
-            GraphicsSupport::Kitty => "kitty",
-            GraphicsSupport::Iterm2 => "iterm2",
-            GraphicsSupport::Sixel => "sixel",
+            GraphicsProtocol::Kitty => "kitty",
+            GraphicsProtocol::Iterm2 => "iterm2",
+            GraphicsProtocol::Sixel => "sixel",
         }
     }
 }
 
-/// The capabilities of the current terminal.
+/// What is known about the terminal's graphics capabilities.
+///
+/// The distinction matters: acting on [`GraphicsSupport::Unknown`] as if it were
+/// support is how a program ends up painting protocol bytes into a terminal that
+/// renders them as garbage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GraphicsSupport {
+    /// Nothing in the environment hinted either way.
+    #[default]
+    Unknown,
+    /// Graphics were explicitly disabled, or the terminal is known not to
+    /// support any protocol we can use.
+    Unsupported,
+    /// The environment suggests this protocol; it is a hint, not a promise.
+    Likely(GraphicsProtocol),
+}
+
+impl GraphicsSupport {
+    /// A short human-readable label for diagnostics.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            GraphicsSupport::Unknown => "unknown",
+            GraphicsSupport::Unsupported => "none",
+            GraphicsSupport::Likely(GraphicsProtocol::Kitty) => "kitty?",
+            GraphicsSupport::Likely(GraphicsProtocol::Iterm2) => "iterm2?",
+            GraphicsSupport::Likely(GraphicsProtocol::Sixel) => "sixel?",
+        }
+    }
+
+    /// The protocol hinted at, if any.
+    #[must_use]
+    pub const fn protocol(self) -> Option<GraphicsProtocol> {
+        match self {
+            GraphicsSupport::Likely(protocol) => Some(protocol),
+            _ => None,
+        }
+    }
+}
+
+/// The pixel size of one character cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellMetrics {
+    /// Cell width in pixels.
+    pub width: u16,
+    /// Cell height in pixels.
+    pub height: u16,
+}
+
+impl CellMetrics {
+    /// Reads the character cell size from the terminal, if it reports it.
+    ///
+    /// Returns `None` when the terminal does not report pixel dimensions, which
+    /// is common (and always the case on some platforms). Callers must treat that
+    /// as "graphics unavailable" rather than guessing, because a wrong cell size
+    /// produces images that overlap neighbouring panels.
+    #[must_use]
+    pub fn detect() -> Option<CellMetrics> {
+        let window = window_size().ok()?;
+        CellMetrics::from_window(window.columns, window.rows, window.width, window.height)
+    }
+
+    /// Derives cell metrics from a terminal window-size report.
+    #[must_use]
+    pub fn from_window(columns: u16, rows: u16, width: u16, height: u16) -> Option<CellMetrics> {
+        if columns == 0 || rows == 0 || width == 0 || height == 0 {
+            return None;
+        }
+        let cell_width = width / columns;
+        let cell_height = height / rows;
+        if cell_width == 0 || cell_height == 0 {
+            return None;
+        }
+        Some(CellMetrics {
+            width: cell_width,
+            height: cell_height,
+        })
+    }
+}
+
+/// What the current terminal can do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Capabilities {
     /// Detected colour support.
     pub colors: ColorSupport,
-    /// Detected graphics protocol, if any (informational only today).
+    /// Detected graphics support.
     pub graphics: GraphicsSupport,
+    /// The character cell size in pixels, when the terminal reports it.
+    pub cell_metrics: Option<CellMetrics>,
 }
 
 impl Capabilities {
-    /// Detects capabilities from the environment. Reads process environment.
+    /// Detects capabilities from the environment and the terminal.
     #[must_use]
     pub fn detect() -> Self {
-        let colors = color_support_from(crossterm::style::available_color_count());
+        let colors = color_support_from(available_color_count());
         let graphics = graphics_support_from(
             &std::env::var("TERM").unwrap_or_default(),
             &std::env::var("TERM_PROGRAM").unwrap_or_default(),
             std::env::var_os("KITTY_WINDOW_ID").is_some(),
+            graphics_disabled(),
         );
-        Capabilities { colors, graphics }
+        let cell_metrics = CellMetrics::detect();
+        Capabilities {
+            colors,
+            graphics,
+            cell_metrics,
+        }
     }
 
     /// A conservative baseline used when detection is unavailable or undesired.
+    ///
+    /// Deliberately colour- and graphics-free so tests never depend on the
+    /// environment or the terminal.
     #[must_use]
     pub const fn conservative() -> Self {
         Capabilities {
             colors: ColorSupport::Ansi16,
-            graphics: GraphicsSupport::None,
+            graphics: GraphicsSupport::Unknown,
+            cell_metrics: None,
         }
     }
+}
+
+/// Whether the user or environment has explicitly disabled graphics.
+fn graphics_disabled() -> bool {
+    matches!(
+        std::env::var("GRIMMOIRE_NO_GRAPHICS").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
 }
 
 /// Maps a colour count from the terminal library onto [`ColorSupport`].
@@ -107,31 +212,47 @@ fn color_support_from(count: u16) -> ColorSupport {
 
 /// Guesses a graphics protocol from well-known environment hints.
 ///
-/// This is a hint, not an authoritative query: a terminal can support a protocol
-/// without advertising it, and multiplexers can swallow the protocol. Authoritative
-/// detection requires querying the terminal with control sequences, which the
-/// project has not needed yet.
-fn graphics_support_from(term: &str, term_program: &str, kitty_window: bool) -> GraphicsSupport {
+/// This is a hint, not a query. A terminal can support a protocol without
+/// advertising it, and a multiplexer can swallow the protocol entirely, so the
+/// result is only ever used to *consider* a backend, never to assume one works.
+fn graphics_support_from(
+    term: &str,
+    term_program: &str,
+    kitty_window: bool,
+    disabled: bool,
+) -> GraphicsSupport {
+    if disabled {
+        return GraphicsSupport::Unsupported;
+    }
+    if term == "dumb" || term.is_empty() {
+        return GraphicsSupport::Unsupported;
+    }
+    // Kitty and iTerm2 are detected so the diagnostics can say what was found,
+    // even though this build only implements sixel.
     if kitty_window || term.contains("kitty") || term.contains("ghostty") {
-        return GraphicsSupport::Kitty;
+        return GraphicsSupport::Likely(GraphicsProtocol::Kitty);
     }
     if term_program.contains("WezTerm") {
-        // WezTerm speaks the Kitty protocol as well as its own.
-        return GraphicsSupport::Kitty;
+        return GraphicsSupport::Likely(GraphicsProtocol::Kitty);
     }
     if term_program.contains("iTerm") {
-        return GraphicsSupport::Iterm2;
+        return GraphicsSupport::Likely(GraphicsProtocol::Iterm2);
     }
-    if term.contains("foot") || term.contains("mlterm") || term.contains("sixel") {
-        return GraphicsSupport::Sixel;
+    if term.contains("foot")
+        || term.contains("mlterm")
+        || term.contains("sixel")
+        || term.contains("contour")
+    {
+        return GraphicsSupport::Likely(GraphicsProtocol::Sixel);
     }
-    GraphicsSupport::None
+    GraphicsSupport::Unknown
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Capabilities, ColorSupport, GraphicsSupport, color_support_from, graphics_support_from,
+        Capabilities, CellMetrics, ColorSupport, GraphicsProtocol, GraphicsSupport,
+        color_support_from, graphics_support_from,
     };
 
     #[test]
@@ -143,44 +264,64 @@ mod tests {
     }
 
     #[test]
-    fn extended_palette_reports_correctly() {
-        assert!(!ColorSupport::Ansi16.has_extended_palette());
-        assert!(ColorSupport::Ansi256.has_extended_palette());
-        assert!(ColorSupport::TrueColor.has_extended_palette());
-    }
-
-    #[test]
-    fn graphics_hints_are_recognised() {
+    fn sixel_hints_are_recognised() {
         assert_eq!(
-            GraphicsSupport::Kitty,
-            graphics_support_from("xterm-kitty", "", false)
+            GraphicsSupport::Likely(GraphicsProtocol::Sixel),
+            graphics_support_from("foot", "", false, false)
         );
         assert_eq!(
-            GraphicsSupport::Kitty,
-            graphics_support_from("xterm-256color", "WezTerm", false)
-        );
-        assert_eq!(
-            GraphicsSupport::Iterm2,
-            graphics_support_from("xterm-256color", "iTerm.app", false)
-        );
-        assert_eq!(
-            GraphicsSupport::Sixel,
-            graphics_support_from("foot", "", false)
-        );
-        assert_eq!(
-            GraphicsSupport::None,
-            graphics_support_from("xterm-256color", "Apple_Terminal", false)
+            GraphicsSupport::Likely(GraphicsProtocol::Sixel),
+            graphics_support_from("xterm-sixel", "", false, false)
         );
     }
 
     #[test]
-    fn conservative_default_uses_the_basic_palette() {
+    fn other_protocols_are_detected_but_distinguished() {
         assert_eq!(
-            Capabilities::conservative(),
-            Capabilities {
-                colors: ColorSupport::Ansi16,
-                graphics: GraphicsSupport::None
-            }
+            GraphicsSupport::Likely(GraphicsProtocol::Kitty),
+            graphics_support_from("xterm-kitty", "", false, false)
         );
+        assert_eq!(
+            GraphicsSupport::Likely(GraphicsProtocol::Iterm2),
+            graphics_support_from("xterm-256color", "iTerm.app", false, false)
+        );
+    }
+
+    #[test]
+    fn unknown_and_unsupported_are_not_the_same() {
+        assert_eq!(
+            GraphicsSupport::Unknown,
+            graphics_support_from("xterm-256color", "", false, false)
+        );
+        assert_eq!(
+            GraphicsSupport::Unsupported,
+            graphics_support_from("dumb", "", false, false)
+        );
+        assert_eq!(
+            GraphicsSupport::Unsupported,
+            graphics_support_from("foot", "", false, true)
+        );
+    }
+
+    #[test]
+    fn cell_metrics_derive_from_a_window_report() {
+        let metrics = CellMetrics::from_window(100, 30, 800, 600).expect("metrics");
+        assert_eq!(8, metrics.width);
+        assert_eq!(20, metrics.height);
+    }
+
+    #[test]
+    fn cell_metrics_reject_unusable_reports() {
+        assert_eq!(None, CellMetrics::from_window(0, 30, 800, 600));
+        assert_eq!(None, CellMetrics::from_window(100, 30, 0, 0));
+        assert_eq!(None, CellMetrics::from_window(2000, 30, 800, 600));
+    }
+
+    #[test]
+    fn the_conservative_baseline_claims_nothing() {
+        let capabilities = Capabilities::conservative();
+        assert_eq!(ColorSupport::Ansi16, capabilities.colors);
+        assert_eq!(GraphicsSupport::Unknown, capabilities.graphics);
+        assert_eq!(None, capabilities.cell_metrics);
     }
 }

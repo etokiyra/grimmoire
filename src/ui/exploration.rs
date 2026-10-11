@@ -15,7 +15,7 @@ use super::theme::Palette;
 use super::{FrameContext, transition};
 use crate::game::{Direction, EntityKind, Interaction, Position, Prompt, Tile, World, areas};
 use crate::input::{Key, KeyCode};
-use crate::render::{Canvas, Rect, Style, glyph};
+use crate::render::{Frame, Rect, Style, glyph};
 use crate::save::SaveStore;
 
 /// The minimum interval between movement steps.
@@ -38,10 +38,11 @@ const MIN_HEIGHT: u16 = 8;
 const PLAYER_GLYPH: char = '@';
 
 /// Bindings listed by the help overlay while exploring.
-const CONTROLS: [Binding; 5] = [
+const CONTROLS: [Binding; 6] = [
     ("w a s d / arrows", "move"),
     ("e", "interact with what you face"),
     ("h / ? / F1", "controls and diagnostics"),
+    ("F3", "presentation study (rendering)"),
     ("F2", "renderer showcase (development)"),
     ("q / Esc / Ctrl+C", "quit"),
 ];
@@ -132,7 +133,7 @@ impl ExplorationScreen {
     }
 
     /// Draws the header strip: where we are, and how much has been seen.
-    fn compose_header(&self, frame: &mut Canvas, rect: Rect, palette: &Palette) {
+    fn compose_header(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
         let mut view = frame.view(rect);
         if view.height() == 0 {
             return;
@@ -141,7 +142,7 @@ impl ExplorationScreen {
             0,
             0,
             self.world.area_name(),
-            Style::new().with_fg(palette.arcane).bold(),
+            Style::new().with_fg(palette.accent).bold(),
         );
         let visited = format!(
             "visited {} of {}",
@@ -152,12 +153,12 @@ impl ExplorationScreen {
             view.width().saturating_sub(glyph::display_width(&visited)),
             0,
             &visited,
-            palette.muted(),
+            palette.muted_style(),
         );
     }
 
     /// Draws the world through a camera that follows the player.
-    fn compose_world(&self, frame: &mut Canvas, rect: Rect, palette: &Palette) {
+    fn compose_world(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
         if rect.is_empty() {
             return;
         }
@@ -214,7 +215,7 @@ impl ExplorationScreen {
     }
 
     /// Draws the feedback line: the last message, or a prompt for what is near.
-    fn compose_message(&self, frame: &mut Canvas, rect: Rect, palette: &Palette) {
+    fn compose_message(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
         let mut view = frame.view(rect);
         if view.height() == 0 {
             return;
@@ -222,32 +223,32 @@ impl ExplorationScreen {
 
         let message = self.world.message();
         if !message.is_empty() {
-            view.put_str(0, 0, "> ", palette.muted());
-            view.put_str(2, 0, message, Style::new().with_fg(palette.parchment));
+            view.put_str(0, 0, "> ", palette.muted_style());
+            view.put_str(2, 0, message, Style::new().with_fg(palette.text));
             return;
         }
 
         if let Some(prompt) = self.world.prompt() {
-            view.put_str(0, 0, "e  ", Style::new().with_fg(palette.frost).bold());
-            view.put_str(3, 0, &prompt_line(prompt), palette.muted());
+            view.put_str(0, 0, "e  ", Style::new().with_fg(palette.accent_alt).bold());
+            view.put_str(3, 0, &prompt_line(prompt), palette.muted_style());
         }
     }
 
     /// Draws the status bar: position, facing, and the essential controls.
-    fn compose_status(&self, frame: &mut Canvas, rect: Rect, palette: &Palette) {
+    fn compose_status(&self, frame: &mut Frame, rect: Rect, palette: &Palette) {
         let mut view = frame.view(rect);
         if view.height() == 0 {
             return;
         }
 
         let player = self.world.player();
-        view.put_str(0, 0, "position", palette.muted());
+        view.put_str(0, 0, "position", palette.muted_style());
         let coords = format!("{}, {}", player.x, player.y);
         view.put_str(
             glyph::display_width("position").saturating_add(2),
             0,
             &coords,
-            Style::new().with_fg(palette.frost),
+            Style::new().with_fg(palette.accent_alt),
         );
 
         let facing = format!("facing {}", self.world.facing().name());
@@ -255,7 +256,7 @@ impl ExplorationScreen {
             view.width().saturating_sub(glyph::display_width(&facing)),
             0,
             &facing,
-            palette.muted(),
+            palette.muted_style(),
         );
 
         if view.height() > 1 {
@@ -263,7 +264,7 @@ impl ExplorationScreen {
                 Rect::new(0, 1, view.width(), 1),
                 1,
                 "wasd / arrows move    e interact    h help    q quit",
-                palette.muted(),
+                palette.muted_style(),
             );
         }
     }
@@ -291,6 +292,12 @@ impl Screen for ExplorationScreen {
                 }
                 return Command::Push(Box::new(Showcase::new()));
             }
+            KeyCode::Function(3) => {
+                if key.is_repeat() {
+                    return Command::None;
+                }
+                return Command::Push(Box::new(super::stage::StageScreen::new()));
+            }
             KeyCode::Char('e') | KeyCode::Char('E') => {
                 if key.is_repeat() {
                     return Command::None;
@@ -311,7 +318,7 @@ impl Screen for ExplorationScreen {
         self.travel = self.travel.saturating_sub(delta);
     }
 
-    fn compose(&self, frame: &mut Canvas, context: &FrameContext) {
+    fn compose(&self, frame: &mut Frame, context: &FrameContext) {
         let area = frame.bounds();
         let palette = &context.palette;
 
@@ -328,7 +335,7 @@ impl Screen for ExplorationScreen {
 
         if self.travel > Duration::ZERO {
             let progress = 1.0 - self.travel.as_secs_f32() / TRAVEL_DURATION.as_secs_f32();
-            transition::compose_curtain(frame, progress, palette);
+            transition::compose_curtain(frame.canvas(), progress, palette);
         }
     }
 
@@ -405,19 +412,19 @@ fn tile_glyph(tile: Tile) -> char {
 /// The style drawn for a tile.
 fn tile_style(tile: Tile, palette: &Palette) -> Style {
     match tile {
-        Tile::Floor => Style::new().with_fg(palette.shadow),
-        Tile::Path => Style::new().with_fg(palette.parchment),
-        Tile::Wall => Style::new().with_fg(palette.frost_dim),
-        Tile::Water => Style::new().with_fg(palette.frost),
-        Tile::Tree => Style::new().with_fg(palette.moss),
-        Tile::Door => Style::new().with_fg(palette.ember).bold(),
+        Tile::Floor => Style::new().with_fg(palette.text_muted),
+        Tile::Path => Style::new().with_fg(palette.text),
+        Tile::Wall => Style::new().with_fg(palette.accent_alt_dim),
+        Tile::Water => Style::new().with_fg(palette.accent_alt),
+        Tile::Tree => Style::new().with_fg(palette.nature),
+        Tile::Door => Style::new().with_fg(palette.effect).bold(),
     }
 }
 
 /// The style drawn for an entity, by kind.
 fn entity_style(kind: EntityKind, palette: &Palette) -> Style {
     match kind {
-        EntityKind::Npc { .. } => Style::new().with_fg(palette.arcane).bold(),
+        EntityKind::Npc { .. } => Style::new().with_fg(palette.accent).bold(),
         EntityKind::Object { .. } => Style::new().with_fg(palette.relic).bold(),
     }
 }
@@ -426,7 +433,7 @@ fn entity_style(kind: EntityKind, palette: &Palette) -> Style {
 fn player_style(palette: &Palette) -> Style {
     Style::new()
         .with_fg(palette.highlight_fg)
-        .with_bg(palette.parchment)
+        .with_bg(palette.text)
         .bold()
 }
 
@@ -451,7 +458,7 @@ fn movement_direction(code: KeyCode) -> Option<Direction> {
 }
 
 /// The fallback frame for terminals too small for the interface.
-fn compose_too_small(frame: &mut Canvas, palette: &Palette) {
+fn compose_too_small(frame: &mut Frame, palette: &Palette) {
     let area = frame.bounds();
     if area.is_empty() {
         return;
@@ -462,14 +469,14 @@ fn compose_too_small(frame: &mut Canvas, palette: &Palette) {
         view.bounds(),
         row,
         "Grimmoire",
-        Style::new().with_fg(palette.arcane).bold(),
+        Style::new().with_fg(palette.accent).bold(),
     );
     let hint = format!("needs {MIN_WIDTH}x{MIN_HEIGHT}    q quits");
     view.put_str_centered(
         view.bounds(),
         row.saturating_add(1),
         &hint,
-        Style::new().with_fg(palette.frost_dim),
+        Style::new().with_fg(palette.accent_alt_dim),
     );
 }
 
@@ -481,7 +488,7 @@ mod tests {
     use super::{ExplorationScreen, MOVE_INTERVAL, axis_camera, movement_direction};
     use crate::game::{Direction, Position, Tile, World, areas};
     use crate::input::{Key, KeyCode};
-    use crate::render::Canvas;
+    use crate::render::{Canvas, Frame};
     use crate::save::SaveStore;
     use crate::terminal::{Capabilities, PresentStats};
     use crate::ui::screen::{Command, Screen};
@@ -490,11 +497,19 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
+            image_backend: crate::terminal::ImageBackend::None,
             palette: Palette::BASIC,
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
             animating: false,
         }
+    }
+
+    /// Composes a screen into a canvas, supplying an empty image list.
+    fn draw<S: Screen + ?Sized>(canvas: &mut Canvas, screen: &S) {
+        let mut images = Vec::new();
+        let mut frame = Frame::begin(canvas, &mut images);
+        screen.compose(&mut frame, &context());
     }
 
     fn screen() -> ExplorationScreen {
@@ -738,7 +753,7 @@ mod tests {
     #[test]
     fn compose_draws_the_area_the_player_and_the_status() {
         let mut canvas = Canvas::new(80, 24);
-        screen().compose(&mut canvas, &context());
+        draw(&mut canvas, &screen());
         let text = frame_text(&canvas);
         assert!(text.contains("Ruined Chapel"), "area name missing");
         assert!(text.contains('@'), "player missing");
@@ -751,7 +766,7 @@ mod tests {
         for width in [1, 10, 24, 46, 80, 200] {
             for height in [1, 4, 8, 16, 40] {
                 let mut canvas = Canvas::new(width, height);
-                screen().compose(&mut canvas, &context());
+                draw(&mut canvas, &screen());
             }
         }
     }
@@ -760,8 +775,8 @@ mod tests {
     fn compose_is_deterministic() {
         let mut a = Canvas::new(80, 24);
         let mut b = Canvas::new(80, 24);
-        screen().compose(&mut a, &context());
-        screen().compose(&mut b, &context());
+        draw(&mut a, &screen());
+        draw(&mut b, &screen());
         assert_eq!(frame_text(&a), frame_text(&b));
     }
 
@@ -778,7 +793,7 @@ mod tests {
     #[test]
     fn the_too_small_fallback_still_names_the_game() {
         let mut canvas = Canvas::new(20, 6);
-        screen().compose(&mut canvas, &context());
+        draw(&mut canvas, &screen());
         assert!(frame_text(&canvas).contains("Grimmoire"));
     }
 }

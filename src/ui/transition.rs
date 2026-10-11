@@ -38,11 +38,11 @@ pub fn compose_curtain(frame: &mut Canvas, progress: f32, palette: &Palette) {
     }
 
     let body = Style::new()
-        .with_fg(palette.arcane_dim)
-        .with_bg(palette.night);
+        .with_fg(palette.accent_dim)
+        .with_bg(palette.background);
     let edge = Style::new()
-        .with_fg(palette.frost)
-        .with_bg(palette.night)
+        .with_fg(palette.accent_alt)
+        .with_bg(palette.background)
         .bold();
     let width = frame.width();
 

@@ -4,7 +4,7 @@
 //! [`draw_stencil`] to draw art over an existing scene: it leaves space glyphs
 //! transparent so the layer underneath shows through.
 
-use crate::render::{CanvasView, Style};
+use crate::render::{CanvasView, Image, Rgb, Style};
 
 /// The full "GRIMMOIRE" banner (generated with figlet's `standard` font).
 pub const BANNER_FULL: [&str; 5] = [
@@ -163,11 +163,89 @@ pub fn draw_stencil(view: &mut CanvasView, x: u16, y: u16, lines: &[&str], style
     }
 }
 
+/// A procedural portrait plate: a hooded figure lit from behind.
+///
+/// This is placeholder art for the graphics proof of concept. It is generated
+/// rather than loaded, so the project needs no image decoder and the result is
+/// deterministic and testable. If image-backed art becomes central, this is
+/// where a real decoder and real art would replace it.
+#[must_use]
+pub fn portrait(width: u32, height: u32) -> Image {
+    let glow = Rgb::new(255, 206, 122);
+    let deep = Rgb::new(14, 10, 22);
+    let violet = Rgb::new(48, 32, 78);
+    let mut image = Image::radial(width, height, violet, deep);
+
+    if width == 0 || height == 0 {
+        return image;
+    }
+
+    let w = width as f32;
+    let h = height as f32;
+    let cx = (w - 1.0) / 2.0;
+
+    // A soft halo behind the figure.
+    let halo_cy = h * 0.42;
+    let halo_r = h * 0.46;
+    for y in 0..height {
+        for x in 0..width {
+            let dy = y as f32 - halo_cy;
+            let dx = (x as f32 - cx) * 0.85;
+            let distance = (dx * dx + dy * dy).sqrt() / halo_r;
+            if distance < 1.0 {
+                let falloff = (1.0 - distance).powi(2);
+                let base = image.pixel(x, y);
+                image.set_pixel(x, y, base.lerp(glow, falloff * 0.6));
+            }
+        }
+    }
+
+    // The figure: a hood over shoulders, drawn as a stencil so the halo reads
+    // around it.
+    let hood_cy = h * 0.40;
+    let hood_rx = w * 0.17;
+    let hood_ry = h * 0.21;
+    let shoulder_top = h * 0.58;
+    for y in 0..height {
+        for x in 0..width {
+            let dx = (x as f32 - cx) / hood_rx;
+            let dy = (y as f32 - hood_cy) / hood_ry;
+            let in_hood = dx * dx + dy * dy < 1.0;
+
+            let in_shoulders = if (y as f32) > shoulder_top {
+                let spread = (y as f32 - shoulder_top) / (h - shoulder_top).max(1.0);
+                (x as f32 - cx).abs() < w * (0.10 + 0.22 * spread)
+            } else {
+                false
+            };
+
+            if in_hood || in_shoulders {
+                image.set_pixel(x, y, Rgb::new(9, 7, 14));
+            }
+        }
+    }
+
+    // A warm rim on the leading edge of the hood.
+    let rim_radius = w * 0.19;
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - hood_cy;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if (distance - rim_radius).abs() < 1.2 && dy < 0.0 {
+                image.set_pixel(x, y, Rgb::new(190, 150, 96));
+            }
+        }
+    }
+
+    image
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         BANNER_FULL, BANNER_FULL_WIDTH, BANNER_MINI, BANNER_MINI_WIDTH, BANNER_SMALL,
-        BANNER_SMALL_WIDTH, Banner, TOWER, TOWER_WIDTH, banner_for_width, draw_stencil,
+        BANNER_SMALL_WIDTH, Banner, TOWER, TOWER_WIDTH, banner_for_width, draw_stencil, portrait,
     };
     use crate::render::{Canvas, Rect, Style};
 
@@ -222,5 +300,32 @@ mod tests {
         assert_eq!(Some('a'), canvas.get(0, 0).map(|cell| cell.ch));
         assert_eq!(Some('~'), canvas.get(1, 0).map(|cell| cell.ch));
         assert_eq!(Some('b'), canvas.get(2, 0).map(|cell| cell.ch));
+    }
+
+    #[test]
+    fn the_portrait_is_a_lit_silhouette() {
+        let image = portrait(64, 64);
+        assert_eq!(64, image.width());
+        assert_eq!(64, image.height());
+
+        // The halo beside the figure is far brighter than a corner.
+        let halo = image.pixel(12, 26);
+        let corner = image.pixel(0, 0);
+        let brightness = |c: crate::render::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        assert!(
+            brightness(halo) > brightness(corner) + 60,
+            "expected a glow around the figure"
+        );
+
+        // The figure itself is near-black.
+        let figure = image.pixel(32, 30);
+        assert!(brightness(figure) < 80, "the figure should be a silhouette");
+    }
+
+    #[test]
+    fn the_portrait_is_deterministic_and_size_safe() {
+        assert_eq!(portrait(32, 32), portrait(32, 32));
+        let empty = portrait(0, 0);
+        assert_eq!(0, empty.width());
     }
 }

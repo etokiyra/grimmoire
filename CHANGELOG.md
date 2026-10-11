@@ -9,69 +9,83 @@ it starts releasing.
 
 ## [Unreleased]
 
-### Added — exploration prototype
+### Added — rendering architecture and visual freedom
 
-- A pure world model (`src/game/`): bounded tile areas, terrain, entities,
-  doorways, and a player position with a facing direction, with no rendering or
-  I/O.
-- Two connected, hand-authored areas — the Ruined Chapel and the Sunken Cellar —
-  with distinct layouts, authored as ASCII rows.
-- Tile-based movement (`w`/`a`/`s`/`d` and arrow keys) with collision against
-  terrain, area boundaries, and entities, plus turning to face a tile without
-  moving.
-- A deterministic interaction system (`e`): examine objects, speak to NPCs, and
-  use doorways, with clear feedback when there is nothing to use.
-- An NPC dialogue panel implemented as a pushed screen, so input routing prevents
-  movement and re-triggering while it is open.
-- A camera that follows the player and centres areas smaller than the view, with
-  a responsive layout and a graceful fallback for very small terminals.
-- A status area showing area name, position, facing, discovery counts, and
-  contextual prompts, plus a one-line feedback strip.
-- Minimal versioned persistence (`src/save.rs`) of the current area, position, and
-  discovered areas, saved on quit and on travel. Loading is fail-soft: anything
-  unrecognised starts a new game, and writes are renamed into place atomically.
-- A curtain effect when moving between areas.
-
-### Added — rendering core
-
-- `Canvas` drawing primitives with clipping and saturation (styled text, fills,
-  ASCII and titled borders), `Canvas::crop` / `Canvas::blit` composition, and a
-  clipped, local-coordinate `CanvasView` for independent visual regions.
-- An enforced ASCII-first text width policy (`render::glyph`) using
-  `unicode-width`, so the cell grid cannot desynchronise.
-- Diffed presentation (`terminal::Presenter`): only changed cells are written,
-  grouped into contiguous runs.
-- A time-based animation system (`anim`) with durations, delays, easing,
-  concurrent keyed tracks, completion, cancellation, and a manually advanced clock.
-- A screen stack (`ui::Screen`) with push/pop, input routed to the active screen,
-  bottom-to-top composition, and a curtain transition on screen changes.
-- Runtime capability detection selecting between a portable and a richer palette.
-- Responsive layouts and an idle-aware application loop.
-- Tests across the renderer, animation, screen stack, and presenter, plus
-  `docs/renderer-design.md`.
-- The renderer showcase, retained as a development screen reachable with `F2`.
+- **Opaque, application-owned background.** `Canvas::set` now inherits the
+  background already in a cell when a draw leaves it at `Color::Default`, so the
+  viewport is painted once and every later draw keeps it. This fixes a real
+  defect: foreground-only draws used to reset the background, letting the
+  terminal's theme (or a transparent desktop) show through text. Verified by
+  sampling pixels from a real terminal.
+- **Theme roles.** The palette is now expressed as `background`, `surface`,
+  `surface_raised`, `border`, `text`, `text_muted`, `accent`, `accent_alt`,
+  `effect`, `nature`, `relic`, with role helpers (`surface_style`, `raised_style`,
+  `text_style`, `muted_style`, `border_style`, `accent_style`, `effect_style`).
+- **`Frame` composition boundary.** Screens compose into a `Frame` that bundles
+  the cell canvas with `ImagePlacement`s, separating cell rendering from
+  graphics-protocol rendering. Screens record intent and never emit protocol
+  bytes.
+- **Optional sixel graphics backend.** A pure `sixel::encode` implementation
+  (fixed 6×6×6 palette, run-length encoded bands, raster attributes), an
+  `ImageBackend` selection rule, CPU-side `Image`s with procedural constructors,
+  and a `CellMetrics` report so an image can be sized to a rectangle of cells.
+- **Presenter image handling.** Image rectangles are reserved from cell writes,
+  images are re-emitted when they change or after a full redraw, the cursor is
+  repositioned afterwards, and a disappearing image forces a full repaint so no
+  pixels are left behind.
+- **Three-valued capability detection.** `GraphicsSupport` distinguishes
+  `Unknown`, `Unsupported`, and `Likely(protocol)`. A detected-but-unimplemented
+  protocol (kitty, iTerm2) selects no backend rather than a half-working one, and
+  `GRIMMOIRE_NO_GRAPHICS=1` forces graphics off.
+- **Minimum-viewport policy** (`ui::viewport`, 80×24): below it the application
+  suspends normal rendering, paints a legible explanation, swallows input, and
+  preserves all game state, resuming automatically when the window grows.
+- **The presentation study** (`--study`, or `F3` from the game): an opaque themed
+  prototype with a scene panel, an animated ASCII vale (stars, ridge, treeline,
+  path, fire, drifting mist), an image-backed portrait plate with an ASCII
+  fallback, a theme gallery, live render diagnostics, a reveal transition, and a
+  pause control.
+- Procedural placeholder portrait art (`ui::art::portrait`).
+- Tests for background inheritance and full-viewport opacity, image placement and
+  reservation, image re-emission and clearing, backend selection, capability
+  states, the sixel encoder (framing, palette limit, RLE, bands, determinism),
+  study layout and determinism, and suspend-screen safety.
 
 ### Changed
 
-- The application now launches directly into the playable exploration prototype;
-  the renderer showcase is a secondary screen rather than the entry point.
-- The help overlay takes a per-screen list of key bindings instead of a fixed one.
-- Screens gained an `on_exit` hook so they can persist state when the application
-  shuts down, and the stack notifies all screens.
-- Input events carry an auto-repeat flag; the backend reports it, discrete actions
-  ignore it, and movement is paced by a fixed step interval so held keys behave
-  the same on every terminal.
-- The renderer showcase now leaves its screen with `Esc` (pop, or quit at the
-  root) instead of quitting directly.
-
-### Removed
-
-- The Phase 1 title screen (superseded by the showcase in the previous milestone).
+- The theme's field names changed to the role vocabulary; `Palette::muted()` is
+  now `muted_style()`.
+- `Screen::compose` takes a `&mut Frame` instead of a `&mut Canvas`.
+- `PresentStats` reports the number of images drawn.
+- `unicode-width`'s default `cjk` feature is disabled (only the unused `*_cjk`
+  variants need it), keeping the dependency minimal.
 
 ### Notes
 
 - No license has been chosen yet, so none is included.
 - The story, setting, characters, and detailed mechanics remain undecided. All
-  current area names, entities, and dialogue are placeholder content.
-- No graphics protocol is implemented; detection is informational only.
-- There is no combat, inventory, quest, or skill system.
+  current area names, entities, dialogue, and art are placeholder content.
+- Rendering decisions, the audit that prompted them, measured numbers, and the
+  honest limits of the graphics support are recorded in
+  `docs/renderer-design.md`.
+- Kitty and iTerm2 graphics are not implemented; sixel is verified on `foot`.
+
+### Added — exploration prototype
+
+- A pure world model (`src/game/`): bounded tile areas, terrain, entities,
+  doorways, and a player position with a facing direction.
+- Two connected, hand-authored areas — the Ruined Chapel and the Sunken Cellar.
+- Tile-based movement with collision, turning to face a tile, and a deterministic
+  interaction system (`e`) for examining, speaking, and travelling.
+- An NPC dialogue panel implemented as a pushed screen.
+- A following camera, a responsive layout, and a status area.
+- Minimal versioned persistence of the current area, position, and discovered
+  areas, saved on quit and on travel, with strict fail-soft loading.
+
+### Added — rendering core
+
+- `Canvas` drawing primitives with clipping, `crop`/`blit` composition, and a
+  clipped local-coordinate `CanvasView`.
+- An enforced text width policy, diffed presentation, a time-based animation
+  system, a screen stack, and responsive layouts.
+- `docs/renderer-design.md`.

@@ -19,76 +19,78 @@ Each phase should ship something small, correct, and verifiable.
 - Cell-based renderer with clipping, styled text, fills, ASCII borders, subregions.
 - A clipped local-coordinate `CanvasView` and `crop` / `blit` composition with
   deterministic paint-order layering.
-- An enforced ASCII-first text width policy.
-- Diffed presentation: only changed cells are written.
-- A time-based animation system with a manually advanced, testable clock.
-- A screen stack with push/pop, input routed to the active screen, and layered
-  composition; responsive layouts; capability detection.
+- An enforced text width policy; diffed presentation; a time-based animation
+  system; a screen stack with push/pop and layered composition.
 - `docs/renderer-design.md`.
-
-Still open from this area (deferred, not forgotten): wide/zero-width glyph
-continuation cells; damage-rectangle tracking rather than per-cell diffs; a
-reusable widget vocabulary.
 
 ## Phase 2 — Interaction and shell (partly done)
 
-Done:
+Done: the screen/mode stack; capability detection; resize handling; and
+terminal-independent input including an explicit auto-repeat flag.
 
-- Screen/mode stack with push/pop and a transition effect.
-- Capability detection and responsive handling of resizing, including very small
-  terminals.
-- Terminal-independent input, including an explicit auto-repeat flag.
-
-Remaining:
-
-- Configurable key bindings loaded from a config file.
-- A settings screen, and a screen history (back, not just pop).
-- A main menu / title screen; the game currently launches straight in.
+Remaining: configurable key bindings from a config file; a settings screen; a
+screen history (back, not just pop); a title/menu screen.
 
 ## Phase 3 — World and exploration (started)
 
-Delivered in the current slice:
+Delivered: a pure world model (tile areas, terrain, entities, doorways, facing);
+two connected areas; tile movement with collision; a deterministic interaction
+system; an NPC dialogue panel as a pushed screen; a following camera; a status
+area; and minimal versioned persistence of area, position, and discovery.
 
-- A pure world model: bounded tile areas, terrain, entities, doorways, and a
-  player position with a facing direction.
-- Two connected areas with distinct layouts, authored as ASCII rows.
-- Tile movement with collision against terrain, boundaries, and entities.
-- A deterministic interaction system supporting examination, dialogue, and area
-  travel, with clear feedback when there is nothing to use.
-- An NPC dialogue panel implemented as a pushed screen.
-- A camera that follows the player and centres small areas.
-- A status area showing the area, position, facing, discovery progress, and hints.
-- Minimal versioned persistence of area, position, and discovery.
+Remaining: more areas and a reason to explore them; items that can be picked up
+and used; richer environment art; a map or discovered-area listing; varied
+doors (locked, one-way); field of view, if it earns its complexity.
 
-Remaining:
+## Phase 4 — Rendering architecture and visual freedom (done)
 
-- More areas, more traversal, and a reason to explore them.
-- Items that can be picked up, carried, and used.
-- Richer ASCII environment art and tilesets; the current layouts are functional
-  rather than beautiful.
-- A map or minimap, and a discovered-area listing.
-- Doors and transitions with more variety (locked doors, one-way drops).
-- Field-of-view or lighting, if and when it earns its complexity.
+This phase settled the visual ceiling before more gameplay was built on top of it.
 
-## Phase 4 — Dialogue and story
+Delivered:
+
+- An **audit** of the renderer that found and fixed a real defect: foreground-only
+  draws were resetting the background, so the terminal's own theme could show
+  through the game. Backgrounds are now inherited from the surface, making the
+  viewport genuinely opaque (verified by pixel sampling).
+- A theme expressed as **roles**: background, surface, raised surface, border,
+  text, muted text, accents, and a magical-effect colour.
+- A **`Frame`** composition boundary that separates cell rendering from image
+  placement, so screens describe *intent* and never emit protocol bytes.
+- An optional **sixel image backend** with an ASCII fallback, driven by a
+  three-valued capability probe and requiring reported cell metrics.
+- Presenter support for reserving image rectangles, re-emitting images on change,
+  and repainting fully when an image disappears.
+- A **minimum-viewport policy** (80×24) with a suspend screen, swallowed input,
+  preserved state, and automatic resumption.
+- The **presentation study** (`--study`, `F3`): an opaque themed prototype with a
+  scene, a portrait plate, a detail column, a reveal transition, and ambient
+  effects, plus live render diagnostics.
+- Measured numbers and visual evidence recorded in `docs/renderer-design.md`.
+
+Not delivered, deliberately: any second graphics protocol; a GPU/window renderer;
+wide-glyph continuation cells; damage-rectangle tracking; real image decoding.
+
+## Phase 5 — Dialogue and story
 
 - A dialogue system with branching choices and ASCII portraits.
+- An image-backed portrait path (the study already proves the rendering side).
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.
 - Conversation state that persists, and quests built on top.
 
-## Phase 5 — Magic combat
+## Phase 6 — Magic combat
 
 - Turn-based, magic-only combat: spell resolution, resources, and enemy behaviour.
-- Combat presentation built on the animation system.
+- Combat presentation built on the animation system and the graphics backend for
+  effects and enemy art.
 
-## Phase 6 — Progression and items
+## Phase 7 — Progression and items
 
 - Hybrid progression: discoveries/story milestones plus gameplay mastery.
 - A skill tree.
 - Items focused on exploration, puzzles, quests, and storytelling.
 
-## Phase 7 — Persistence and release
+## Phase 8 — Persistence and release
 
 - A save format for the rest of the game (inventory, quests, story flags) with
   versioning and migration. The current format deliberately covers exploration
@@ -101,7 +103,7 @@ Remaining:
 ## Cross-cutting, ongoing
 
 - Keep dependencies minimal and justified (currently `crossterm` and
-  `unicode-width`).
-- Keep the game/render/terminal boundaries intact; see `AGENTS.md` and
-  `docs/gameplay.md`.
+  `unicode-width`, with its unused `cjk` feature disabled).
+- Keep the game/render/terminal boundaries intact; see `AGENTS.md`,
+  `docs/gameplay.md`, and `docs/renderer-design.md`.
 - Keep documentation, the design documents, and the changelog current.

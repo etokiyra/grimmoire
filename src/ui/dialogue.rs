@@ -11,7 +11,7 @@
 
 use crate::game::Dialogue;
 use crate::input::{Key, KeyCode};
-use crate::render::{Canvas, Rect, Style, glyph};
+use crate::render::{Frame, Rect, Style, glyph};
 
 use super::FrameContext;
 use super::screen::{Command, Screen};
@@ -52,7 +52,7 @@ impl Screen for DialogueScreen {
         }
     }
 
-    fn compose(&self, frame: &mut Canvas, context: &FrameContext) {
+    fn compose(&self, frame: &mut Frame, context: &FrameContext) {
         let palette = &context.palette;
         let area = frame.bounds();
         if area.is_empty() {
@@ -95,14 +95,14 @@ impl Screen for DialogueScreen {
         view.fill_style(
             view.bounds(),
             Style::new()
-                .with_fg(palette.parchment)
-                .with_bg(palette.night),
+                .with_fg(palette.text)
+                .with_bg(palette.background),
         );
         view.draw_titled_border(
             view.bounds(),
             self.dialogue.speaker,
-            Style::new().with_fg(palette.arcane_dim),
-            Style::new().with_fg(palette.frost).bold(),
+            Style::new().with_fg(palette.accent_dim),
+            Style::new().with_fg(palette.accent_alt).bold(),
         );
 
         let inner = Rect::new(
@@ -116,7 +116,7 @@ impl Screen for DialogueScreen {
             if row >= inner.bottom() {
                 break;
             }
-            view.put_str(inner.x, row, line, Style::new().with_fg(palette.parchment));
+            view.put_str(inner.x, row, line, Style::new().with_fg(palette.text));
             row = row.saturating_add(1);
         }
 
@@ -128,7 +128,7 @@ impl Screen for DialogueScreen {
                     .saturating_sub(glyph::display_width(hint)),
                 panel_height.saturating_sub(2),
                 hint,
-                palette.muted(),
+                palette.muted_style(),
             );
         }
     }
@@ -141,7 +141,7 @@ mod tests {
     use super::DialogueScreen;
     use crate::game::Dialogue;
     use crate::input::{Key, KeyCode};
-    use crate::render::Canvas;
+    use crate::render::{Canvas, Frame};
     use crate::terminal::{Capabilities, PresentStats};
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
@@ -156,11 +156,19 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
+            image_backend: crate::terminal::ImageBackend::None,
             palette: Palette::BASIC,
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
             animating: false,
         }
+    }
+
+    /// Composes a screen into a canvas, supplying an empty image list.
+    fn draw<S: Screen + ?Sized>(canvas: &mut Canvas, screen: &S) {
+        let mut images = Vec::new();
+        let mut frame = Frame::begin(canvas, &mut images);
+        screen.compose(&mut frame, &context());
     }
 
     fn frame_text(canvas: &Canvas) -> String {
@@ -220,7 +228,7 @@ mod tests {
     #[test]
     fn compose_shows_the_speaker_and_the_lines() {
         let mut canvas = Canvas::new(80, 24);
-        DialogueScreen::new(dialogue()).compose(&mut canvas, &context());
+        draw(&mut canvas, &DialogueScreen::new(dialogue()));
         let text = frame_text(&canvas);
         assert!(text.contains("the Hooded Figure"), "speaker missing");
         assert!(text.contains("stones remember"), "line missing");
@@ -230,11 +238,13 @@ mod tests {
     #[test]
     fn compose_wraps_a_long_line() {
         let mut canvas = Canvas::new(50, 20);
-        DialogueScreen::new(Dialogue::new(
+        let screen = DialogueScreen::new(Dialogue::new(
             "a voice",
-            &["The stair below has not been swept in a long while, and the water has crept a good deal further than anyone would like to admit."],
-        ))
-        .compose(&mut canvas, &context());
+            &[
+                "The stair below has not been swept in a long while, and the water has crept a good deal further than anyone would like to admit.",
+            ],
+        ));
+        draw(&mut canvas, &screen);
         let text = frame_text(&canvas);
         assert!(text.contains("stair below"));
         assert!(text.contains("water has crept"));
@@ -243,6 +253,6 @@ mod tests {
     #[test]
     fn compose_is_safe_on_a_tiny_frame() {
         let mut canvas = Canvas::new(8, 4);
-        DialogueScreen::new(dialogue()).compose(&mut canvas, &context());
+        draw(&mut canvas, &DialogueScreen::new(dialogue()));
     }
 }

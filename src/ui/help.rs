@@ -7,7 +7,7 @@
 //! competing with it.
 
 use crate::input::{Key, KeyCode};
-use crate::render::{Canvas, CanvasView, Rect, Style};
+use crate::render::{CanvasView, Frame, Rect, Style};
 
 use super::FrameContext;
 use super::screen::{Command, Screen};
@@ -51,7 +51,7 @@ impl Screen for HelpOverlay {
         }
     }
 
-    fn compose(&self, frame: &mut Canvas, context: &FrameContext) {
+    fn compose(&self, frame: &mut Frame, context: &FrameContext) {
         let palette = &context.palette;
         let area = frame.bounds();
         let panel_width = area.width.min(74).saturating_sub(2).max(20).min(area.width);
@@ -75,14 +75,14 @@ impl Screen for HelpOverlay {
         view.fill_style(
             view.bounds(),
             Style::new()
-                .with_fg(palette.parchment)
-                .with_bg(palette.night),
+                .with_fg(palette.text)
+                .with_bg(palette.background),
         );
         view.draw_titled_border(
             view.bounds(),
             "help & diagnostics",
-            Style::new().with_fg(palette.arcane_dim),
-            Style::new().with_fg(palette.frost).bold(),
+            Style::new().with_fg(palette.accent_dim),
+            Style::new().with_fg(palette.accent_alt).bold(),
         );
 
         let inner = Rect::new(
@@ -102,13 +102,13 @@ impl Screen for HelpOverlay {
                 inner.x + 1,
                 row,
                 keys,
-                Style::new().with_fg(palette.parchment).bold(),
+                Style::new().with_fg(palette.text).bold(),
             );
             view.put_str(
                 inner.x.saturating_add(DESCRIPTION_COLUMN),
                 row,
                 description,
-                palette.muted(),
+                palette.muted_style(),
             );
             row = row.saturating_add(1);
         }
@@ -142,12 +142,12 @@ impl Screen for HelpOverlay {
             if row >= inner.bottom() {
                 break;
             }
-            view.put_str(inner.x + 1, row, label, palette.muted());
+            view.put_str(inner.x + 1, row, label, palette.muted_style());
             view.put_str(
                 inner.x.saturating_add(DESCRIPTION_COLUMN),
                 row,
                 value,
-                Style::new().with_fg(palette.frost),
+                Style::new().with_fg(palette.accent_alt),
             );
             row = row.saturating_add(1);
         }
@@ -163,7 +163,7 @@ fn heading(view: &mut CanvasView, inner: Rect, row: u16, text: &str, palette: &P
         inner.x,
         row,
         text,
-        Style::new().with_fg(palette.arcane).bold(),
+        Style::new().with_fg(palette.accent).bold(),
     );
     row.saturating_add(1)
 }
@@ -174,7 +174,7 @@ mod tests {
 
     use super::{Binding, HelpOverlay};
     use crate::input::{Key, KeyCode};
-    use crate::render::Canvas;
+    use crate::render::{Canvas, Frame};
     use crate::terminal::{Capabilities, PresentStats};
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
@@ -188,6 +188,7 @@ mod tests {
     fn context() -> FrameContext {
         FrameContext {
             capabilities: Capabilities::conservative(),
+            image_backend: crate::terminal::ImageBackend::None,
             palette: Palette::BASIC,
             stats: PresentStats {
                 width: 80,
@@ -198,6 +199,13 @@ mod tests {
             frame_time: Duration::from_millis(4),
             animating: true,
         }
+    }
+
+    /// Composes a screen into a canvas, supplying an empty image list.
+    fn draw<S: Screen + ?Sized>(canvas: &mut Canvas, screen: &S) {
+        let mut images = Vec::new();
+        let mut frame = Frame::begin(canvas, &mut images);
+        screen.compose(&mut frame, &context());
     }
 
     fn frame_text(canvas: &Canvas) -> String {
@@ -238,7 +246,7 @@ mod tests {
     #[test]
     fn compose_reports_the_supplied_controls_and_live_diagnostics() {
         let mut canvas = Canvas::new(80, 24);
-        overlay().compose(&mut canvas, &context());
+        draw(&mut canvas, &overlay());
         let text = frame_text(&canvas);
 
         assert!(text.contains("help & diagnostics"), "missing title");
@@ -251,7 +259,7 @@ mod tests {
     #[test]
     fn compose_is_safe_on_a_tiny_frame() {
         let mut canvas = Canvas::new(12, 5);
-        overlay().compose(&mut canvas, &context());
+        draw(&mut canvas, &overlay());
     }
 
     #[test]
@@ -259,7 +267,7 @@ mod tests {
         use crate::render::{Cell, Style};
         let mut canvas = Canvas::new(80, 24);
         canvas.fill(canvas.bounds(), Cell::new('~', Style::PLAIN));
-        overlay().compose(&mut canvas, &context());
+        draw(&mut canvas, &overlay());
 
         // The very corner is outside the panel, so the underlying layer shows.
         assert_eq!(Some('~'), canvas.get(0, 0).map(|cell| cell.ch));

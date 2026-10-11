@@ -9,12 +9,12 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use crate::anim::Animator;
-use crate::input::{Event, Key};
-use crate::render::Canvas;
+use crate::input::{Event, Key, KeyCode};
+use crate::render::{Canvas, Frame, ImagePlacement};
 use crate::save::SaveStore;
-use crate::terminal::{Capabilities, PresentStats, Presenter, Terminal};
+use crate::terminal::{Capabilities, CellMetrics, ImageBackend, PresentStats, Presenter, Terminal};
 use crate::ui::transition;
-use crate::ui::{ExplorationScreen, FrameContext, Palette, ScreenStack};
+use crate::ui::{ExplorationScreen, FrameContext, Palette, Screen, ScreenStack, viewport};
 
 /// The interval between frames while something is animating.
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
@@ -38,6 +38,9 @@ pub struct App {
     transition: Animator<AppAnimation>,
     presenter: Presenter,
     frame: Canvas,
+    frame_images: Vec<ImagePlacement>,
+    image_backend: ImageBackend,
+    cell_metrics: Option<CellMetrics>,
     stats: PresentStats,
     frame_time: Duration,
     running: bool,
@@ -69,8 +72,17 @@ impl App {
     /// renderer showcase is reachable from within it as a development screen.
     #[must_use]
     pub fn with_save(capabilities: Capabilities, save: Option<SaveStore>) -> Self {
+        Self::with_root(capabilities, Box::new(ExplorationScreen::from_save(save)))
+    }
+
+    /// Creates an application with an explicit root screen.
+    ///
+    /// Used to launch the presentation study directly, and available to any
+    /// caller that wants to start somewhere other than the game.
+    #[must_use]
+    pub fn with_root(capabilities: Capabilities, root: Box<dyn Screen>) -> Self {
         let mut stack = ScreenStack::new();
-        stack.push(ExplorationScreen::from_save(save));
+        stack.push_boxed(root);
         App {
             palette: Palette::for_colors(capabilities.colors),
             capabilities,
@@ -78,6 +90,9 @@ impl App {
             transition: Animator::new(),
             presenter: Presenter::new(),
             frame: Canvas::new(0, 0),
+            frame_images: Vec::new(),
+            image_backend: ImageBackend::select(capabilities.graphics, capabilities.cell_metrics),
+            cell_metrics: capabilities.cell_metrics,
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
             running: true,
@@ -121,7 +136,13 @@ impl App {
 
             if self.dirty || had_event || animating {
                 self.compose_frame();
-                self.stats = self.presenter.present(&self.frame, terminal.writer())?;
+                self.stats = self.presenter.present_with(
+                    &self.frame,
+                    &self.frame_images,
+                    self.image_backend,
+                    self.cell_metrics,
+                    terminal.writer(),
+                )?;
                 self.dirty = false;
             }
         }
@@ -157,6 +178,16 @@ impl App {
             return;
         }
 
+        // While the viewport is too small the game is suspended, so the only
+        // thing input can do is leave. Nothing is routed to the screens, which
+        // means no blind movement and no state change.
+        if !viewport::is_usable(self.frame.bounds()) {
+            if key.code == KeyCode::Esc {
+                self.running = false;
+            }
+            return;
+        }
+
         let outcome = self.stack.dispatch(key);
         self.dirty = true;
         if outcome.quit {
@@ -182,21 +213,43 @@ impl App {
         self.frame.resize(width, height);
         self.stack.on_resize(self.frame.bounds());
         self.presenter.invalidate();
+        self.refresh_cell_metrics();
         self.dirty = true;
+    }
+
+    /// Re-reads the character cell size, which can change when the font does.
+    fn refresh_cell_metrics(&mut self) {
+        self.cell_metrics = CellMetrics::detect();
+        self.capabilities.cell_metrics = self.cell_metrics;
+        self.image_backend = ImageBackend::select(self.capabilities.graphics, self.cell_metrics);
     }
 
     /// Composes the current frame from the screen stack and the transition.
     fn compose_frame(&mut self) {
         self.frame.clear_with(self.palette.backdrop());
 
+        // Too small to play in: suspend the interface rather than drawing a
+        // mangled layout. Screens are not composed, so nothing can be left in a
+        // half-drawn state, and all game state is untouched.
+        if !viewport::is_usable(self.frame.bounds()) {
+            let mut frame = Frame::begin(&mut self.frame, &mut self.frame_images);
+            viewport::compose(&mut frame, &self.palette);
+            return;
+        }
+
         let context = FrameContext {
             capabilities: self.capabilities,
             palette: self.palette,
+            image_backend: self.image_backend,
             stats: self.stats,
             frame_time: self.frame_time,
             animating: self.is_animating(),
         };
-        self.stack.compose(&mut self.frame, &context);
+
+        {
+            let mut frame = Frame::begin(&mut self.frame, &mut self.frame_images);
+            self.stack.compose(&mut frame, &context);
+        }
 
         if self.transition.is_active(AppAnimation::Transition) {
             let progress = self.transition.value_or(AppAnimation::Transition, 1.0);
@@ -235,6 +288,7 @@ mod tests {
 
     use super::App;
     use crate::input::{Key, KeyCode};
+    use crate::render::Color;
     use crate::save::SaveStore;
     use crate::terminal::Capabilities;
 
@@ -383,5 +437,63 @@ mod tests {
         assert_eq!(11, data.y);
 
         fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[test]
+    fn every_composed_cell_owns_its_background() {
+        let mut app = fixture();
+        for stage in ["game", "help"] {
+            app.compose_frame();
+            let canvas = app.frame();
+            for y in 0..canvas.height() {
+                for x in 0..canvas.width() {
+                    assert_ne!(
+                        Some(Color::Default),
+                        canvas.get(x, y).map(|cell| cell.style.bg),
+                        "{stage}: cell ({x}, {y}) would show the terminal background"
+                    );
+                }
+            }
+            app.handle_key(Key::char('h'));
+        }
+    }
+
+    #[test]
+    fn a_small_viewport_suspends_the_game_and_swallows_input() {
+        let mut app = App::with_capabilities(Capabilities::conservative());
+        app.set_size(60, 20);
+        app.compose_frame();
+
+        let text = frame_text(&app);
+        assert!(text.contains("too small"), "expected the suspend screen");
+        assert!(!text.contains("Ruined Chapel"), "the game must not draw");
+
+        // Movement while suspended must do nothing at all.
+        for _ in 0..4 {
+            app.handle_key(Key::char('w'));
+        }
+
+        app.set_size(120, 32);
+        app.compose_frame();
+        let text = frame_text(&app);
+        assert!(text.contains("Ruined Chapel"), "play must resume");
+        assert!(
+            text.contains("23, 12"),
+            "the player must not have moved while suspended"
+        );
+    }
+
+    #[test]
+    fn the_study_can_be_the_root_screen() {
+        let mut app = App::with_root(
+            Capabilities::conservative(),
+            Box::new(crate::ui::StageScreen::new()),
+        );
+        app.set_size(100, 30);
+        app.advance(Duration::from_secs(1)); // let the opening reveal finish
+        app.compose_frame();
+        let text = frame_text(&app);
+        assert!(text.contains("presentation study"));
+        assert_eq!(1, app.depth());
     }
 }

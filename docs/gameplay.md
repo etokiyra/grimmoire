@@ -21,6 +21,7 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 | `w` `a` `s` `d` or arrow keys | Move one tile (and face that way) |
 | `e` | Interact with whatever you are facing, or whatever is adjacent |
 | `h`, `?`, `F1` | Help and renderer diagnostics |
+| `F3` | The presentation study (a rendering prototype) |
 | `F2` | The renderer showcase (a development screen) |
 | `Esc` | Quit |
 | `q`, `Ctrl`+`C` | Quit |
@@ -28,6 +29,10 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 The bottom of the screen always shows your position, the direction you face, and
 the essential controls. The line above it shows the result of your last action,
 or a prompt for whatever is within reach.
+
+Play needs a viewport of at least 80×24. Below that the game suspends to a short
+explanation, ignores input, keeps all of its state, and resumes by itself when the
+window grows.
 
 ## The world model
 

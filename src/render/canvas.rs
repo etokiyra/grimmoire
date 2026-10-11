@@ -1,6 +1,6 @@
 //! The cell grid that frames are composed into.
 
-use super::{Cell, Rect, Style, glyph, view::CanvasView};
+use super::{Cell, Color, Rect, Style, glyph, view::CanvasView};
 
 /// A fixed-size grid of [`Cell`]s.
 ///
@@ -75,9 +75,23 @@ impl Canvas {
 
     /// Writes `cell` at `(x, y)`, doing nothing when the coordinate is off-canvas.
     ///
-    /// This is the raw primitive: it stores the cell exactly as given.
+    /// # Background inheritance
+    ///
+    /// A cell whose style leaves the background at [`Color::Default`] inherits the
+    /// background already in the grid. This is what makes the viewport opaque:
+    /// the application fills the frame with the theme background once, and every
+    /// later draw — text, borders, art — keeps it unless it asks for a different
+    /// background. Without this, a foreground-only draw would reset the
+    /// background to the terminal's own, letting the user's theme or desktop show
+    /// through the game.
+    ///
+    /// The raw cell is otherwise stored exactly as given.
     pub fn set(&mut self, x: u16, y: u16, cell: Cell) {
         if let Some(index) = self.index(x, y) {
+            let mut cell = cell;
+            if cell.style.bg == Color::Default {
+                cell.style.bg = self.cells[index].style.bg;
+            }
             self.cells[index] = cell;
         }
     }
@@ -448,5 +462,47 @@ mod tests {
         canvas.copy_from(&other);
         assert_eq!(2, canvas.width());
         assert_eq!(Some('o'), canvas.get(0, 0).map(|cell| cell.ch));
+    }
+
+    #[test]
+    fn a_foreground_only_draw_inherits_the_surface_background() {
+        let mut canvas = Canvas::new(4, 2);
+        let surface = Color::Indexed(233);
+        canvas.clear_with(Cell::new(' ', Style::new().with_bg(surface)));
+
+        canvas.put_str(0, 0, "hi", Style::new().with_fg(Color::LightMagenta));
+
+        assert_eq!(Some(surface), canvas.get(0, 0).map(|cell| cell.style.bg));
+        assert_eq!(Some(surface), canvas.get(1, 0).map(|cell| cell.style.bg));
+    }
+
+    #[test]
+    fn an_explicit_background_wins_over_the_surface() {
+        let mut canvas = Canvas::new(2, 1);
+        canvas.clear_with(Cell::new(' ', Style::new().with_bg(Color::Indexed(233))));
+
+        canvas.put_char(0, 0, 'x', Style::new().with_bg(Color::Red));
+
+        assert_eq!(Some(Color::Red), canvas.get(0, 0).map(|cell| cell.style.bg));
+    }
+
+    #[test]
+    fn the_whole_viewport_can_be_painted_opaque() {
+        let mut canvas = Canvas::new(6, 3);
+        let backdrop = Cell::new(' ', Style::new().with_bg(Color::Black));
+        canvas.clear_with(backdrop);
+        // Foreground-only content must not punch a hole in the background.
+        canvas.put_str(1, 1, "abc", Style::new().with_fg(Color::White));
+        canvas.draw_border(canvas.bounds(), Style::new().with_fg(Color::DarkGrey));
+
+        for y in 0..3 {
+            for x in 0..6 {
+                assert_eq!(
+                    Some(Color::Black),
+                    canvas.get(x, y).map(|cell| cell.style.bg),
+                    "cell ({x}, {y}) leaked the terminal's default background"
+                );
+            }
+        }
     }
 }
