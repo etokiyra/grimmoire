@@ -3,6 +3,7 @@
 This roadmap is organised into practical phases. It is a direction, not a
 promise, and it will change. **The story, setting, characters, and detailed
 mechanics are explicitly undecided** and are not committed to by anything below.
+All current world content is placeholder.
 
 Each phase should ship something small, correct, and verifiable.
 
@@ -11,35 +12,23 @@ Each phase should ship something small, correct, and verifiable.
 - Cargo application project named `grimmoire`, committing `Cargo.lock`.
 - Terminal backend around `crossterm`: raw mode, alternate screen, input,
   guaranteed restore.
-- A small, pure, cell-based renderer.
 - Unit tests, formatting/Clippy/test/release gates, and CI.
 
 ## Phase 1 — Rendering core (done)
 
-- Explicit frame composition separated from terminal output.
-- Drawing primitives with clipping: styled text, fills, ASCII borders, subregions.
-- A clipped, local-coordinate `CanvasView` for independent visual regions, and
-  `crop` / `blit` composition with deterministic paint-order layering.
-- An enforced ASCII-first text width policy (`unicode-width`), so the cell grid
-  cannot desynchronise.
-- **Diffed presentation**: only changed cells are written, grouped into runs;
-  unchanged frames write nothing. Full redraw on resize or invalidation.
-- A time-based animation system with durations, delays, easing, concurrent
-  tracks, completion, cancellation, and a manually advanced, testable clock.
+- Cell-based renderer with clipping, styled text, fills, ASCII borders, subregions.
+- A clipped local-coordinate `CanvasView` and `crop` / `blit` composition with
+  deterministic paint-order layering.
+- An enforced ASCII-first text width policy.
+- Diffed presentation: only changed cells are written.
+- A time-based animation system with a manually advanced, testable clock.
 - A screen stack with push/pop, input routed to the active screen, and layered
-  composition.
-- Responsive layouts (two-column, stacked, minimal) recomputed from frame bounds.
-- Runtime capability detection (colour depth) selecting the palette; a
-  best-effort graphics-protocol probe reported in diagnostics only.
-- An interactive renderer showcase with four visible time-based effects and a
-  help & diagnostics overlay.
-- Design document: `docs/renderer-design.md`.
+  composition; responsive layouts; capability detection.
+- `docs/renderer-design.md`.
 
-Still open from this area (deliberately deferred, not forgotten):
-
-- Wide/zero-width glyph support via continuation cells.
-- Damage-rectangle tracking rather than per-cell diffs.
-- A reusable widget vocabulary; the showcase draws directly with primitives.
+Still open from this area (deferred, not forgotten): wide/zero-width glyph
+continuation cells; damage-rectangle tracking rather than per-cell diffs; a
+reusable widget vocabulary.
 
 ## Phase 2 — Interaction and shell (partly done)
 
@@ -48,25 +37,45 @@ Done:
 - Screen/mode stack with push/pop and a transition effect.
 - Capability detection and responsive handling of resizing, including very small
   terminals.
+- Terminal-independent input, including an explicit auto-repeat flag.
 
 Remaining:
 
 - Configurable key bindings loaded from a config file.
-- A settings screen and a screen/mode history (back, not just pop).
-- Consistent small-terminal and resize behaviour across every future screen.
-- Optional: request terminal focus/colour-depth queries rather than env hints.
+- A settings screen, and a screen history (back, not just pop).
+- A main menu / title screen; the game currently launches straight in.
 
-## Phase 3 — World and exploration
+## Phase 3 — World and exploration (started)
 
-- A world/area model and a minimal map traversal loop.
-- ASCII-art environment tilesets and scene composition.
-- Text-log/status presentation suitable for exploration and dialogue.
+Delivered in the current slice:
+
+- A pure world model: bounded tile areas, terrain, entities, doorways, and a
+  player position with a facing direction.
+- Two connected areas with distinct layouts, authored as ASCII rows.
+- Tile movement with collision against terrain, boundaries, and entities.
+- A deterministic interaction system supporting examination, dialogue, and area
+  travel, with clear feedback when there is nothing to use.
+- An NPC dialogue panel implemented as a pushed screen.
+- A camera that follows the player and centres small areas.
+- A status area showing the area, position, facing, discovery progress, and hints.
+- Minimal versioned persistence of area, position, and discovery.
+
+Remaining:
+
+- More areas, more traversal, and a reason to explore them.
+- Items that can be picked up, carried, and used.
+- Richer ASCII environment art and tilesets; the current layouts are functional
+  rather than beautiful.
+- A map or minimap, and a discovered-area listing.
+- Doors and transitions with more variety (locked doors, one-way drops).
+- Field-of-view or lighting, if and when it earns its complexity.
 
 ## Phase 4 — Dialogue and story
 
-- A dialogue system with ASCII portraits and branching choices.
+- A dialogue system with branching choices and ASCII portraits.
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.
+- Conversation state that persists, and quests built on top.
 
 ## Phase 5 — Magic combat
 
@@ -81,14 +90,18 @@ Remaining:
 
 ## Phase 7 — Persistence and release
 
-- Persistent save files with versioning and migration.
+- A save format for the rest of the game (inventory, quests, story flags) with
+  versioning and migration. The current format deliberately covers exploration
+  state only.
+- Manual save slots.
 - A real release strategy: packaging, versioned tags, and a release pipeline
-  (deliberately deferred until then).
+  (deferred until then).
 - Decide and add the project license.
 
 ## Cross-cutting, ongoing
 
 - Keep dependencies minimal and justified (currently `crossterm` and
   `unicode-width`).
-- Keep the render/animation/terminal boundaries intact; see `AGENTS.md`.
-- Keep documentation, the design document, and the changelog current.
+- Keep the game/render/terminal boundaries intact; see `AGENTS.md` and
+  `docs/gameplay.md`.
+- Keep documentation, the design documents, and the changelog current.

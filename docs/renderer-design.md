@@ -133,8 +133,8 @@ semantics, and it is covered by tests (`blit_later_wins`,
 contiguous runs and positioned with absolute cursor moves. It writes to any
 `Write`, so its byte output is asserted in tests without a terminal.
 
-Measured on a 120x40 frame (4800 cells), from `examples/diff_stats.rs` during
-development:
+Measured on a 120x40 frame (4800 cells) using the presenter's own statistics
+during development (a throwaway measurement harness, since removed):
 
 | Frame | Cells written | Runs | Bytes |
 | --- | --- | --- | --- |

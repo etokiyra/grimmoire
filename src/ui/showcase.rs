@@ -33,6 +33,18 @@ const SPEEDS: [f32; 4] = [0.25, 0.5, 1.0, 2.0];
 /// The speed multiplier selected at start-up.
 const DEFAULT_SPEED: usize = 2;
 
+/// Bindings listed by the help overlay while the showcase is active.
+const SHOWCASE_CONTROLS: [super::help::Binding; 8] = [
+    ("arrows / 1-3", "choose a scene"),
+    ("space", "pause or resume motion"),
+    ("+ / -", "change animation speed"),
+    ("r", "replay the title reveal"),
+    ("h / ? / F1", "controls and diagnostics"),
+    ("Esc", "leave the showcase"),
+    ("q / Ctrl+C", "quit Grimmoire"),
+    ("F2", "open this showcase from the game"),
+];
+
 /// Animations owned by the showcase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShowKey {
@@ -433,7 +445,10 @@ impl Screen for Showcase {
 
     fn handle_key(&mut self, key: Key) -> Command {
         match key.code {
-            KeyCode::Esc => Command::Quit,
+            // "Leave this screen": the stack pops back to what is beneath, or
+            // quits when the showcase is the root. That makes the demo usable
+            // both standalone and pushed on top of the game.
+            KeyCode::Esc => Command::Pop,
             KeyCode::Left | KeyCode::Up => {
                 self.step(-1);
                 Command::None
@@ -471,7 +486,7 @@ impl Screen for Showcase {
                 Command::None
             }
             KeyCode::Char('h') | KeyCode::Char('?') | KeyCode::Function(1) => {
-                Command::Push(Box::new(HelpOverlay::new()))
+                Command::Push(Box::new(HelpOverlay::new(&SHOWCASE_CONTROLS)))
             }
             _ => Command::None,
         }
@@ -757,11 +772,13 @@ mod tests {
     }
 
     #[test]
-    fn escape_quits_and_h_pushes_the_overlay() {
+    fn escape_leaves_the_showcase_and_h_pushes_the_overlay() {
         let mut showcase = Showcase::new();
+        // "Leave this screen": the stack decides whether that means popping or
+        // quitting, so the showcase works both standalone and as a demo.
         assert!(matches!(
             showcase.handle_key(Key::new(KeyCode::Esc)),
-            Command::Quit
+            Command::Pop
         ));
         assert!(matches!(
             showcase.handle_key(Key::char('h')),

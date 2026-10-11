@@ -1,9 +1,11 @@
 //! Grimmoire — a terminal-native, ASCII-first dark-fantasy wizard RPG.
 //!
-//! This crate is an early-development foundation: it provides a terminal
-//! backend, a cell-based renderer with layering and diffed presentation, a
-//! time-based animation system, a screen stack, and an interactive renderer
-//! showcase. Gameplay systems are intentionally absent; see `ROADMAP.md`.
+//! This crate is an early-development exploration prototype: it provides a
+//! terminal backend, a cell-based renderer with layering and diffed
+//! presentation, a time-based animation system, a screen stack, a small playable
+//! world with two connected areas, and fail-soft persistence of exploration
+//! progress. Combat, dialogue scripting, quests, and progression are absent; see
+//! `ROADMAP.md`.
 //!
 //! # Architecture
 //!
@@ -13,8 +15,11 @@
 //!   alternate screen, input, capability detection, and diffed presentation.
 //! * [`anim`] provides time-based animation driven by an injectable clock.
 //! * [`input`] defines terminal-independent input events.
+//! * [`game`] owns the world model and its rules — movement, collision,
+//!   interaction, and area travel — with no rendering or I/O.
+//! * [`save`] persists essential exploration state in a small versioned format.
 //! * [`ui`] composes frames from state and owns the screen stack.
-//! * [`game`] will own the world and its rules; [`app`] wires everything together.
+//! * [`app`] wires input, update, compose, and present together.
 
 #![warn(missing_docs)]
 
@@ -23,5 +28,6 @@ pub mod app;
 pub mod game;
 pub mod input;
 pub mod render;
+pub mod save;
 pub mod terminal;
 pub mod ui;

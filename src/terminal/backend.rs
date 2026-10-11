@@ -157,6 +157,7 @@ fn map_key(key: KeyEvent) -> Option<Key> {
             alt: key.modifiers.contains(TerminalKeyModifiers::ALT),
             shift: key.modifiers.contains(TerminalKeyModifiers::SHIFT),
         },
+        repeat: key.kind == KeyEventKind::Repeat,
     })
 }
 
@@ -201,6 +202,17 @@ mod tests {
             None,
             map_key(key(TerminalKeyCode::CapsLock, TerminalKeyModifiers::NONE))
         );
+    }
+
+    #[test]
+    fn auto_repeat_is_flagged() {
+        let mut repeated = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
+        repeated.kind = KeyEventKind::Repeat;
+        let mapped = map_key(repeated).expect("mapped");
+        assert!(mapped.is_repeat());
+
+        let pressed = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
+        assert!(!map_key(pressed).expect("mapped").is_repeat());
     }
 
     #[test]

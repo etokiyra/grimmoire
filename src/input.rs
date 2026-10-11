@@ -68,6 +68,13 @@ pub struct Key {
     pub code: KeyCode,
     /// Which modifiers were held.
     pub modifiers: KeyModifiers,
+    /// Whether the terminal reported this as an auto-repeat of a held key.
+    ///
+    /// Only some terminals advertise repeats; the ones that do so via the
+    /// enhanced keyboard protocol are reported here. Screens must not rely on
+    /// this flag alone to debounce input, because a classic terminal sends
+    /// auto-repeats as ordinary presses.
+    pub repeat: bool,
 }
 
 impl Key {
@@ -77,6 +84,7 @@ impl Key {
         Key {
             code,
             modifiers: KeyModifiers::NONE,
+            repeat: false,
         }
     }
 
@@ -105,6 +113,19 @@ impl Key {
     pub const fn with_shift(mut self) -> Self {
         self.modifiers.shift = true;
         self
+    }
+
+    /// Returns a copy marked as an auto-repeat of a held key.
+    #[must_use]
+    pub const fn with_repeat(mut self) -> Self {
+        self.repeat = true;
+        self
+    }
+
+    /// Whether this event is an auto-repeat of a held key.
+    #[must_use]
+    pub const fn is_repeat(&self) -> bool {
+        self.repeat
     }
 
     /// Whether this is `ch` without modifiers.
@@ -180,6 +201,17 @@ mod tests {
                 shift: true
             },
             key.modifiers
+        );
+    }
+
+    #[test]
+    fn auto_repeat_is_flagged_independently_of_code() {
+        assert!(!Key::char('a').is_repeat());
+        let repeated = Key::char('a').with_repeat();
+        assert!(repeated.is_repeat());
+        assert!(
+            repeated.is_char('a'),
+            "repeat must not change the key identity"
         );
     }
 }

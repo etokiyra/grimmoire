@@ -9,74 +9,69 @@ it starts releasing.
 
 ## [Unreleased]
 
-### Added
+### Added — exploration prototype
 
-- **Renderer core.** `Canvas` drawing primitives with clipping and saturation
-  (styled text, fills, ASCII and titled borders), `Canvas::crop` / `Canvas::blit`
-  composition with deterministic paint-order layering, and a clipped,
-  local-coordinate `CanvasView` (including nested views) for independent visual
-  regions.
-- **Text width policy.** `render::glyph` classifies glyphs with `unicode-width`
-  and enforces an ASCII-first rule: glyphs that are not exactly one column wide
-  are dropped so the cell grid cannot desynchronise. Added `unicode-width` as a
-  direct dependency.
-- **Diffed presentation.** `terminal::Presenter` writes only changed cells,
-  grouped into contiguous runs, and clears plus re-baselines on resize or
-  invalidation. It writes through any `Write`, so its output is tested without a
-  terminal.
-- **Animation system.** `anim::Animator` and `anim::Animation`: durations,
-  delays, easing curves, concurrent keyed tracks, completion, cancellation, and a
-  manually advanced clock so progress is deterministic under test.
-- **Screen stack.** `ui::Screen` and `ui::ScreenStack` with push/pop, input routed
-  to the active screen, and bottom-to-top composition; plus a full-screen curtain
-  transition on screen changes.
-- **Capability detection.** Colour support (16/256/truecolour) selects between a
-  portable and a richer palette; a best-effort graphics-protocol hint is reported
-  in diagnostics only.
-- **Responsive layouts.** Two-column, stacked, and minimal modes recomputed from
-  frame bounds each frame, with graceful degradation on small terminals.
-- **Interactive renderer showcase** replacing the Phase 1 title screen: the
-  Grimmoire banner with a reveal animation, three animated ASCII scenes
-  (Emberfall, Sigil, Starfield), a pulsing highlight, a scene-change wipe, an
-  information panel with live diagnostics, a status bar, and a help &
-  diagnostics overlay.
-- **Terminal-independent input.** `input::Key` / `input::Event`, with the backend
-  translating library events (and skipping mouse, paste, and key releases).
-- Tests across the new architecture: clipping and bounds, layer order and
-  overlap, diff output and determinism, animation progression and cancellation,
-  screen push/pop and input routing, resize and small-screen layouts.
-- `docs/renderer-design.md`: backend evaluation, graphics-protocol investigation,
-  architecture, constraints, measured numbers, and extension points.
+- A pure world model (`src/game/`): bounded tile areas, terrain, entities,
+  doorways, and a player position with a facing direction, with no rendering or
+  I/O.
+- Two connected, hand-authored areas — the Ruined Chapel and the Sunken Cellar —
+  with distinct layouts, authored as ASCII rows.
+- Tile-based movement (`w`/`a`/`s`/`d` and arrow keys) with collision against
+  terrain, area boundaries, and entities, plus turning to face a tile without
+  moving.
+- A deterministic interaction system (`e`): examine objects, speak to NPCs, and
+  use doorways, with clear feedback when there is nothing to use.
+- An NPC dialogue panel implemented as a pushed screen, so input routing prevents
+  movement and re-triggering while it is open.
+- A camera that follows the player and centres areas smaller than the view, with
+  a responsive layout and a graceful fallback for very small terminals.
+- A status area showing area name, position, facing, discovery counts, and
+  contextual prompts, plus a one-line feedback strip.
+- Minimal versioned persistence (`src/save.rs`) of the current area, position, and
+  discovered areas, saved on quit and on travel. Loading is fail-soft: anything
+  unrecognised starts a new game, and writes are renamed into place atomically.
+- A curtain effect when moving between areas.
+
+### Added — rendering core
+
+- `Canvas` drawing primitives with clipping and saturation (styled text, fills,
+  ASCII and titled borders), `Canvas::crop` / `Canvas::blit` composition, and a
+  clipped, local-coordinate `CanvasView` for independent visual regions.
+- An enforced ASCII-first text width policy (`render::glyph`) using
+  `unicode-width`, so the cell grid cannot desynchronise.
+- Diffed presentation (`terminal::Presenter`): only changed cells are written,
+  grouped into contiguous runs.
+- A time-based animation system (`anim`) with durations, delays, easing,
+  concurrent keyed tracks, completion, cancellation, and a manually advanced clock.
+- A screen stack (`ui::Screen`) with push/pop, input routed to the active screen,
+  bottom-to-top composition, and a curtain transition on screen changes.
+- Runtime capability detection selecting between a portable and a richer palette.
+- Responsive layouts and an idle-aware application loop.
+- Tests across the renderer, animation, screen stack, and presenter, plus
+  `docs/renderer-design.md`.
+- The renderer showcase, retained as a development screen reachable with `F2`.
 
 ### Changed
 
-- Split terminal lifecycle (`terminal::Terminal`) from frame presentation
-  (`terminal::Presenter`).
-- Rewrote the application loop around an explicit clock, idle-aware polling, and
-  a reusable frame buffer.
-- Replaced the ad-hoc colour constants with a capability-aware `Palette`.
+- The application now launches directly into the playable exploration prototype;
+  the renderer showcase is a secondary screen rather than the entry point.
+- The help overlay takes a per-screen list of key bindings instead of a fixed one.
+- Screens gained an `on_exit` hook so they can persist state when the application
+  shuts down, and the stack notifies all screens.
+- Input events carry an auto-repeat flag; the backend reports it, discrete actions
+  ignore it, and movement is paced by a fixed step interval so held keys behave
+  the same on every terminal.
+- The renderer showcase now leaves its screen with `Esc` (pop, or quit at the
+  root) instead of quitting directly.
 
 ### Removed
 
-- The Phase 1 `ui::title` screen, replaced by the showcase.
+- The Phase 1 title screen (superseded by the showcase in the previous milestone).
 
 ### Notes
 
 - No license has been chosen yet, so none is included.
-- The story, setting, characters, and detailed mechanics remain undecided.
+- The story, setting, characters, and detailed mechanics remain undecided. All
+  current area names, entities, and dialogue are placeholder content.
 - No graphics protocol is implemented; detection is informational only.
-
-## [0.0.0] - Phase 1
-
-### Added
-
-- Cargo application project named `grimmoire` (binary crate `grimmoire`), with
-  `Cargo.lock` committed.
-- Terminal backend around `crossterm` entering/leaving raw mode and the alternate
-  screen, with restore on normal exit, on the error path, and from a panic.
-- Pure, cell-based rendering primitives: `Canvas`, `Cell`, `Style`, `Color`, and
-  `Rect`, with ASCII border drawing and centred-text helpers.
-- A title screen with an interactive menu and a status line.
-- An input → update → compose → present loop.
-- Unit tests, GitHub Actions CI (formatting, Clippy, tests, release build), and
-  documentation: `README.md`, `AGENTS.md`, `ROADMAP.md`, `CHANGELOG.md`.
+- There is no combat, inventory, quest, or skill system.

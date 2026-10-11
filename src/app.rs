@@ -11,9 +11,10 @@ use std::time::{Duration, Instant};
 use crate::anim::Animator;
 use crate::input::{Event, Key};
 use crate::render::Canvas;
+use crate::save::SaveStore;
 use crate::terminal::{Capabilities, PresentStats, Presenter, Terminal};
 use crate::ui::transition;
-use crate::ui::{FrameContext, Palette, ScreenStack, Showcase};
+use crate::ui::{ExplorationScreen, FrameContext, Palette, ScreenStack};
 
 /// The interval between frames while something is animating.
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
@@ -44,20 +45,32 @@ pub struct App {
 }
 
 impl App {
-    /// Creates an application, detecting the terminal's capabilities.
+    /// Creates the application: detects the terminal and loads any saved game.
+    ///
+    /// Persistence is skipped entirely when no conventional save location can be
+    /// found, so an unusual environment simply starts a new game.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_capabilities(Capabilities::detect())
+        Self::with_save(Capabilities::detect(), SaveStore::default_location())
     }
 
-    /// Creates an application with explicit capabilities.
+    /// Creates an application with explicit capabilities and no persistence.
     ///
     /// Used by tests, and available to any caller that wants deterministic
-    /// presentation without reading the environment.
+    /// behaviour without reading the environment or the filesystem.
     #[must_use]
     pub fn with_capabilities(capabilities: Capabilities) -> Self {
+        Self::with_save(capabilities, None)
+    }
+
+    /// Creates an application with explicit capabilities and an optional save.
+    ///
+    /// This launches directly into the playable exploration prototype; the
+    /// renderer showcase is reachable from within it as a development screen.
+    #[must_use]
+    pub fn with_save(capabilities: Capabilities, save: Option<SaveStore>) -> Self {
         let mut stack = ScreenStack::new();
-        stack.push(Showcase::new());
+        stack.push(ExplorationScreen::from_save(save));
         App {
             palette: Palette::for_colors(capabilities.colors),
             capabilities,
@@ -75,10 +88,12 @@ impl App {
     /// Runs until the user quits, rendering to `terminal`.
     ///
     /// The terminal is entered and left here, so it is restored on both the
-    /// success and the error path.
+    /// success and the error path. Screens are told the application is finishing
+    /// before the terminal is released, which is when they persist their state.
     pub fn run(&mut self, terminal: &mut Terminal) -> io::Result<()> {
         terminal.enter()?;
         let result = self.event_loop(terminal);
+        self.stack.on_exit();
         let left = terminal.leave();
         result.and(left)
     }
@@ -215,11 +230,21 @@ impl Default for App {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::Duration;
 
     use super::App;
     use crate::input::{Key, KeyCode};
+    use crate::save::SaveStore;
     use crate::terminal::Capabilities;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("grimmoire-app-{tag}-{unique}"))
+    }
 
     fn fixture() -> App {
         let mut app = App::with_capabilities(Capabilities::conservative());
@@ -278,11 +303,11 @@ mod tests {
     }
 
     #[test]
-    fn composing_the_root_screen_produces_the_showcase() {
+    fn composing_the_root_screen_produces_the_world() {
         let app = fixture();
         let text = frame_text(&app);
-        assert!(text.contains("EMBERFALL"));
-        assert!(text.contains("GRIMMOIRE"));
+        assert!(text.contains("Ruined Chapel"), "area name missing");
+        assert!(text.contains('@'), "player missing");
     }
 
     #[test]
@@ -300,15 +325,18 @@ mod tests {
     }
 
     #[test]
-    fn time_only_advances_when_ticked() {
+    fn the_loop_asks_for_frames_only_while_something_is_animating() {
         let mut app = fixture();
-        app.handle_key(Key::char(' ')); // pause motion
-        app.advance(Duration::from_millis(50));
-        app.handle_key(Key::char(' ')); // resume
-        app.advance(Duration::from_millis(50));
-        // Reaching here without panicking and with a running app is enough; the
-        // point is that ticks are explicit and deterministic.
-        assert!(app.running);
+        assert!(
+            !app.is_animating(),
+            "an idle game should not ask for frames"
+        );
+
+        app.handle_key(Key::char('w'));
+        assert!(app.is_animating(), "a step should keep the loop ticking");
+
+        app.advance(Duration::from_millis(200));
+        assert!(!app.is_animating(), "the step should settle by now");
     }
 
     #[test]
@@ -329,14 +357,31 @@ mod tests {
     }
 
     #[test]
-    fn an_overlay_composites_over_the_showcase() {
+    fn an_overlay_composites_over_the_world() {
         let mut app = fixture();
         app.handle_key(Key::char('h'));
         app.advance(Duration::from_secs(1)); // let the transition finish
         app.compose_frame();
         let text = frame_text(&app);
-        // Both layers are visible: the overlay panel and the showcase beneath.
+        // Both layers are visible: the overlay panel and the world beneath it.
         assert!(text.contains("help & diagnostics"));
-        assert!(text.contains("renderer showcase"));
+        assert!(text.contains("Ruined Chapel"));
+    }
+
+    #[test]
+    fn shutting_down_persists_the_game() {
+        let directory = scratch("app-exit");
+        let store = SaveStore::at(directory.join("save.txt"));
+        let mut app = App::with_save(Capabilities::conservative(), Some(store.clone()));
+        app.set_size(80, 24);
+
+        app.handle_key(Key::char('w'));
+        app.stack.on_exit();
+
+        let data = store.load().expect("progress should have been saved");
+        assert_eq!("ruined-chapel", data.area);
+        assert_eq!(11, data.y);
+
+        fs::remove_dir_all(&directory).expect("cleanup");
     }
 }

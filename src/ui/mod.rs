@@ -4,6 +4,8 @@
 //! frame information, but it performs no terminal I/O and no game rules.
 
 pub mod art;
+pub mod dialogue;
+pub mod exploration;
 pub mod help;
 pub mod layout;
 pub mod screen;
@@ -11,6 +13,8 @@ pub mod showcase;
 pub mod theme;
 pub mod transition;
 
+pub use dialogue::DialogueScreen;
+pub use exploration::ExplorationScreen;
 pub use help::HelpOverlay;
 pub use layout::Layout;
 pub use screen::{Command, Outcome, Screen, ScreenStack};

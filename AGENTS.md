@@ -6,9 +6,10 @@ current.
 ## What Grimmoire is
 
 A terminal-native, ASCII-first dark-fantasy wizard RPG written in Rust. The
-project is in early development: it currently provides a terminal application with
-a cell-based renderer, animation, a screen stack, and an interactive renderer
-showcase — not a playable game.
+project is in early development: it currently provides a playable exploration
+prototype — two connected areas, tile movement, interaction, one NPC, and
+fail-soft saving — on top of a cell-based renderer, animation system, and screen
+stack. It is not a complete game.
 
 ## Vision and confirmed decisions
 
@@ -26,6 +27,8 @@ These are settled and should guide new work:
 - **`crossterm` is the sole terminal library.** Do not add `ratatui`, `termion`,
   or a second backend without a strong, documented reason. `ratatui` in
   particular would own the drawing model.
+- **No ECS, no scripting engine, no widget toolkit** until a phase concretely
+  needs one. The current world is a grid plus lists.
 - **No graphics protocol is implemented.** The capability probe is informational
   only. Do not wire it into rendering without a documented design in
   `docs/renderer-design.md`.
@@ -35,25 +38,30 @@ These are settled and should guide new work:
 
 Explicitly **undecided** (do not treat as settled, and do not invent them): the
 story, world, characters, detailed mechanics, art direction beyond "ASCII", and
-licensing.
+licensing. All current area names, entities, and dialogue lines are placeholders.
 
 ## Architecture invariants
 
 Respect these; they are the point of the current structure:
 
+- `src/game/` — the world model and its rules (`area`, `entity`, `dialogue`,
+  `world`, `areas`). Pure: no rendering, no canvas, no terminal, no file I/O.
+  Movement, collision, interaction, and travel must stay testable without a
+  terminal. The game never decides how anything looks; it exposes tiles and
+  entity kinds and lets the UI map them to glyphs and colours.
+- `src/save.rs` — the versioned save format and the only code that touches the
+  save file. Saving must stay fail-soft: anything unrecognised means "start a new
+  game", never a half-loaded state. Only essential exploration state is stored.
 - `src/render/` — pure, terminal-agnostic drawing (`Canvas`, `CanvasView`, `Cell`,
   `Style`, `Color`, `Rect`, `glyph`). **No** terminal or game code, and no
-  dependency on a terminal library. Must stay testable without a terminal.
+  dependency on a terminal library.
 - `src/anim/` — time-based animation. **No** terminal or UI code. Progress is a
   function of elapsed time, advanced explicitly; never frame counts.
-- `src/terminal/` — the **only** module allowed to talk to the terminal (raw
-  mode, alternate screen, input, capabilities, escape sequences, presentation).
+- `src/terminal/` — the **only** module allowed to talk to the terminal.
 - `src/input.rs` — terminal-independent `Key`/`Event` types. The backend
-  translates library events into these.
+  translates library events into these, including the auto-repeat flag.
 - `src/ui/` — composes frames from state and owns the screen stack. No I/O, no
   escape sequences, no game rules.
-- `src/game.rs` — where world state and rules will live. Keep rendering out of it
-  and keep it out of rendering.
 - `src/app.rs` — wires input → update → compose → present and drives the loop.
 
 Additional rules:
@@ -61,11 +69,18 @@ Additional rules:
 - Screens must never write to the terminal; they compose into a `Canvas` and
   return `Command`s from `handle_key`.
 - Input goes to the active (top) screen only; composition runs bottom to top.
-- The text width policy in `render::glyph` is the single source of truth for
-  what may be drawn. Do not bypass it with raw `Cell` writes that put wide or
-  control glyphs into the grid.
+  This is what stops movement while a dialogue panel is open — do not replace it
+  with a mode flag inside the game.
+- Discrete actions (`e`, help, screen changes) must ignore auto-repeat. Movement
+  is paced by a fixed step interval instead of the repeat flag, because classic
+  terminals report repeats as ordinary presses.
+- The text width policy in `render::glyph` is the single source of truth for what
+  may be drawn.
+- Screens persist their own state in `Screen::on_exit`; the stack decides when
+  the application is finished.
 
 If a change crosses a boundary, call it out and explain why. Read
+`docs/gameplay.md` before changing the world model, and
 `docs/renderer-design.md` before changing rendering, presentation, or animation.
 
 ## Code quality
@@ -81,17 +96,16 @@ cargo build --release
 
 Clippy warnings are errors. Keep the code formatted. Prefer small, focused units
 with focused tests over broad, shallow coverage. Tests must run without a real
-terminal: assert on composed `Canvas`es and on presenter output captured into a
-`Vec<u8>`.
+terminal: assert on composed `Canvas`es, on presenter output captured into a
+`Vec<u8>`, and on game state directly. Use a temporary directory for any test
+that exercises the save store — never the real user data directory.
 
 ## Verification discipline
 
 - **Verify claims before reporting completion.** Never report a command, build,
   test, push, or CI run as successful unless you observed the result.
   "Attempted" is not "succeeded".
-- Do not claim performance improvements without a measurement. The presenter's
-  own statistics and CPU-time measurements are the accepted forms of evidence
-  here; record numbers, not adjectives.
+- Do not claim performance improvements without a measurement.
 - When you state that interactive or terminal behaviour works, say how it was
   verified (for example, driven through a pseudo-terminal) or state that it was
   not.
@@ -102,8 +116,10 @@ terminal: assert on composed `Canvas`es and on presenter output captured into a
 After substantial changes, update the documentation in the same change:
 
 - `README.md` — user-facing status, controls, build/run, architecture.
+- `docs/gameplay.md` — the world model, controls, interaction rules, save format,
+  and where the code lives.
 - `docs/renderer-design.md` — rendering, presentation, animation, and backend
-  decisions, plus constraints and extension points.
+  decisions.
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

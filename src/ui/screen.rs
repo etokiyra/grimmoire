@@ -46,6 +46,12 @@ pub trait Screen {
     /// Called when the terminal size changes, before the next compose.
     fn on_resize(&mut self, _area: Rect) {}
 
+    /// Called once when the application is shutting down cleanly.
+    ///
+    /// This is where a screen persists anything it owns, because the stack (not
+    /// the screen) decides when the application is finished.
+    fn on_exit(&mut self) {}
+
     /// Whether this screen currently has motion in progress.
     fn is_animating(&self) -> bool {
         false
@@ -132,6 +138,13 @@ impl ScreenStack {
     pub fn on_resize(&mut self, area: Rect) {
         for screen in &mut self.screens {
             screen.on_resize(area);
+        }
+    }
+
+    /// Notifies every screen that the application is shutting down cleanly.
+    pub fn on_exit(&mut self) {
+        for screen in &mut self.screens {
+            screen.on_exit();
         }
     }
 
@@ -249,6 +262,10 @@ mod tests {
 
         fn compose(&self, _frame: &mut Canvas, _context: &FrameContext) {
             self.log.push(format!("{}:compose", self.name));
+        }
+
+        fn on_exit(&mut self) {
+            self.log.push(format!("{}:exit", self.name));
         }
     }
 
@@ -410,5 +427,26 @@ mod tests {
     fn resize_reaches_every_screen_without_panicking() {
         let (mut stack, _log) = stack_with(Mode::Stay);
         stack.on_resize(Rect::from_size(80, 24));
+    }
+
+    #[test]
+    fn exit_reaches_every_screen_once() {
+        let (mut stack, log) = stack_with(Mode::Stay);
+        stack.push(FakeScreen {
+            name: "child",
+            log: log.clone(),
+            mode: Mode::Stay,
+        });
+        stack.on_exit();
+
+        let exits: Vec<String> = log
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.ends_with(":exit"))
+            .collect();
+        assert_eq!(
+            vec!["root:exit".to_string(), "child:exit".to_string()],
+            exits
+        );
     }
 }

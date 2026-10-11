@@ -29,6 +29,8 @@ pub struct Palette {
     pub frost_dim: Color,
     /// Green accent reserved for future environments.
     pub moss: Color,
+    /// Cool accent for relics and interactable objects.
+    pub relic: Color,
     /// De-emphasised chrome such as borders and hints.
     pub shadow: Color,
     /// Foreground used on top of a bright highlight background.
@@ -47,6 +49,7 @@ impl Palette {
         frost: Color::LightCyan,
         frost_dim: Color::Cyan,
         moss: Color::LightGreen,
+        relic: Color::LightBlue,
         shadow: Color::DarkGrey,
         highlight_fg: Color::Black,
     };
@@ -62,6 +65,7 @@ impl Palette {
         frost: Color::Indexed(117),
         frost_dim: Color::Indexed(67),
         moss: Color::Indexed(114),
+        relic: Color::Indexed(110),
         shadow: Color::Indexed(240),
         highlight_fg: Color::Indexed(232),
     };

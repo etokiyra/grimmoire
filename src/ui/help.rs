@@ -1,8 +1,10 @@
 //! The help and diagnostics overlay.
 //!
-//! This is the secondary screen required by the renderer milestone. It is pushed
-//! on top of the showcase, draws an opaque panel over it, and leaves the animated
-//! scene visible around the edges — a direct demonstration of layered composition.
+//! A reusable secondary screen: any screen can push it with its own list of key
+//! bindings. It draws an opaque panel over whatever is beneath and leaves the
+//! surrounding frame visible, demonstrating layered composition. It also reports
+//! live renderer diagnostics, which keeps them reachable from the game without
+//! competing with it.
 
 use crate::input::{Key, KeyCode};
 use crate::render::{Canvas, CanvasView, Rect, Style};
@@ -11,29 +13,23 @@ use super::FrameContext;
 use super::screen::{Command, Screen};
 use super::theme::Palette;
 
-/// Key bindings listed in the overlay.
-const CONTROLS: [(&str, &str); 7] = [
-    ("Up/Down, 1-3", "choose a scene"),
-    ("Space", "pause or resume motion"),
-    ("+ / -", "change animation speed"),
-    ("r", "replay the title reveal"),
-    ("h / ? / F1", "toggle this overlay"),
-    ("Esc", "close this overlay"),
-    ("q / Ctrl+C", "quit Grimmoire"),
-];
+/// A key binding shown in the overlay: the keys, and what they do.
+pub type Binding = (&'static str, &'static str);
 
 /// The column at which descriptions are aligned, relative to the panel interior.
 const DESCRIPTION_COLUMN: u16 = 15;
 
-/// A modal overlay listing controls and reporting live renderer diagnostics.
-#[derive(Debug, Default)]
-pub struct HelpOverlay;
+/// A modal overlay listing a screen's controls plus live renderer diagnostics.
+#[derive(Debug, Clone, Copy)]
+pub struct HelpOverlay {
+    controls: &'static [Binding],
+}
 
 impl HelpOverlay {
-    /// Creates the overlay.
+    /// Creates the overlay with the bindings to display.
     #[must_use]
-    pub const fn new() -> Self {
-        HelpOverlay
+    pub const fn new(controls: &'static [Binding]) -> Self {
+        HelpOverlay { controls }
     }
 }
 
@@ -43,6 +39,10 @@ impl Screen for HelpOverlay {
     }
 
     fn handle_key(&mut self, key: Key) -> Command {
+        // Auto-repeat must not dismiss the overlay the moment it opens.
+        if key.is_repeat() {
+            return Command::None;
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('?') | KeyCode::Function(1) => {
                 Command::Pop
@@ -94,7 +94,7 @@ impl Screen for HelpOverlay {
         let mut row = inner.y;
 
         row = heading(&mut view, inner, row, "controls", palette);
-        for (keys, description) in CONTROLS {
+        for (keys, description) in self.controls {
             if row >= inner.bottom() {
                 break;
             }
@@ -172,12 +172,18 @@ fn heading(view: &mut CanvasView, inner: Rect, row: u16, text: &str, palette: &P
 mod tests {
     use std::time::Duration;
 
-    use super::HelpOverlay;
+    use super::{Binding, HelpOverlay};
     use crate::input::{Key, KeyCode};
     use crate::render::Canvas;
     use crate::terminal::{Capabilities, PresentStats};
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
+
+    const TEST_CONTROLS: [Binding; 2] = [("w a s d", "move"), ("e", "interact")];
+
+    fn overlay() -> HelpOverlay {
+        HelpOverlay::new(&TEST_CONTROLS)
+    }
 
     fn context() -> FrameContext {
         FrameContext {
@@ -207,7 +213,7 @@ mod tests {
 
     #[test]
     fn escape_and_question_mark_close_the_overlay() {
-        let mut overlay = HelpOverlay::new();
+        let mut overlay = overlay();
         assert!(matches!(
             overlay.handle_key(Key::new(KeyCode::Esc)),
             Command::Pop
@@ -217,14 +223,27 @@ mod tests {
     }
 
     #[test]
-    fn compose_reports_controls_and_live_diagnostics() {
+    fn auto_repeat_does_not_close_the_overlay() {
+        let mut overlay = overlay();
+        assert!(matches!(
+            overlay.handle_key(Key::new(KeyCode::Esc).with_repeat()),
+            Command::None
+        ));
+        assert!(matches!(
+            overlay.handle_key(Key::char('?').with_repeat()),
+            Command::None
+        ));
+    }
+
+    #[test]
+    fn compose_reports_the_supplied_controls_and_live_diagnostics() {
         let mut canvas = Canvas::new(80, 24);
-        HelpOverlay::new().compose(&mut canvas, &context());
+        overlay().compose(&mut canvas, &context());
         let text = frame_text(&canvas);
 
         assert!(text.contains("help & diagnostics"), "missing title");
         assert!(text.contains("controls"), "missing controls heading");
-        assert!(text.contains("pause or resume motion"), "missing control");
+        assert!(text.contains("interact"), "missing supplied control");
         assert!(text.contains("120 / 1920"), "missing cell diagnostics");
         assert!(text.contains("16-colour"), "missing capability label");
     }
@@ -232,7 +251,7 @@ mod tests {
     #[test]
     fn compose_is_safe_on_a_tiny_frame() {
         let mut canvas = Canvas::new(12, 5);
-        HelpOverlay::new().compose(&mut canvas, &context());
+        overlay().compose(&mut canvas, &context());
     }
 
     #[test]
@@ -240,7 +259,7 @@ mod tests {
         use crate::render::{Cell, Style};
         let mut canvas = Canvas::new(80, 24);
         canvas.fill(canvas.bounds(), Cell::new('~', Style::PLAIN));
-        HelpOverlay::new().compose(&mut canvas, &context());
+        overlay().compose(&mut canvas, &context());
 
         // The very corner is outside the panel, so the underlying layer shows.
         assert_eq!(Some('~'), canvas.get(0, 0).map(|cell| cell.ch));
