@@ -1,25 +1,27 @@
 //! Grimmoire — a terminal-native, ASCII-first dark-fantasy wizard RPG.
 //!
-//! This crate is an early-development foundation. It currently provides the
-//! terminal backend, a small cell-based renderer, and a title screen that
-//! demonstrates both. Gameplay systems are intentionally absent; see
-//! `ROADMAP.md` in the repository root for what comes next.
+//! This crate is an early-development foundation: it provides a terminal
+//! backend, a cell-based renderer with layering and diffed presentation, a
+//! time-based animation system, a screen stack, and an interactive renderer
+//! showcase. Gameplay systems are intentionally absent; see `ROADMAP.md`.
 //!
 //! # Architecture
 //!
-//! The crate is split along three boundaries:
-//!
-//! * [`render`] is pure and terminal-agnostic: cells, styles, rectangles, and
-//!   the [`render::Canvas`] that frames are composed into.
-//! * [`terminal`] is the only module that talks to the terminal. It owns raw
-//!   mode, the alternate screen, input, and frame presentation.
-//! * [`ui`] composes frames from state, while [`game`] will eventually own the
-//!   world and its rules. [`app`] wires them together and drives the loop.
+//! * [`render`] is pure and terminal-agnostic: cells, styles, canvases, views,
+//!   and the text width policy. It has no dependency on any terminal library.
+//! * [`terminal`] is the only module that talks to the terminal: raw mode, the
+//!   alternate screen, input, capability detection, and diffed presentation.
+//! * [`anim`] provides time-based animation driven by an injectable clock.
+//! * [`input`] defines terminal-independent input events.
+//! * [`ui`] composes frames from state and owns the screen stack.
+//! * [`game`] will own the world and its rules; [`app`] wires everything together.
 
 #![warn(missing_docs)]
 
+pub mod anim;
 pub mod app;
 pub mod game;
+pub mod input;
 pub mod render;
 pub mod terminal;
 pub mod ui;

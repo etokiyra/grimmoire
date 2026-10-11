@@ -17,6 +17,10 @@ publish = false
 # actively maintained, Unix-only) and `ratatui` (a full widget/TUI framework
 # that would own the drawing model Grimmoire wants to keep for itself).
 crossterm = "0.29"
+# Display width of a `char`/`str` according to Unicode Standard Annex #11. Used
+# only by `render::glyph` to enforce the ASCII-first width policy, so text can
+# never desynchronise the cell grid. No dependencies of its own.
+unicode-width = "0.2"
 
 [profile.release]
 lto = true

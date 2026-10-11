@@ -1,131 +1,105 @@
-//! The concrete crossterm-backed terminal implementation.
+//! The concrete terminal implementation, backed by `crossterm`.
 
-use std::io::{self, Stdout, Write};
-use std::time::Duration;
+use std::io::{self, Stdout};
+use std::time::{Duration, Instant};
 
-use crossterm::cursor::{Hide, MoveTo, Show};
-use crossterm::event::{self, Event};
-use crossterm::style::{
-    Attribute, Color as TerminalColor, Print, ResetColor, SetAttribute, SetBackgroundColor,
-    SetForegroundColor,
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{
+    self, Event as TerminalEvent, KeyCode as TerminalKeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers as TerminalKeyModifiers,
 };
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::{execute, queue};
+use crossterm::execute;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 
-use crate::render::{Canvas, Color, Style};
+use crate::input::{Event, Key, KeyCode, KeyModifiers};
 
-/// Owns the process's terminal state and turns composed frames into output.
+/// Owns the process's terminal state and delivers terminal-independent events.
 ///
-/// The backend sits behind a narrow interface so the rest of Grimmoire can stay
-/// terminal-agnostic. Terminal restoration is guaranteed twice over: [`leave`]
-/// is idempotent and explicitly called on the normal exit path, and [`Drop`]
-/// performs the same restore if the backend is dropped early (for example while
-/// unwinding from a panic).
+/// The terminal is the single owner of raw mode and the alternate screen. Frame
+/// output is written through [`Terminal::writer`] by a
+/// [`crate::terminal::Presenter`], which keeps escape sequences in one layer.
 ///
-/// [`leave`]: TerminalBackend::leave
-pub struct TerminalBackend {
+/// Terminal restoration is layered: [`leave`](Terminal::leave) is idempotent and
+/// called on the normal exit path, [`Drop`] restores the terminal if the owner is
+/// dropped early (including while unwinding from a panic), and
+/// [`install_panic_hook`] restores it before the panic message is printed.
+///
+/// This does **not** guarantee restoration against forced termination such as
+/// `SIGKILL` or a power loss; no user-space program can.
+pub struct Terminal {
     stdout: Stdout,
     active: bool,
 }
 
-impl TerminalBackend {
-    /// Creates a backend without touching terminal state yet.
-    ///
-    /// Call [`TerminalBackend::enter`] before drawing.
+impl Terminal {
+    /// Creates a terminal handle without changing terminal state yet.
     pub fn new() -> io::Result<Self> {
-        Ok(TerminalBackend {
+        Ok(Terminal {
             stdout: io::stdout(),
             active: false,
         })
     }
 
-    /// Switches into the alternate screen with raw keyboard input enabled.
+    /// Switches to the alternate screen with raw keyboard input enabled.
     ///
-    /// Calling this when the terminal is already active is a no-op.
+    /// Calling this when already active is a no-op, so ownership stays clear.
     pub fn enter(&mut self) -> io::Result<()> {
         if self.active {
             return Ok(());
         }
-        terminal::enable_raw_mode()?;
+        enable_raw_mode()?;
         execute!(self.stdout, EnterAlternateScreen, Hide)?;
         self.active = true;
         Ok(())
     }
 
-    /// Restores the terminal to the state it was in before [`TerminalBackend::enter`].
+    /// Restores the terminal to the state it was in before [`Terminal::enter`].
     ///
-    /// Idempotent: calling it more than once (or after a panic) is harmless.
+    /// Idempotent, so calling it twice is harmless.
     pub fn leave(&mut self) -> io::Result<()> {
         if !self.active {
             return Ok(());
         }
         self.active = false;
         let restored = execute!(self.stdout, Show, LeaveAlternateScreen);
-        let _ = terminal::disable_raw_mode();
+        let _ = disable_raw_mode();
         restored
     }
 
     /// The current terminal size as `(columns, rows)`.
     pub fn size(&self) -> io::Result<(u16, u16)> {
-        terminal::size()
+        crossterm::terminal::size()
     }
 
-    /// Waits up to `timeout` for an input event.
+    /// A mutable handle to the output stream, for the presenter to write to.
+    pub fn writer(&mut self) -> &mut Stdout {
+        &mut self.stdout
+    }
+
+    /// Waits up to `timeout` for a supported input event.
     ///
-    /// Returns `Ok(None)` when the timeout elapses without input, which lets the
-    /// caller keep animating or ticking while remaining input-driven.
+    /// Events the application does not use (mouse, paste, key releases) are
+    /// skipped rather than surfaced. Returns `Ok(None)` when the timeout expires,
+    /// which lets the caller keep animating while remaining input-driven.
     pub fn poll_event(&self, timeout: Duration) -> io::Result<Option<Event>> {
-        if event::poll(timeout)? {
-            Ok(Some(event::read()?))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Paints an entire canvas to the terminal.
-    ///
-    /// Colours and attributes are only re-emitted when they change between
-    /// adjacent cells, which keeps output small. An initial reset guarantees a
-    /// predictable starting state even if a previous frame left styling active.
-    pub fn present(&mut self, canvas: &Canvas) -> io::Result<()> {
-        let width = canvas.width();
-        let height = canvas.height();
-
-        queue!(self.stdout, SetAttribute(Attribute::Reset), ResetColor)?;
-
-        let mut current: Option<Style> = None;
-        for y in 0..height {
-            queue!(self.stdout, MoveTo(0, y))?;
-
-            // Printing into the bottom-right corner makes a terminal scroll, so
-            // the final cell of the final row is skipped. It is almost always
-            // blank and the alternative (a disabled autowrap mode) is more
-            // invasive than it is worth here.
-            let row_width = if y + 1 == height {
-                width.saturating_sub(1)
-            } else {
-                width
-            };
-
-            for x in 0..row_width {
-                let cell = canvas.get(x, y).unwrap_or_default();
-                if current != Some(cell.style) {
-                    queue_style(&mut self.stdout, cell.style)?;
-                    current = Some(cell.style);
-                }
-                queue!(self.stdout, Print(cell.ch))?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if !event::poll(remaining)? {
+                return Ok(None);
+            }
+            if let Some(mapped) = translate(event::read()?) {
+                return Ok(Some(mapped));
             }
         }
-
-        queue!(self.stdout, SetAttribute(Attribute::Reset), ResetColor)?;
-        self.stdout.flush()
     }
 }
 
-impl Drop for TerminalBackend {
+impl Drop for Terminal {
     fn drop(&mut self) {
-        // Best effort: Drop cannot report the failure, and `leave` on an
-        // already-restored terminal is a no-op.
+        // Best effort: Drop cannot report failures, and `leave` is idempotent.
         let _ = self.leave();
     }
 }
@@ -135,56 +109,126 @@ impl Drop for TerminalBackend {
 pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = terminal::disable_raw_mode();
+        let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
         previous(info);
     }));
 }
 
-/// Emits the escape sequences that reproduce `style` from a clean attribute state.
-fn queue_style(out: &mut Stdout, style: Style) -> io::Result<()> {
-    queue!(out, SetAttribute(Attribute::Reset))?;
-    if style.bold {
-        queue!(out, SetAttribute(Attribute::Bold))?;
+/// Translates a terminal library event, dropping events the app does not use.
+fn translate(event: TerminalEvent) -> Option<Event> {
+    match event {
+        TerminalEvent::Key(key)
+            if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+        {
+            map_key(key).map(Event::Key)
+        }
+        TerminalEvent::Resize(width, height) => Some(Event::Resize { width, height }),
+        _ => None,
     }
-    if style.dim {
-        queue!(out, SetAttribute(Attribute::Dim))?;
-    }
-    if style.italic {
-        queue!(out, SetAttribute(Attribute::Italic))?;
-    }
-    if style.underline {
-        queue!(out, SetAttribute(Attribute::Underlined))?;
-    }
-    queue!(
-        out,
-        SetForegroundColor(to_terminal_color(style.fg)),
-        SetBackgroundColor(to_terminal_color(style.bg)),
-    )
 }
 
-/// Maps a renderer [`Color`] onto the equivalent crossterm colour.
-fn to_terminal_color(color: Color) -> TerminalColor {
-    match color {
-        Color::Default => TerminalColor::Reset,
-        // crossterm's bare names are the bright variants; the base 16 colours
-        // live under the `Dark*` names.
-        Color::Black => TerminalColor::Black,
-        Color::Red => TerminalColor::DarkRed,
-        Color::Green => TerminalColor::DarkGreen,
-        Color::Yellow => TerminalColor::DarkYellow,
-        Color::Blue => TerminalColor::DarkBlue,
-        Color::Magenta => TerminalColor::DarkMagenta,
-        Color::Cyan => TerminalColor::DarkCyan,
-        Color::White => TerminalColor::Grey,
-        Color::DarkGrey => TerminalColor::DarkGrey,
-        Color::LightRed => TerminalColor::Red,
-        Color::LightGreen => TerminalColor::Green,
-        Color::LightYellow => TerminalColor::Yellow,
-        Color::LightBlue => TerminalColor::Blue,
-        Color::LightMagenta => TerminalColor::Magenta,
-        Color::LightCyan => TerminalColor::Cyan,
-        Color::Indexed(index) => TerminalColor::AnsiValue(index),
-        Color::Rgb(r, g, b) => TerminalColor::Rgb { r, g, b },
+/// Maps a terminal key event onto the app's key model.
+fn map_key(key: KeyEvent) -> Option<Key> {
+    let code = match key.code {
+        TerminalKeyCode::Char(ch) => KeyCode::Char(ch),
+        TerminalKeyCode::Enter => KeyCode::Enter,
+        TerminalKeyCode::Esc => KeyCode::Esc,
+        TerminalKeyCode::Backspace => KeyCode::Backspace,
+        TerminalKeyCode::Tab | TerminalKeyCode::BackTab => KeyCode::Tab,
+        TerminalKeyCode::Delete => KeyCode::Delete,
+        TerminalKeyCode::Insert => KeyCode::Insert,
+        TerminalKeyCode::Home => KeyCode::Home,
+        TerminalKeyCode::End => KeyCode::End,
+        TerminalKeyCode::PageUp => KeyCode::PageUp,
+        TerminalKeyCode::PageDown => KeyCode::PageDown,
+        TerminalKeyCode::Up => KeyCode::Up,
+        TerminalKeyCode::Down => KeyCode::Down,
+        TerminalKeyCode::Left => KeyCode::Left,
+        TerminalKeyCode::Right => KeyCode::Right,
+        TerminalKeyCode::F(number) => KeyCode::Function(number),
+        _ => return None,
+    };
+
+    Some(Key {
+        code,
+        modifiers: KeyModifiers {
+            ctrl: key.modifiers.contains(TerminalKeyModifiers::CONTROL),
+            alt: key.modifiers.contains(TerminalKeyModifiers::ALT),
+            shift: key.modifiers.contains(TerminalKeyModifiers::SHIFT),
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TerminalEvent, map_key, translate};
+    use crate::input::{Event, Key, KeyCode};
+    use crossterm::event::{
+        KeyCode as TerminalKeyCode, KeyEvent, KeyEventKind, KeyModifiers as TerminalKeyModifiers,
+    };
+
+    fn key(code: TerminalKeyCode, modifiers: TerminalKeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
+    #[test]
+    fn character_keys_keep_modifiers() {
+        let mapped = map_key(key(
+            TerminalKeyCode::Char('c'),
+            TerminalKeyModifiers::CONTROL,
+        ))
+        .expect("mapped");
+        assert_eq!(KeyCode::Char('c'), mapped.code);
+        assert!(mapped.modifiers.ctrl);
+    }
+
+    #[test]
+    fn navigation_keys_are_mapped() {
+        assert_eq!(
+            Some(KeyCode::Up),
+            map_key(key(TerminalKeyCode::Up, TerminalKeyModifiers::NONE)).map(|k| k.code)
+        );
+        assert_eq!(
+            Some(KeyCode::Function(5)),
+            map_key(key(TerminalKeyCode::F(5), TerminalKeyModifiers::NONE)).map(|k| k.code)
+        );
+    }
+
+    #[test]
+    fn unused_keys_are_dropped() {
+        assert_eq!(
+            None,
+            map_key(key(TerminalKeyCode::CapsLock, TerminalKeyModifiers::NONE))
+        );
+    }
+
+    #[test]
+    fn resize_events_pass_through() {
+        assert_eq!(
+            Some(Event::Resize {
+                width: 80,
+                height: 24
+            }),
+            translate(TerminalEvent::Resize(80, 24))
+        );
+    }
+
+    #[test]
+    fn key_release_events_are_ignored() {
+        let mut release = key(TerminalKeyCode::Char('a'), TerminalKeyModifiers::NONE);
+        release.kind = KeyEventKind::Release;
+        assert_eq!(None, translate(TerminalEvent::Key(release)));
+    }
+
+    #[test]
+    fn presses_become_key_events() {
+        assert_eq!(
+            Some(Event::Key(Key::char('a'))),
+            translate(TerminalEvent::Key(key(
+                TerminalKeyCode::Char('a'),
+                TerminalKeyModifiers::NONE
+            )))
+        );
     }
 }

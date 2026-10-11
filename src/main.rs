@@ -4,7 +4,7 @@ use std::io;
 use std::process::ExitCode;
 
 use grimmoire::app::App;
-use grimmoire::terminal::{self, TerminalBackend};
+use grimmoire::terminal::{self, Terminal};
 
 fn main() -> ExitCode {
     terminal::install_panic_hook();
@@ -12,17 +12,17 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            // The backend has already been dropped and the terminal restored by
-            // the time the error surfaces here.
+            // The terminal has already been restored by the time the error
+            // surfaces here.
             eprintln!("grimmoire: {error}");
             ExitCode::FAILURE
         }
     }
 }
 
-/// Creates the backend and runs the application to completion.
+/// Creates the terminal and runs the application to completion.
 fn run() -> io::Result<()> {
-    let mut backend = TerminalBackend::new()?;
+    let mut terminal = Terminal::new()?;
     let mut app = App::new();
-    app.run(&mut backend)
+    app.run(&mut terminal)
 }

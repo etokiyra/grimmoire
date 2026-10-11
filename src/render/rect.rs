@@ -49,6 +49,47 @@ impl Rect {
             && y < self.y.saturating_add(self.height)
     }
 
+    /// Whether the rectangle encloses no cells.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    /// The exclusive right edge (`x + width`), saturating at `u16::MAX`.
+    #[must_use]
+    pub const fn right(&self) -> u16 {
+        self.x.saturating_add(self.width)
+    }
+
+    /// The exclusive bottom edge (`y + height`), saturating at `u16::MAX`.
+    #[must_use]
+    pub const fn bottom(&self) -> u16 {
+        self.y.saturating_add(self.height)
+    }
+
+    /// The overlapping region shared with `other`, which may be empty.
+    #[must_use]
+    pub const fn intersection(&self, other: &Rect) -> Rect {
+        let x = if self.x > other.x { self.x } else { other.x };
+        let y = if self.y > other.y { self.y } else { other.y };
+        let right = if self.right() < other.right() {
+            self.right()
+        } else {
+            other.right()
+        };
+        let bottom = if self.bottom() < other.bottom() {
+            self.bottom()
+        } else {
+            other.bottom()
+        };
+        Rect {
+            x,
+            y,
+            width: right.saturating_sub(x),
+            height: bottom.saturating_sub(y),
+        }
+    }
+
     /// Returns a copy shrunk by `margin` cells on every side.
     #[must_use]
     pub const fn inset(&self, margin: u16) -> Self {
@@ -112,5 +153,36 @@ mod tests {
         assert_eq!(4, rect.centered_y(2));
         // An item wider than the rect is clamped to the origin column.
         assert_eq!(0, rect.centered_x(99));
+    }
+
+    #[test]
+    fn edges_are_exclusive() {
+        let rect = Rect::new(2, 3, 4, 5);
+        assert_eq!(6, rect.right());
+        assert_eq!(8, rect.bottom());
+        assert!(!rect.is_empty());
+        assert!(Rect::new(2, 3, 0, 5).is_empty());
+    }
+
+    #[test]
+    fn intersection_is_the_shared_region() {
+        let a = Rect::new(0, 0, 10, 10);
+        let b = Rect::new(4, 4, 10, 10);
+        assert_eq!(Rect::new(4, 4, 6, 6), a.intersection(&b));
+        assert_eq!(a.intersection(&b), b.intersection(&a));
+    }
+
+    #[test]
+    fn intersection_of_disjoint_rects_is_empty() {
+        let a = Rect::new(0, 0, 2, 2);
+        let b = Rect::new(5, 5, 2, 2);
+        assert!(a.intersection(&b).is_empty());
+    }
+
+    #[test]
+    fn intersection_clips_an_oversized_rect() {
+        let clip = Rect::new(1, 1, 3, 3);
+        let big = Rect::new(0, 0, 100, 100);
+        assert_eq!(clip, big.intersection(&clip));
     }
 }

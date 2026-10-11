@@ -11,26 +11,50 @@ Each phase should ship something small, correct, and verifiable.
 - Cargo application project named `grimmoire`, committing `Cargo.lock`.
 - Terminal backend around `crossterm`: raw mode, alternate screen, input,
   guaranteed restore.
-- A small, pure, cell-based renderer (`Canvas`, `Cell`, `Style`, `Color`, `Rect`).
-- A title screen demonstrating ASCII art, colour, layout, and input.
+- A small, pure, cell-based renderer.
 - Unit tests, formatting/Clippy/test/release gates, and CI.
-- `README.md`, `AGENTS.md`, `ROADMAP.md`, `CHANGELOG.md`.
 
-## Phase 1 — Renderer growth
+## Phase 1 — Rendering core (done)
 
-- Incremental/diffed screen updates instead of a full repaint each frame.
-- An animation timeline the main loop drives (frame timing, eased transitions).
-- Multiple named screens/layouts with explicit navigation between them.
-- A small widget vocabulary that stays in `ui/` and never leaks into `render/`.
-- Snapshots/tests for frame composition.
+- Explicit frame composition separated from terminal output.
+- Drawing primitives with clipping: styled text, fills, ASCII borders, subregions.
+- A clipped, local-coordinate `CanvasView` for independent visual regions, and
+  `crop` / `blit` composition with deterministic paint-order layering.
+- An enforced ASCII-first text width policy (`unicode-width`), so the cell grid
+  cannot desynchronise.
+- **Diffed presentation**: only changed cells are written, grouped into runs;
+  unchanged frames write nothing. Full redraw on resize or invalidation.
+- A time-based animation system with durations, delays, easing, concurrent
+  tracks, completion, cancellation, and a manually advanced, testable clock.
+- A screen stack with push/pop, input routed to the active screen, and layered
+  composition.
+- Responsive layouts (two-column, stacked, minimal) recomputed from frame bounds.
+- Runtime capability detection (colour depth) selecting the palette; a
+  best-effort graphics-protocol probe reported in diagnostics only.
+- An interactive renderer showcase with four visible time-based effects and a
+  help & diagnostics overlay.
+- Design document: `docs/renderer-design.md`.
 
-## Phase 2 — Interaction and shell
+Still open from this area (deliberately deferred, not forgotten):
 
-- A screen/mode stack (title, menu, settings, gameplay placeholder).
+- Wide/zero-width glyph support via continuation cells.
+- Damage-rectangle tracking rather than per-cell diffs.
+- A reusable widget vocabulary; the showcase draws directly with primitives.
+
+## Phase 2 — Interaction and shell (partly done)
+
+Done:
+
+- Screen/mode stack with push/pop and a transition effect.
+- Capability detection and responsive handling of resizing, including very small
+  terminals.
+
+Remaining:
+
 - Configurable key bindings loaded from a config file.
-- Terminal capability detection (colour depth, size changes via resize events).
-- Graceful handling of very small or resized terminals everywhere, not just the
-  title screen.
+- A settings screen and a screen/mode history (back, not just pop).
+- Consistent small-terminal and resize behaviour across every future screen.
+- Optional: request terminal focus/colour-depth queries rather than env hints.
 
 ## Phase 3 — World and exploration
 
@@ -47,7 +71,7 @@ Each phase should ship something small, correct, and verifiable.
 ## Phase 5 — Magic combat
 
 - Turn-based, magic-only combat: spell resolution, resources, and enemy behaviour.
-- Combat presentation layered on the renderer's animation support.
+- Combat presentation built on the animation system.
 
 ## Phase 6 — Progression and items
 
@@ -64,6 +88,7 @@ Each phase should ship something small, correct, and verifiable.
 
 ## Cross-cutting, ongoing
 
-- Keep dependencies minimal and justified.
-- Keep the render/game/terminal boundaries intact.
-- Keep documentation and the changelog current.
+- Keep dependencies minimal and justified (currently `crossterm` and
+  `unicode-width`).
+- Keep the render/animation/terminal boundaries intact; see `AGENTS.md`.
+- Keep documentation, the design document, and the changelog current.
