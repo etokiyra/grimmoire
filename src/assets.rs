@@ -1,23 +1,20 @@
-//! Image assets.
+//! Optional image assets for the interface.
 //!
-//! The only module in the crate that reads image files. Assets are loaded once at
-//! startup, validated, and handed out as [`AssetId`] handles so that the renderer
-//! and the graphics state never carry image bytes around.
+//! Grimmoire's world is ASCII and needs no images at all. When the development
+//! flag asks for pixel interface art, the pictures are drawn from the
+//! source-controlled art in [`crate::pixel::art`] and encoded to PNG in memory —
+//! there are no image files, so there is no third-party imagery to track and no
+//! missing file to break the game.
 //!
-//! The artwork itself is original: `tools/generate-assets.sh` produces every PNG
-//! in `assets/` procedurally, so the repository contains no third-party imagery
-//! and no image decoder is needed. See `assets/README.md`.
+//! This module is the only place that turns a sprite into bytes. The renderer
+//! handles sprites as [`crate::render::AssetId`]s and never sees data, and the
+//! terminal layer owns transmission; nothing here knows about the protocol.
 
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use crate::pixel::Sprite;
+use crate::pixel::art;
+use crate::render::{AssetId, png};
 
-use crate::render::AssetId;
-
-/// The eight-byte signature every PNG file starts with.
-const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-
-/// A loaded image.
+/// A generated image, ready to transmit.
 #[derive(Debug, Clone)]
 pub struct Asset {
     id: AssetId,
@@ -32,13 +29,13 @@ impl Asset {
         self.id
     }
 
-    /// A human-readable name, used in diagnostics and error messages.
+    /// A human-readable name, used in diagnostics and lookups.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// The PNG bytes, exactly as they were read.
+    /// The PNG bytes.
     #[must_use]
     pub fn png(&self) -> &[u8] {
         &self.png
@@ -46,74 +43,35 @@ impl Asset {
 }
 
 /// Every asset available to the application.
-///
-/// Ids are assigned in filename order so a given installation is stable.
 #[derive(Debug, Clone, Default)]
 pub struct Assets {
     items: Vec<Asset>,
 }
 
 impl Assets {
-    /// Loads every `.png` in `dir`, in filename order.
+    /// Renders every image the game can display.
     ///
-    /// Fails on an unreadable file or one that is not a PNG, naming the file, so
-    /// a broken installation is reported rather than rendering blank frames.
-    pub fn load_dir(dir: &Path) -> io::Result<Assets> {
-        let entries = fs::read_dir(dir).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "could not read the asset directory {}: {error}",
-                    dir.display()
-                ),
-            )
-        })?;
-
-        let mut paths: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
-            })
-            .collect();
-        paths.sort();
-
-        let mut items = Vec::with_capacity(paths.len());
-        for (index, path) in paths.iter().enumerate() {
-            let png = fs::read(path).map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!("could not read the asset {}: {error}", path.display()),
-                )
-            })?;
-            if !png.starts_with(&PNG_SIGNATURE) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("the asset {} is not a PNG file", path.display()),
-                ));
-            }
-            let name = path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            items.push(Asset {
-                id: AssetId::new(index as u32),
-                name,
-                png,
-            });
+    /// Called once at startup. The scene itself is not an asset — it is produced
+    /// fresh each frame and travels through [`crate::render::SceneFrame`] — so
+    /// what is built here is the small set of pictures that never change.
+    #[must_use]
+    pub fn built() -> Assets {
+        Assets {
+            items: vec![Asset {
+                id: AssetId::new(0),
+                name: "portrait-hooded".to_string(),
+                png: encode(art().portrait()),
+            }],
         }
-
-        Ok(Assets { items })
     }
 
-    /// The asset with this id, if it was loaded.
+    /// The asset with this id, if it exists.
     #[must_use]
     pub fn get(&self, id: AssetId) -> Option<&Asset> {
         self.items.iter().find(|asset| asset.id == id)
     }
 
-    /// The asset with this name, if it was loaded.
+    /// The asset with this name, if it exists.
     #[must_use]
     pub fn named(&self, name: &str) -> Option<&Asset> {
         self.items.iter().find(|asset| asset.name == name)
@@ -125,105 +83,99 @@ impl Assets {
         &self.items
     }
 
-    /// How many assets were loaded.
+    /// How many assets there are.
     #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    /// Whether no assets were loaded.
+    /// Whether there are no assets.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    /// The total size of the loaded PNG data in bytes.
+    /// The total size of the encoded data in bytes.
     #[must_use]
     pub fn total_bytes(&self) -> usize {
         self.items.iter().map(|asset| asset.png.len()).sum()
     }
 
-    /// Where the assets live, if a directory can be found.
-    ///
-    /// Prefers `$GRIMMOIRE_ASSETS`, then `assets/` beside the executable, then
-    /// `assets/` in the working directory. Returns `None` when none exists.
-    #[must_use]
-    pub fn default_dir() -> Option<PathBuf> {
-        if let Some(dir) = std::env::var_os("GRIMMOIRE_ASSETS") {
-            let dir = PathBuf::from(dir);
-            if dir.is_dir() {
-                return Some(dir);
-            }
+    /// Builds a store from raw payloads, for tests that need distinguishable
+    /// images without rendering real art.
+    #[cfg(test)]
+    pub(crate) fn from_raw(items: Vec<(&str, Vec<u8>)>) -> Assets {
+        Assets {
+            items: items
+                .into_iter()
+                .enumerate()
+                .map(|(index, (name, png))| Asset {
+                    id: AssetId::new(index as u32),
+                    name: name.to_string(),
+                    png,
+                })
+                .collect(),
         }
-        if let Ok(executable) = std::env::current_exe() {
-            if let Some(parent) = executable.parent() {
-                let candidate = parent.join("assets");
-                if candidate.is_dir() {
-                    return Some(candidate);
-                }
-            }
-        }
-        let candidate = PathBuf::from("assets");
-        candidate.is_dir().then_some(candidate)
     }
+}
+
+/// Encodes a sprite as PNG.
+///
+/// Transparent pixels become a near-black ground, so the image is opaque and can
+/// sit under the interface without the terminal's own background showing.
+fn encode(sprite: &Sprite) -> Vec<u8> {
+    const GROUND: crate::pixel::Rgb = crate::pixel::Rgb::new(0x0a, 0x09, 0x10);
+    let mut canvas = crate::pixel::PixelCanvas::new(sprite.width(), sprite.height(), GROUND);
+    sprite.draw(&mut canvas, 0, 0);
+    png::encode_rgb(canvas.width(), canvas.height(), &canvas.as_rgb_bytes())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Assets, PNG_SIGNATURE};
-    use std::fs;
-    use std::path::PathBuf;
-
-    fn scratch(tag: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("grimmoire-assets-{tag}-{unique}"))
-    }
-
-    fn tiny_png() -> Vec<u8> {
-        let mut png = PNG_SIGNATURE.to_vec();
-        png.extend_from_slice(&[0, 0, 0, 0, b'I', b'E', b'N', b'D']);
-        png
-    }
+    use super::{Asset, Assets};
+    use crate::render::{AssetId, png};
 
     #[test]
-    fn assets_are_loaded_in_filename_order_with_stable_ids() {
-        let dir = scratch("load");
-        fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join("bravo.png"), tiny_png()).expect("write");
-        fs::write(dir.join("alpha.png"), tiny_png()).expect("write");
-        fs::write(dir.join("notes.txt"), b"ignored").expect("write");
-
-        let assets = Assets::load_dir(&dir).expect("load");
-        assert_eq!(2, assets.len(), "non-PNG files are ignored");
-        assert_eq!("alpha", assets.all()[0].name());
-        assert_eq!("bravo", assets.all()[1].name());
-        assert_eq!(
-            assets.all()[0].id(),
-            assets.named("alpha").expect("named").id()
+    fn the_built_assets_include_a_portrait() {
+        let assets = Assets::built();
+        assert!(!assets.is_empty());
+        let portrait = assets.named("portrait-hooded").expect("portrait");
+        assert!(portrait.png().starts_with(&png::SIGNATURE));
+        assert!(
+            portrait.png().len() > 100,
+            "the portrait should have content"
         );
-        assert!(assets.get(assets.all()[0].id()).is_some());
-
-        fs::remove_dir_all(&dir).expect("cleanup");
+        assert_eq!(
+            portrait.id(),
+            assets.get(portrait.id()).expect("by id").id()
+        );
+        assert!(assets.total_bytes() > 0);
     }
 
     #[test]
-    fn a_file_that_is_not_a_png_is_rejected_by_name() {
-        let dir = scratch("bad");
-        fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join("broken.png"), b"definitely not a png").expect("write");
-
-        let error = Assets::load_dir(&dir).expect_err("should reject");
-        assert!(error.to_string().contains("broken.png"));
-
-        fs::remove_dir_all(&dir).expect("cleanup");
+    fn ids_are_stable_and_lookups_can_miss() {
+        let assets = Assets::built();
+        assert_eq!(
+            AssetId::new(0),
+            assets.named("portrait-hooded").expect("portrait").id()
+        );
+        assert!(assets.get(AssetId::new(99)).is_none());
+        assert!(assets.named("nothing").is_none());
     }
 
     #[test]
-    fn a_missing_directory_is_an_error_naming_the_path() {
-        let error = Assets::load_dir(&scratch("missing")).expect_err("should reject");
-        assert!(error.to_string().contains("asset directory"));
+    fn an_empty_store_is_valid() {
+        let assets = Assets::default();
+        assert!(assets.is_empty());
+        assert_eq!(0, assets.len());
+        assert_eq!(0, assets.total_bytes());
+    }
+
+    #[test]
+    fn the_asset_type_carries_its_handle() {
+        let assets = Assets::built();
+        let asset: &Asset = &assets.all()[0];
+        assert_eq!(asset.id(), assets.get(asset.id()).expect("by id").id());
+        assert!(!asset.name().is_empty());
     }
 }

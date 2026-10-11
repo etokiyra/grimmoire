@@ -100,27 +100,53 @@ Delivered:
 - Live verification in a real Kitty session, plus `tools/smoke.sh` and
   `examples/bench`.
 
-## Phase 6 — Dialogue and story
+## Phase 6 — A custom ASCII game (done)
+
+This phase was a direction correction as much as a build. The world had been
+drawn as a software pixel-art image; the instruction was that the game is ASCII,
+so that was reverted and the effort went into a character renderer instead.
+
+Delivered:
+
+- **A custom ASCII scenery renderer** (`ui::scenery`). A wall's glyph depends on
+  what surrounds it — a lit cap where floor is above, a shadowed base where floor
+  is below, a side face, or a pillar when it stands alone — which is what turns a
+  tile grid into architecture rather than a field of `#`.
+- **Variation that never shimmers**: floors, paths, water, rubble and moss pick
+  their glyph from a hash of their *world* position, so the same tile always looks
+  the same and neighbouring tiles never match.
+- **Characters as ASCII art**: a staff-bearing wizard and a dark, still, two-eyed
+  hooded figure, each three cells square, with four facing directions and a walk
+  cycle.
+- **Sprint**, and a fix for the axis asymmetry: the two directions are paced from
+  one speed in *pixels per second* rather than one step rate, so north and east
+  cross the screen at the same rate despite cells being taller than they are wide.
+- **The pixel renderer kept, but demoted**: it now draws optional interface pieces
+  only, behind `--pixel-ui`, off by default. The default path emits no graphics.
+- `examples/preview`, which prints a rendered area as text so art can be read and
+  diffed without a screenshot.
+
+## Phase 7 — Dialogue and story
 
 - A dialogue system with branching choices, built on the overlay that already
-  carries an image-backed portrait.
+  carries an ASCII portrait.
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.
 - Conversation state that persists, and quests built on top.
 
-## Phase 7 — Magic combat
+## Phase 8 — Magic combat
 
 - Turn-based, magic-only combat: spell resolution, resources, and enemy behaviour.
-- Combat presentation built on the animation system and the graphics backend for
-  effects and enemy art.
+- Combat presentation built on the animation system, with ASCII effects and enemy
+  art.
 
-## Phase 8 — Progression and items
+## Phase 9 — Progression and items
 
 - Hybrid progression: discoveries/story milestones plus gameplay mastery.
 - A skill tree.
 - Items focused on exploration, puzzles, quests, and storytelling.
 
-## Phase 9 — Persistence and release
+## Phase 10 — Persistence and release
 
 - A save format for the rest of the game (inventory, quests, story flags) with
   versioning and migration. The current format deliberately covers exploration

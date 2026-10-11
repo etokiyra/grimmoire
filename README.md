@@ -4,18 +4,17 @@ A terminal-native, ASCII-first dark-fantasy wizard RPG written in Rust.
 
 [![CI](https://github.com/etokiyra/grimmoire/actions/workflows/ci.yml/badge.svg)](https://github.com/etokiyra/grimmoire/actions/workflows/ci.yml)
 
-> **Status: early development.** There is no stable release and no tagged
-> version yet. Grimmoire is a small, playable **exploration prototype** — two
-> connected areas, responsive movement, interaction, one NPC, and fail-soft
-> saving — on top of a custom cell renderer with a Kitty graphics backend. It is
-> not a complete game.
+> **Status: early development.** There is no stable release and no tagged version
+> yet. Grimmoire is a small, playable **exploration prototype** — two connected
+> areas, responsive movement with sprinting, interaction, one NPC, and fail-soft
+> saving — on top of a custom ASCII renderer. It is not a complete game.
 
 ## What Grimmoire is
 
-A game about a wizard who grows stronger through knowledge rather than gear,
-built for the terminal and taking ASCII art as its primary visual language. The
-long-term vision includes exploration, character-focused dialogue with portraits,
-strategic turn-based magic combat, skill trees, story-and-mastery progression, and
+A game about a wizard who grows stronger through knowledge rather than gear, built
+for the terminal and taking **ASCII art as its primary visual language**. The
+long-term vision includes exploration, character-focused dialogue, strategic
+turn-based magic combat, skill trees, story-and-mastery progression, and
 persistent saves.
 
 The story, world, characters, and detailed mechanics are **deliberately
@@ -25,10 +24,10 @@ undecided**. Everything currently in the game is placeholder content. See
 ## Requirements
 
 **Grimmoire runs in [Kitty](https://sw.kovidgoyal.net/kitty/).** It uses Kitty's
-graphics protocol for artwork and its keyboard protocol for key releases, and it
-targets that terminal deliberately rather than trading the visual result for
-breadth. If it cannot establish that Kitty is available it says so and exits,
-instead of starting in a mode that would look broken.
+keyboard protocol so that it can see key *releases*, which is what makes "hold to
+walk, release to stop" work properly. If it cannot establish that the terminal can
+do this, it says so and exits rather than starting in a mode that would feel
+broken.
 
 Everything else it needs is a Rust toolchain and a terminal of at least **80×24**
 reporting 256 colours.
@@ -47,24 +46,18 @@ prompt appears.
 | Key | Action |
 | --- | --- |
 | `w` `a` `s` `d` or arrow keys | Move (and face that way). Hold to keep walking. |
+| `Shift` + a direction | Sprint |
 | `e` | Interact with what you face |
-| `h`, `?`, `F1` | Help and renderer diagnostics |
+| `h`, `?`, `F1` | Help and diagnostics |
 | `F3` | Presentation study (rendering prototype) |
 | `F2` | Renderer showcase (development screen) |
-| `Esc` | Quit |
-| `q`, `Ctrl`+`C` | Quit |
+| `Esc`, `q`, `Ctrl`+`C` | Quit |
 
-To evaluate the visual direction instead, launch the **presentation study**:
+To look at the interface pieces instead, launch the **presentation study**:
 
 ```sh
 kitty --directory "$PWD" cargo run --release -- --study
 ```
-
-The study is a rendering prototype — an opaque themed surface, composed panels, an
-animated ASCII scene, an image-backed portrait, a theme gallery, and live renderer
-diagnostics. In it, `g` toggles the portrait, `space` pauses the scene, and `r`
-replays the reveal. It is the subject of
-[`docs/renderer-design.md`](docs/renderer-design.md).
 
 Progress saves automatically on quit and whenever you move between areas; see
 [`docs/gameplay.md`](docs/gameplay.md) for the save location and format.
@@ -77,16 +70,20 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 **The exploration prototype**
 
-- A world of two large connected areas that are **bigger than the viewport**, so
-  the camera scrolls and the environment fills the screen.
+- Two large connected areas that are **bigger than the viewport**, so the camera
+  scrolls and the environment fills the screen.
 - Tile-based movement with collision against terrain, boundaries, and entities,
   plus a facing direction so you can face what you want to use.
 - **Event-driven movement**: a press steps at once, holding walks at a steady
-  cadence, and releasing stops immediately. A tap is always exactly one step.
+  cadence, releasing stops immediately, and `Shift` sprints. A tap is always
+  exactly one step, and no lost event can leave you walking on your own.
+- **Both axes move at the same screen speed.** Terminal cells are taller than
+  they are wide, so the two axes are paced from one speed in pixels per second
+  rather than a single step rate — which is what stops vertical movement feeling
+  twice as fast as horizontal.
 - An interaction model resolved deterministically from the adjacent tiles, with a
   contextual prompt instead of permanent instructions.
-- A dialogue overlay with an image-backed portrait, pushed as a screen so input
-  cannot leak through it.
+- A dialogue overlay, pushed as a screen so input cannot leak through it.
 - Autumn-tinted floors around the player, so the space reads as lit rather than
   flat.
 - Automatic, versioned, fail-soft persistence of area, position, and discovered
@@ -94,30 +91,30 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 **The renderer and framework underneath**
 
+- A **custom ASCII scenery renderer**: walls show lit caps, shadowed bases, side
+  faces and pillars depending on what surrounds them; floors, paths, water and
+  rubble vary by position without ever shimmering; water moves.
+- **Characters drawn as ASCII figures** three cells square, with four facing
+  directions and a walk cycle — a staff-bearing wizard and a dark, still, two-eyed
+  hooded figure.
 - A pure, terminal-agnostic cell renderer: `Canvas`, `Cell`, `Style`, `Color`,
   `Rect`, and a clipped local-coordinate `CanvasView`.
 - A **fully opaque, application-owned background**: the theme paints every cell,
-  and foreground-only draws inherit the surface, so the terminal's own theme (or a
-  transparent desktop) never shows through.
+  and foreground-only draws inherit the surface, so the terminal's own theme never
+  shows through.
 - A role-based theme: background, surfaces, borders and separators, three weights
-  of text, accents, focus, interactive objects, player, characters, effects,
+  of text, accents, focus, interactive objects, player, character, effects,
   warnings, and an ambient light ramp.
 - `Frame` composition that separates **cell rendering** from **image placement**.
-- A **Kitty graphics backend**: PNG transmitted inline once per image, placed by
-  cell, moved without flicker, and deleted on every exit path.
-- **Arrival plates** when you enter an area, from original artwork generated by a
-  committed script.
-- Composition primitives (`crop` / `blit`) with deterministic paint-order
-  layering, and ASCII borders.
-- An enforced text width policy, so the grid cannot desynchronise.
-- **Diffed presentation**: only changed cells are written, and images are
-  retransmitted only when they actually change.
+- **Diffed presentation**: only changed cells are written. An unchanged frame
+  costs sixteen bytes.
 - Time-based animation with an explicitly advanced, testable clock.
 - A screen stack with push/pop, input routed to the active screen, and layered
   composition, plus a curtain transition between screens.
 - A **minimum-viewport policy** (80×24): below it, play suspends safely and resumes
   on its own.
-- The presentation study (`F3` or `--study`) and the renderer showcase (`F2`).
+- Optional **pixel interface art** behind a development flag, off by default; the
+  game itself never emits a graphics sequence.
 
 ## Not implemented yet
 
@@ -134,17 +131,17 @@ cargo run --release -- --study   # the presentation study
 cargo build --release            # produce target/release/grimmoire
 ```
 
-Resize the terminal freely: the layout, camera, and image placements are
-recomputed, and below 80×24 play suspends to a short explanation rather than
-drawing a mangled layout. The terminal — including the Kitty keyboard protocol —
-is restored on a normal exit, on a recoverable error, and from a panic.
+Resize the terminal freely: the layout and camera are recomputed, and below 80×24
+play suspends to a short explanation rather than drawing a mangled layout. The
+terminal — including the Kitty keyboard protocol — is restored on a normal exit,
+on a recoverable error, and from a panic.
 
 ### Development overrides
 
 | Variable | Effect |
 | --- | --- |
-| `GRIMMOIRE_ASSUME_KITTY=1` | Assume graphics support even if it cannot be confirmed. For inspecting the cell layer in another terminal, and for the pty smoke test. Images will not appear, and the help overlay says so. |
-| `GRIMMOIRE_ASSETS=<dir>` | Load artwork from `<dir>` instead of `$GRIMMOIRE_ASSETS`, `assets/` beside the executable, or `assets/` in the working directory. |
+| `GRIMMOIRE_ASSUME_KITTY=1` | Assume the terminal is Kitty even if it cannot be confirmed. For inspecting the game in another terminal, and for the pty smoke test. |
+| `GRIMMOIRE_PIXEL_UI=1` | Draw interface pieces (the dialogue portrait) as pixel art. Off by default; equivalent to `--pixel-ui`. |
 
 ## Development
 
@@ -157,14 +154,16 @@ cargo test --all-targets
 cargo build --release
 ```
 
-Two further tools are kept honest by use:
+Three tools are kept honest by use:
 
 ```sh
-tools/smoke.sh            # drives the binary through a pty and checks terminal cleanup
-cargo run --release --example bench   # the performance numbers in the design doc
-tools/generate-assets.sh  # regenerate the artwork (needs ImageMagick 7)
-tools/generate-areas.py   # regenerate the two areas (prints them for inspection)
+tools/smoke.sh                            # pty smoke test: terminal lifecycle and cleanup
+cargo run --release --example preview     # print the ASCII world to the terminal
+cargo run --release --example bench       # the performance numbers in the design doc
 ```
+
+`examples/preview` is the quickest way to look at scenery: it renders a real area
+as text, so art changes can be read and diffed without a screenshot.
 
 ## Architecture
 
@@ -172,41 +171,37 @@ tools/generate-areas.py   # regenerate the two areas (prints them for inspection
 | --- | --- |
 | `game` | The world model and its rules: areas, tiles, entities, movement, collision, interaction, travel. Pure — no rendering, no I/O. |
 | `save` | A small versioned format and the only code that touches the save file. |
-| `assets` | The only code that reads image files: loads and validates PNGs, hands out handles. |
-| `render` | Pure, terminal-agnostic drawing: cells, styles, colours, rectangles, canvases, views, `Frame` composition, and image handles. |
-| `terminal` | The **only** module that talks to the terminal: raw mode, alternate screen, the Kitty keyboard and graphics protocols, input, capability detection, diffed presentation, and protocol bytes. |
+| `render` | Pure, terminal-agnostic drawing: cells, styles, colours, rectangles, canvases, views, `Frame` composition, image handles, and the optional PNG encoder. |
+| `terminal` | The **only** module that talks to the terminal: raw mode, alternate screen, the Kitty keyboard and graphics protocols, input, capability detection, and diffed presentation. |
 | `anim` | Time-based animation with an explicitly advanced clock. |
 | `input` | Terminal-independent key and event types, including press/repeat/release. |
-| `ui` | Frame composition: theme, layout, art, motion, screens, transitions, the screen stack, the presentation study, and the viewport policy. |
+| `ui` | Frame composition: the ASCII scenery renderer, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
 | `app` | Wires input, update, compose, and present together. |
+| `pixel` | Software pixel rendering, used only by optional interface art. |
 
 Documentation:
 
 - [`docs/renderer-design.md`](docs/renderer-design.md) — the rendering
-  architecture, the Kitty decision and its evidence, the image and input models,
-  the measured numbers, what was verified live, and what was not.
+  architecture, the ASCII scenery renderer, the movement model and why the two
+  axes are paced differently, the measured numbers, and what was verified live.
 - [`docs/gameplay.md`](docs/gameplay.md) — the world model, controls, movement,
   interaction rules, and save format.
 - [`docs/phase5-audit.md`](docs/phase5-audit.md) — the audit that started this
-  phase, before any change.
+  work, before any change.
 
 ### Key decisions
 
-- **Kitty is the supported terminal, for now.** Visual quality and control were
-  chosen over breadth of compatibility, and Kitty is the only graphics protocol
-  implemented. The session was verified live in Kitty 0.49.2 — including that it
-  renders images, reports key releases, and releases the protocol on exit.
-- **`crossterm` is the sole terminal library.** It handles raw mode, the alternate
-  screen, events with timeouts, the Kitty keyboard protocol, and escape sequences,
-  while Grimmoire owns its drawing model. `ratatui` was rejected because it would
-  own that model.
-- **Cells first, images second.** The cell renderer is the baseline and always
-  works; images are placed in reserved rectangles behind the
-  `Frame`/`ImagePlacement`/`AssetId` boundary, so no protocol detail reaches the
-  game. Artwork is used where a picture materially helps, not for terrain.
+- **ASCII is the identity, not a fallback.** The world is a glyph grid drawn by a
+  renderer Grimmoire owns. Pixel rendering exists only as an off-by-default
+  interface extra, and the default path sends no graphics at all.
+- **Kitty is the supported terminal**, for its keyboard protocol and colour depth.
+  `crossterm` is the sole terminal library; `ratatui` was rejected because it would
+  own the drawing model.
 - **Movement is event-driven, never timer-driven.** A press steps at once, holding
   walks at a cadence, releasing stops. No sequence of lost events can make the
   player walk on their own.
+- **The two axes share a screen speed, not a cadence.** Cells are not square, and
+  pretending otherwise is what made vertical movement feel fast.
 - **The world is larger than the viewport**, and the camera scrolls; the HUD is an
   overlay of two rows rather than rows taken from the world.
 - **The viewport owns its background.** Foreground-only draws inherit the surface
@@ -222,23 +217,20 @@ Documentation:
 ## Known limitations
 
 - **Kitty only.** Other Kitty-protocol terminals are untested, and tmux/zellij may
-  intercept the protocol. There is no sixel or fallback backend.
-- Double-width and zero-width glyphs are not rendered; the cell model has no
-  continuation cell. Block and box glyphs, which are one column wide, are usable.
-- The artwork is three generated PNGs (two arrival plates and a portrait). It is
-  atmospheric rather than illustrative, and it is not final art.
-- Presentation repaints per changed cell rather than tracking damage rectangles.
-  A step with a scrolled camera rewrites a few hundred cells.
-- Only one area-transition pair exists, and the world is two rooms.
+  intercept the keyboard protocol.
+- **One glyph per cell.** Wide and zero-width glyphs are not rendered; the cell
+  model has no continuation cell.
+- Presentation repaints per changed cell rather than tracking damage rectangles. A
+  step with a scrolled camera rewrites a few thousand cells.
+- The world is two rooms with one NPC and no dialogue branching; the art is
+  placeholder.
 - Visual verification was done on Linux under Kitty 0.49.2; other platforms are
   untested.
 - Terminal restoration cannot be guaranteed against `SIGKILL` or power loss.
-- Grimmoire cannot change the terminal *window's* opacity, and cannot maximise it;
-  only the rendered viewport is opaque.
 
 ## License
 
 No license has been chosen yet, so none is included. This is an open decision and
-must be settled before the project is distributed or reused. See `AGENTS.md`. The
-artwork in `assets/` is generated by this repository and carries no third-party
-rights; see [`assets/README.md`](assets/README.md).
+must be settled before the project is distributed or reused. See `AGENTS.md`. All
+artwork is generated from source text in this repository and carries no
+third-party rights.

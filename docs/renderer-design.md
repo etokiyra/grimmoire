@@ -4,8 +4,8 @@ This document records Grimmoire's rendering architecture, the evidence behind it
 the constraints of drawing inside a terminal, and the extension points left open.
 It describes what is implemented today, not aspirations.
 
-It was rewritten for the Kitty-first phase. §2 records what the audit found before
-any change; §3 records the protocol decision and the evidence behind it.
+It was rewritten for the ASCII-scenery phase. §2 records what the audit found and
+§3 records the direction decision, including the one that was reversed.
 
 ## 1. The constraint that shapes everything
 
@@ -14,10 +14,9 @@ foreground colour, and a background colour. A program does not address pixels
 unless the terminal implements a graphics protocol, and even then it is *placing
 an image*, not drawing into a pixel buffer. Three consequences follow:
 
-- **Resolution is sub-cell at best by default.** Block and box glyphs (`█`, `░`)
-  are one column wide, so they *can* be used as colour swatches and shading —
-  confirmed against `unicode-width`, which treats East Asian Ambiguous characters
-  as one column. Photographic imagery needs a graphics protocol.
+- **Resolution is one glyph per cell.** Block and box glyphs (`█`, `▓`, `▀`, `·`)
+  are one column wide and are legitimate drawing elements — confirmed against
+  `unicode-width`, which treats East Asian Ambiguous characters as one column.
 - **The cell grid desynchronises** if a glyph is not exactly one column wide. The
   renderer enforces a width policy at draw time and again at the output boundary.
 - **Output cost is real.** Rewriting a large screen is wasteful, so the presenter
@@ -31,8 +30,8 @@ Verified in code and on screen before anything changed; the full record is in
 **The world occupied a fraction of the screen.** `axis_camera` centred any area
 smaller than the view, and both areas were far smaller than a normal terminal
 (46 × 16 and 34 × 12). At the reference size the Ruined Chapel covered roughly
-**17% of the viewport area**, as a small island surrounded by empty margins. Four
-rows of chrome (header, message, two-row status bar) framed it.
+**17% of the viewport**, as a small island surrounded by empty margins. Four rows
+of chrome framed it.
 
 **Movement felt poor, for four separate reasons.**
 
@@ -40,56 +39,39 @@ rows of chrome (header, message, two-row status bar) framed it.
    the window was **dropped** rather than queued.
 2. There was no notion of a held direction and therefore no way to stop promptly.
 3. The Kitty keyboard protocol was never enabled, so `KeyEventKind` was always
-   `Press` and the `repeat` flag Phase 3 added was never set. The guard that was
-   supposed to stop auto-repeat re-triggering discrete actions was dead code.
+   `Press` and the `repeat` flag was dead code.
 4. Because the camera centred a small map, walking around the middle of a room
-   produced no visual change at all. This, more than the timing, is what made
-   movement feel dead.
+   produced no visual change at all.
 
-**Incidental findings.** The sixel backend required the terminal to report cell
-metrics in pixels, which many terminals do not; the capability probe could not
-distinguish "no graphics" from "could not tell"; the theme had no separators,
-focus, interactive, player, or warning tokens.
+**The remaining complaint, in this phase's words:** horizontal movement felt too
+slow beside vertical movement, which felt too fast, and there was no sprint.
+§6 explains why, and what was done about it.
 
-## 3. The protocol decision: Kitty, and only Kitty
+## 3. The direction decision
 
-Kitty is the supported terminal for this phase. That is a product decision — visual
-quality and control over breadth of compatibility — and it is implemented as one.
+**Grimmoire is an ASCII game, and that is the identity rather than a limitation.**
+The world is drawn as characters, one glyph per cell, by a scenery renderer that
+Grimmoire owns.
 
-The protocol was chosen on evidence, not on documentation:
+An earlier revision of this phase rendered the world as a software pixel-art
+image and had Kitty display it behind the cell layer. That was reverted on
+instruction: it looked like a different game, and the ASCII wall of the project
+was better served by investing in the character renderer. The pixel renderer
+survives as an **optional interface extra** behind the `--pixel-ui` development
+flag, off by default (§7). Nothing in the default path emits a graphics sequence
+at all, and a test asserts it.
 
-| Claim | How it was checked |
-| --- | --- |
-| Kitty is installed here | `kitty 0.49.2` at `/usr/bin/kitty`, plus `kitten` |
-| Kitty renders images here | `kitten icat assets/cellar.png` in a real Kitty window, captured with `grim` and inspected |
-| Kitty speaks the protocol | `crossterm`'s live query returned `Ok(true)`; the running binary reports `graphics  kitty (confirmed)` |
-| Kitty reports key releases | the same query gives `keys  press/repeat/release`, and holding a direction visibly repeats |
+### Why the terminal is still Kitty
 
-Sixel was removed rather than kept as a second backend. The instruction is explicit
-that theoretical flexibility is not a reason to carry two paths, and the second path
-was the one with the worse layout model: sixel has no concept of cells, so it needs
-the terminal's pixel cell size, which is exactly the thing a pty and many terminals
-do not report. Kitty places **by cell** (`c` and `r`), so Grimmoire no longer needs
-cell metrics at all.
+Kitty remains the supported terminal because of the **keyboard** protocol, which
+is what makes "hold to walk, release to stop" possible at all: it reports key
+releases, and `REPORT_EVENT_TYPES` is what turns an auto-repeat into something
+distinguishable from a fresh press. Colour depth is the other reason.
 
-### What Kitty is asked to do
-
-- **Inline PNG, transmitted once** (`a=t,f=100,t=d`), because a file path (`t=f`)
-  assumes a shared filesystem — false over SSH and in sandboxes — and a failed file
-  read is reported as an unread response. The PNG bytes are copied into the escape
-  sequence untouched: **no image codec exists anywhere in the project**.
-- **Placements with ids** (`i` + `p`). Re-sending the same pair replaces the
-  placement in place, so moving an image needs no delete and does not flicker.
-- **Cell-aligned rectangles** (`c`/`r`), so an image occupies a known number of
-  cells and the cell layer can be told not to write there. Kitty letterboxes rather
-  than distorting.
-- **Placement at the cursor.** Kitty draws at the current cursor cell, so every
-  placement moves the cursor to the rectangle's top-left corner first and then asks
-  for the cursor to stay put (`C=1`). Getting this wrong is invisible until an image
-  silently lands in the wrong place; it was found by live verification (§7).
-- **Responses suppressed** (`q=2`). Acknowledgements arrive on the *input* stream,
-  and this application reads input as key events — an unread acknowledgement would
-  surface as garbage keystrokes.
+Because the world no longer needs images, the capability check is best understood
+as "this terminal speaks the keyboard protocol", which is exactly what
+`crossterm`'s live query measures. `GRIMMOIRE_ASSUME_KITTY=1` remains the
+documented development override, and the pty smoke test uses it.
 
 ## 4. Chosen architecture
 
@@ -97,256 +79,213 @@ cell metrics at all.
 +---------------------------------------------------------------------+
 | app::App   clock, screen stack, transition, canvas, image placements |
 +------------------+-------------------------------+------------------+
-| ui::*  screens, layout, theme, art, stage        | terminal::*      |
-|        Screen trait -> Frame                     |   Terminal       |
-|                                                  |   Presenter      |
-|                                                  |   Capabilities   |
-|                                                  |   Graphics       |
-|                                                  |   kitty (pure)   |
-+------------------+-------------------------------+------------------+
-| render::*  Canvas, CanvasView, Frame, Cell, Style, Color, Rect,     |
-|            ImagePlacement, AssetId, glyph                           |
+| ui::*                                                             |
+|   scenery  the ASCII world renderer                               |
+|   theme    roles, surfaces, and the ambient shade ramp            |
+|   motion   press, hold, release, sprint, per-axis cadence         |
+|   screens  exploration, dialogue, help, study, showcase           |
+|                                     +----------------------------+ |
+|                                     | terminal::*                | |
+|                                     |   Terminal, Presenter      | |
+|                                     |   Capabilities, Graphics   | |
+|                                     |   kitty (pure encoder)     | |
+|                                     +----------------------------+ |
++---------------------------------------------------------------------+
+| render::*  Canvas, CanvasView, Frame, Cell, Style, Color, Rect,      |
+|            ImagePlacement, AssetId, glyph, png (optional UI only)    |
 +---------------------------------------------------------------------+
 | anim::*    Animator, Animation, Easing                              |
-| input::*   Key, KeyCode, KeyKind, Event  (terminal-independent)     |
-| assets::*  PNG loading and validation (the only module that reads   |
-|            image files)                                             |
+| input::*   Key, KeyCode, KeyKind, Event  (terminal-independent)      |
+| game::*    areas, entities, world, dialogue  (pure)                  |
+| save::*    a small versioned format                                  |
 +---------------------------------------------------------------------+
 ```
 
-Dependencies point downward. `render` and `anim` have no terminal dependency;
-`terminal` is the only module that touches the terminal or emits protocol bytes;
-`ui` composes frames and never performs I/O.
+Dependencies point downward. `render`, `anim`, `game`, and `ui` have no terminal
+dependency; `terminal` is the only module that touches the terminal or emits
+protocol bytes.
 
-### Separation of cell rendering from image rendering
+## 5. The ASCII scenery renderer
 
-A screen composes into a `Frame`, which bundles two kinds of content rendered by
-very different machinery:
+`ui::scenery` draws the world into a cell view. It is pure: a world and a palette
+in, cells out. Three things make it read as a place rather than as a field of
+symbols.
 
-- **cells**, drawn through `Canvas` views; and
-- **images**, recorded as `ImagePlacement { area: Rect, asset: AssetId }` —
-  intent, not protocol, and not even bytes.
+### Structure, from neighbours
 
-A screen never emits graphics bytes and never sees image data: it names an asset
-handle and a rectangle, and composes a sensible fallback in that rectangle for
-when nothing is painted. `FrameContext::graphics` and `FrameContext::art` tell it
-which case it is in, so the two renderings are chosen deliberately.
+A wall is not `#` repeated. Its glyph is chosen from what surrounds it:
 
-`terminal::kitty` is a **pure encoder**: intent in, bytes out, no I/O and no state,
-so the protocol is verified in unit tests without a terminal.
-
-`terminal::graphics::Graphics` owns the lifecycle and is the only place that
-decides when to transmit, place, or delete:
-
-- An image's data is transmitted **once** and kept under a stable id. Showing it
-  again costs nothing.
-- A placement is identified by `(image, placement)`, so an unchanged rectangle
-  emits nothing and a moved one is replaced without flicker.
-- A **full redraw discards the graphics state**, because the clear-screen escape
-  code is specified to clear images too. Data is retransmitted and placements are
-  re-issued. This is what makes resizing safe.
-- `Graphics::clear` deletes every image and placement the application created, and
-  runs before a resize and on shutdown — and again in `Terminal::leave` and in the
-  panic hook, so no exit path can leave graphics behind.
-
-The presenter decides *when*: it hands the graphics layer the frame's placements
-and a `reset` flag, and writes what came back.
-
-Worked example of the whole chain, for one step of movement while a portrait is on
-screen: the camera shifts, ~250 cells change, the presenter writes those 250 cells
-in ~170 runs — and emits **zero** image bytes, because the portrait did not move.
-
-### Capability states
-
-Startup is strict, and the policy lives in `terminal::graphics::classify` (pure,
-and unit tested):
-
-| Evidence | Result | Behaviour |
+| Situation | Glyph | Why |
 | --- | --- | --- |
-| The terminal answered the live Kitty protocol query | `Confirmed` | run |
-| `GRIMMOIRE_ASSUME_KITTY=1` (development override) | `Forced` | run, reported as forced |
-| `KITTY_WINDOW_ID`, `TERM`, or `TERM_PROGRAM` look like Kitty, but nothing answered | `Unverified` | run, with a warning on stderr |
-| Nothing suggests Kitty | `Unsupported` | **print an actionable error and exit** |
+| Open floor above | `▀` | the wall's lit cap |
+| Open floor below | `▄` | its shadowed base |
+| Open floor beside | `▓` | a dressed side face |
+| Surrounded | `#` | interior masonry |
+| Floor on all four sides | `║` | a free-standing pillar |
 
-`$TERM` alone is never treated as proof. `KITTY_WINDOW_ID` is set by Kitty itself
-for its children, so it is evidence; it is still not confirmation, which is what the
-live query is for. The override exists so the cell layer can be inspected in a
-terminal that cannot paint images — including this project's own pty smoke test —
-and it is documented as development-only.
+That single rule is what turns a chapel's colonnade, a crypt's chambers and a
+corridor's edges into architecture. A worked test asserts a cap, a base and a
+pillar are three different glyphs.
 
-Colour detection is separate and purely cosmetic: it selects the palette and
-nothing else, so a wrong guess is never fatal.
+### Variation, from a hash
 
-### Background ownership
+Floors, paths, water, rubble and moss pick their glyph from a small set using a
+hash of the tile's **world** position, not of the frame or the call order. The
+same tile therefore looks the same every time it is drawn, so the world never
+shimmers as the camera moves, and neighbouring tiles differ. The variation is
+deliberately restrained — a floor is one surface with grit on it, not static.
 
-- The theme is explicit and role-based: `background`, `surface`, `surface_raised`,
-  `border`, `separator`, `text`, `text_secondary`, `text_muted`, `accent`,
-  `accent_dim`, `accent_alt`, `accent_alt_dim`, `effect`, `effect_dim`, `focus`,
-  `interactive`, `player`, `character`, `nature`, `relic`, `warning`, and the three
-  `shade_*` steps of the ambient ramp.
-- The application fills every cell of the frame with the backdrop before composing,
-  and `Canvas::set` **inherits** that background into foreground-only draws, so a
-  draw can never reset a cell to the terminal's own background.
-- Panels, bars, and overlays paint their surface explicitly; everything else keeps
-  the viewport colour.
-- This is asserted twice: a unit test walks every cell of a composed frame and
-  requires a non-default background, and a pixel sample from a real terminal
-  confirms the colour.
-- Window opacity is the emulator's business and is not claimed.
+### Characters as art
 
-### Composition and the camera
+The player and the people they meet are small ASCII figures, three cells square,
+rather than a single coloured letter:
 
-The world is composed across the **entire viewport**; the HUD is a two-row overlay
-painted *over* it rather than rows taken from it. The camera follows the player and
-clamps to the area's edges; an area smaller than the view is centred, which only
-happens for a pathologically small map. Both areas are larger than the reference
-viewport by construction, and a content test enforces that.
+```
+ ^      ^      ^
+(o)    (.)    (o>      and the hooded figure: (oo)
+/|\    /|\    /|\                             |###|
+```
 
-Floors are tinted by squared distance from the player, which reads as a pool of
-light, gives the space depth, and costs no geometry: one `match` in the tile loop.
+They have a facing direction (four variants, with west mirrored from east), a
+two-frame walk cycle, and a distinct palette role. The staff-bearing wizard and
+the dark, still, two-eyed hooded figure are not confusable at a glance.
 
-### Minimum viewport
+### Light, from distance
 
-`ui::viewport` owns the policy: **80 × 24**, the classic terminal and the size the
-game and the study are composed for. Below it the application suspends normal
-rendering, paints a dedicated legible screen, and **swallows input** so the player
-cannot act blind. Screens are not composed at all while suspended, so nothing can
-be caught half-drawn, and all game state is untouched. Play resumes on its own when
-the window grows, and the presenter is invalidated so the terminal is repainted
-from scratch. The threshold is one constant in one file.
+Every cell is shaded by its distance from the player, using the theme's three-step
+ambient ramp as the background and the `dim` attribute for the far distance. The
+effect is a pool of light around the wizard that falls away into shadow — the
+same trick the cell renderer used before, kept because it is cheap and it works.
 
-Fullscreen detection is deliberately *not* attempted, and Grimmoire cannot maximise
-the user's window. It enforces its own minimum and says so.
+Aerial perspective is not attempted, and neither is field of view. The whole area
+is drawn every frame; only the visible window is composed.
 
-## 5. The input model
+## 6. The input model
 
-Movement is an explicit state machine (`ui::motion`), not a throttle on the raw key
-stream, because the three things a player notices are distinct:
+Movement is an explicit state machine (`ui::motion`), not a throttle on the raw
+key stream:
 
 - a **fresh press** steps immediately, with no gate and no latency;
-- **auto-repeat** steps again only once the cadence (125 ms, ~8 steps a second) has
-  elapsed, so a fast terminal cannot make the player sprint;
-- a **release** stops the walk at once.
+- **auto-repeat** steps again only once the cadence has elapsed;
+- a **release** stops the walk at once;
+- **shift** makes the hold a sprint.
 
-The critical design decision is that **steps are taken on events, never on a timer**.
-An earlier revision self-drove the cadence while a direction was held; live testing
+The critical decision is that **steps are taken on events, never on a timer**. An
+earlier revision self-drove the cadence while a direction was held; live testing
 showed that a press with no release — exactly what injected or pasted input looks
 like — then walked ~3 steps before a stall guard caught it. Event-driven motion
-makes a tap exactly one step and makes a runaway *impossible by construction*.
+makes a tap exactly one step and makes a runaway *impossible by construction*. A
+repeat that does not continue a hold is ignored, and a stall guard clears the
+reported held state after 400 ms of silence without ever taking a step.
 
-Two further rules fall out of that:
+### Why the two axes do *not* share a cadence
 
-- A **repeat that does not continue an existing hold is ignored**, so only a press
-  starts moving and a release is final even if stray repeats arrive.
-- A **stall guard** clears the reported held state after 400 ms of silence, well
-  above any plausible auto-repeat interval. It never moves anyone, so a lost release
-  cannot leave the player walking.
+This is the fix for "horizontal feels slow, vertical feels fast".
 
-Discrete actions (`e`, help, screen changes) are separate from movement entirely and
-fire only on a non-repeat press, so holding a key cannot interact over and over.
+A step moves the view exactly one cell. Terminal cells are about twice as tall as
+they are wide — measured here at **9 × 20 pixels**. At one cadence, a step north
+would cross more than twice the screen distance of a step east, so holding a
+direction looked fast vertically and sluggish horizontally.
 
-The Kitty keyboard protocol is requested in `Terminal::enter` only when the terminal
-answers for it, and released on every exit path.
+The fix is to move at a constant **screen speed** rather than a constant step
+rate:
 
-## 6. Assets
+| Direction | Step | Cadence | Screen speed |
+| --- | --- | --- | --- |
+| north / south | 20 px | 133 ms | 150 px/s |
+| east / west | 9 px | 60 ms | 150 px/s |
 
-Three PNGs, generated by a committed script (`tools/generate-assets.sh`): an
-arrival plate for each area and a portrait. They are original, produced
-procedurally from gradients and shapes, so the repository contains no third-party
-imagery, there are no usage rights to track, and no image decoder is needed to read
-them — `assets::Assets` validates the PNG signature, and Kitty does the decoding.
+Both axes are derived from one constant (`WALK_SPEED`, with `SPRINT_SPEED` at
+twice it), and the cell size comes from the terminal, so this adapts to the font
+instead of being tuned for one. A floor of 45 ms per step keeps a very narrow
+terminal from asking for more steps a second than a keyboard can deliver.
 
-Artwork is used where a picture materially helps and nowhere else:
+## 7. The optional pixel interface
 
-- an **arrival plate**, shown after the travel curtain when you enter an area, and
-  gone again a second and a half later;
-- a **portrait** beside the speaker in the dialogue overlay.
+`--pixel-ui` (or `GRIMMOIRE_PIXEL_UI=1`) enables a small software pixel renderer
+for **interface pieces only**: the dialogue portrait, and the study's portrait
+panel. It is off by default, the game never depends on it, and the default path
+emits no graphics sequence.
 
-The world itself is character cells. Converting terrain into images would cost far
-more than it bought, and would make the game unreadable wherever an image failed.
+The pixel layer is a flat RGB canvas, sprites authored as ASCII, and a PNG
+encoder (`render::png`) that hands the bytes to Kitty. The PNG container is
+hand-written — signature, `IHDR`, `IDAT`, `IEND`, Paeth filtering, CRC-32 — and
+only DEFLATE comes from a dependency (`fdeflate`, chosen for PNG scanline data).
+Nothing in the project decodes an image: Kitty does that.
 
-Assets are required: if the files are missing the application names them and exits,
-rather than starting with a subtly broken look.
+This exists so the pixel work is inspectable rather than thrown away, and so a
+future phase can decide to use it deliberately.
 
-## 7. Verification
+## 8. Verification
 
 **Visually verified in a real Kitty session** (0.49.2, driven through Kitty's own
 remote-control socket and captured with `grim`, then inspected):
 
 | Check | Result |
 | --- | --- |
-| Launches into the playable world at 120 × 40 | Ruined Chapel, world edge to edge |
-| The world dominates the viewport | only two rows are HUD; the rest is environment |
-| Movement, in every direction, one press one step | `70,44` → `70,43` for one `w` |
-| Holding a direction walks | repeats step at the cadence; a burst inside it does not |
-| Travel between both areas | chapel → cellar (`20,12`) → chapel (`70,49`) |
-| The arrival plate renders | the cellar plate is painted, with its caption beneath |
-| Cells compose with the image | the world is visible around the plate; no remnants |
-| Dialogue opens as an overlay | panel, speaker title, lines, close hint |
-| The dialogue portrait renders | drawn beside the text, world visible around the panel |
-| Interactive objects are discoverable | prompt `e  speak with the Hooded Figure` |
-| The keyboard protocol is released on exit | Kitty reports flags `?0u` afterwards |
-| Images are deleted on exit | `ESC_Ga=d,d=A ESC\` is emitted; no graphics remain |
-| The terminal is restored | alternate screen left, cursor shown again |
+| Launches into the playable world | Ruined Chapel, world edge to edge |
+| The world is ASCII | a cathedral: nave, colonnade, side chapels, apse, graveyard |
+| The player is a figure, not a letter | `(o)` with a hood and a walk cycle |
+| The hooded figure is distinct | `(oo)` over a dark cloak, in its own colour |
+| One press is exactly one step | `70,44` → `70,43` for one `w` |
+| A burst cannot sprint the player | ten presses inside one cadence moved one tile |
+| Sprint is real | the burst with shift moved one tile; the indicator appears |
+| Travel between both areas | chapel → cellar (`20,12`) → chapel |
+| The cellar is a different place | four chambers, one flooded, bridges between |
+| Dialogue is an ASCII overlay | panel, title, ASCII bust, lines, close hint |
+| The interface does not cover the world | the world is visible around the panel |
+| No graphics are sent by default | asserted by the smoke test |
+| The terminal is restored | alternate screen left, cursor shown, images deleted |
 
-**Background ownership, by pixel sampling:** the `foot` control (nothing drawn)
-samples `gray(36)`; Grimmoire samples `srgb(18,18,18)`, the theme background.
+**Pseudo-terminal smoke test** (`tools/smoke.sh`, 12 checks, all passing): enters
+the alternate screen, hides the cursor, composes the ASCII world, draws the
+player, shows the controls, suspends below the minimum viewport, resumes after the
+resize, shows the cursor, leaves the alternate screen, **sends no graphics by
+default**, cleans up images, and exits 0. It runs the game under a scratch
+`XDG_DATA_HOME`, so it can never read or write a real save.
 
-**Pseudo-terminal smoke test** (`tools/smoke.sh`, 10 checks, all passing):
-enters the alternate screen, hides the cursor, composes the world and its controls,
-suspends below the minimum viewport, resumes after the resize, shows the cursor,
-leaves the alternate screen, deletes its images, and exits 0.
-
-**Unit tests:** 281, including the Kitty encoder's framing, chunking, base64,
-deletion forms, and cursor-movement prefix; the graphics lifecycle (transmit once,
-place, move without retransmitting, reset after a clear, clear, and skip a missing
-asset); the movement state machine (immediate press, cadence, release, direction
-change, stray repeats, the stall guard); the presenter's reservation and repaint
-rules; the camera and full-viewport composition at many sizes; the minimum viewport;
-content connectivity (every walkable tile reachable, entities reachable, doorways on
-doors, arrival tiles clear); and background inheritance.
+**Unit tests:** 333, including the scenery renderer (structure, variation
+stability, water motion, every glyph one column wide, every cell shaded), the
+movement state machine (immediate press, cadence, release, direction change, stray
+repeats, the stall guard, sprint, and equal screen speed on both axes), the
+presenter's diffing, the camera, the minimum viewport, the game's rules, and the
+save format.
 
 **Not verified, and not claimed:** behaviour under tmux/zellij; other Kitty-family
-terminals; macOS or Windows; the *study* screen's `g` portrait toggle, which still
-cannot be exercised by key injection; and **resizing the Kitty window while an
-image is on screen**. That last one is covered indirectly — the pty smoke test
-suspends and resumes across a resize, and the graphics state is unit-tested to be
-discarded and rebuilt after a clear — but the live pixel result was not observed,
-because this environment could not resize the window on command.
+terminals; macOS or Windows; resizing while a *pixel* interface piece is on
+screen (the pty smoke test covers suspend and resume, and the graphics state is
+unit-tested to be discarded and rebuilt after a clear).
 
-## 8. Measurements
+## 9. Measurements
 
-From `cargo run --release --example bench` on this machine, at a 120 × 40 frame,
-with the world composed and one image placed (cells are 10 × 22 px here). Every
-number is measured, not estimated.
+From `cargo run --release --example bench` on this machine, at a 120 × 40 frame
+with the world composed and shown. Every number is measured.
 
 | Operation | Cost |
 | --- | --- |
-| Compose the world (120 × 40) | 0.083 ms |
-| Present a full redraw with one image | 0.56 ms, 2880 cells in 60 runs, 107 KiB |
-| Present an unchanged frame | 0.078 ms, **16 bytes, zero images** |
-| Present one movement step (scrolled camera) | 0.23 ms, 253 cells in 168 runs, 8 KiB, **zero images** |
-| Idle, and while stepping | below measurement resolution (0.00% of one core) |
+| Compose a frame (scenery + interface) | 0.28 ms |
+| Present a full redraw | 0.7 ms, 4800 cells in 40 runs, 37 KiB |
+| Present an unchanged frame | 0.11 ms, **16 bytes** |
+| Present one movement step (camera scrolled) | 1.1 ms, 3207 cells in 913 runs |
+| Idle | no frames at all until the world's own detail ticks, ~4 times a second |
 
-The unchanged-frame and movement rows are the point of the design: ordinary play
-never retransmits an image. A full session transmits each asset once, so the 232 KiB
-of PNG on disk crosses the wire once, as roughly 310 KiB of base64.
+The presenter numbers move by a few hundred microseconds with machine load; the
+composition number does not. For comparison, the reverted pixel path composed a
+frame in **4.7 ms** — around seventeen times the cost — because it had to
+rasterise and PNG-encode forty thousand pixels every frame. ASCII is not a
+compromise here: it is cheaper *and* it is the look the project wants.
 
-## 9. Migration path
+## 10. Migration path and non-goals
 
-- **A second graphics protocol** would be a new encoder module plus a variant in the
-  capability policy. `Frame`, `ImagePlacement`, `AssetId`, and the presenter's
-  reservation rule are protocol-neutral.
-- **Real artwork** means replacing the generated PNGs; nothing in the code changes.
-  A decoder dependency is still not needed, because the terminal decodes.
-- **Animated imagery** is possible: `kitty` already knows how to chunk a payload,
-  and the placement key forces a full repaint when an image changes.
+- **More art** means more glyph tables and more neighbour rules in `ui::scenery`;
+  nothing else changes.
+- **A tile-drawing DSL** would be the natural next step if the scenery rules grow
+  past a handful of matches.
+- **The pixel interface** could be extended to more of the UI, or removed, without
+  touching the game.
 - **Deferred renderer work**: wide/zero-width glyph continuation cells, and
   damage-rectangle tracking instead of per-cell diffing.
 
-## 10. Non-goals
-
-- No terminal emulator, and no pixel drawing without a graphics protocol.
-- No GPU window: the terminal premise holds until a requirement breaks it.
-- No second graphics protocol until one is demonstrated to be necessary.
-- No widget toolkit, retained scene graph, or ECS.
+Non-goals: no terminal emulator; no widget toolkit, retained scene graph, or ECS;
+no second terminal backend; no GPU window. Gradients and photographic art are not
+attempted, because the identifier is a glyph grid.

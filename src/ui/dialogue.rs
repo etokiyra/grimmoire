@@ -9,9 +9,14 @@
 //! Dismissal deliberately does **not** use the key that opens a conversation
 //! (`e`). A terminal that reports auto-repeats as ordinary presses would
 //! otherwise close the panel the instant it opened.
+//!
+//! The portrait is ASCII by default, like everything else in the game. When the
+//! development flag enables pixel interface art, an image is drawn in the same
+//! rectangle instead; the panel looks right either way.
 
 use super::FrameContext;
 use super::screen::{Command, Screen};
+use super::theme::Palette;
 use crate::game::Dialogue;
 use crate::input::{Key, KeyCode};
 use crate::render::{AssetId, Frame, Rect, Style, glyph};
@@ -20,6 +25,17 @@ use crate::render::{AssetId, Frame, Rect, Style, glyph};
 const PORTRAIT_WIDTH: u16 = 22;
 /// How tall the panel is, in cells.
 const PANEL_HEIGHT: u16 = 11;
+
+/// The hooded figure's bust, drawn as ASCII when there is no image.
+const PORTRAIT_ASCII: [&str; 7] = [
+    "   ____   ",
+    "  /    \\  ",
+    " |  o o | ",
+    " |   <  | ",
+    "  \\____/  ",
+    " /######\\ ",
+    "|########|",
+];
 
 /// A modal panel showing a short exchange, with a portrait when one exists.
 #[derive(Debug, Clone, Copy)]
@@ -102,25 +118,27 @@ impl Screen for DialogueScreen {
             return;
         }
 
-        // The portrait occupies a reserved rectangle: no cells are written there,
-        // so the image and the text never fight.
+        // The portrait occupies a reserved rectangle: the image and the text
+        // never fight over the same cells.
         let mut text = inner;
-        if let Some(portrait) = self.portrait {
-            let plate = Rect::new(
-                inner.x,
+        let plate = Rect::new(
+            inner.x,
+            inner.y,
+            PORTRAIT_WIDTH.min(inner.width.saturating_sub(8)),
+            inner.height,
+        );
+        if plate.width >= 6 {
+            if let Some(portrait) = self.portrait {
+                frame.place_image(plate, portrait);
+            } else {
+                draw_ascii_portrait(frame, plate, palette);
+            }
+            text = Rect::new(
+                plate.right().saturating_add(2),
                 inner.y,
-                PORTRAIT_WIDTH.min(inner.width.saturating_sub(8)),
+                inner.right().saturating_sub(plate.right() + 2),
                 inner.height,
             );
-            if plate.width >= 6 {
-                frame.place_image(plate, portrait);
-                text = Rect::new(
-                    plate.right().saturating_add(2),
-                    inner.y,
-                    inner.right().saturating_sub(plate.right() + 2),
-                    inner.height,
-                );
-            }
         }
 
         // A view re-bases its origin, so the coordinates below are local to the
@@ -145,6 +163,29 @@ impl Screen for DialogueScreen {
             column.bottom().saturating_sub(1),
             hint,
             palette.muted_style(),
+        );
+    }
+}
+
+/// Draws the speaker's bust in the portrait plate, centred.
+fn draw_ascii_portrait(frame: &mut Frame, plate: Rect, palette: &Palette) {
+    let width = PORTRAIT_ASCII
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0) as u16;
+    if plate.width < width || plate.height < PORTRAIT_ASCII.len() as u16 {
+        return;
+    }
+    let mut view = frame.view(plate);
+    let left = view.bounds().centered_x(width);
+    let top = view.bounds().centered_y(PORTRAIT_ASCII.len() as u16);
+    for (row, line) in PORTRAIT_ASCII.iter().enumerate() {
+        view.put_str(
+            left,
+            top.saturating_add(row as u16),
+            line,
+            Style::new().with_fg(palette.character).bold(),
         );
     }
 }
@@ -254,13 +295,20 @@ mod tests {
     }
 
     #[test]
-    fn compose_shows_the_speaker_and_the_lines() {
+    fn compose_shows_the_speaker_the_lines_and_an_ascii_portrait() {
         let (canvas, images) = compose_into(&DialogueScreen::new(dialogue(), None), 100, 30);
         let text = frame_text(&canvas);
         assert!(text.contains("the Hooded Figure"), "speaker missing");
         assert!(text.contains("stones remember"), "line missing");
         assert!(text.contains("[enter] close"), "hint missing");
-        assert!(images.is_empty(), "no portrait was supplied");
+        assert!(
+            images.is_empty(),
+            "the default portrait is ASCII, not an image"
+        );
+        assert!(
+            text.contains("o o"),
+            "the ASCII portrait is missing:\n{text}"
+        );
     }
 
     #[test]

@@ -25,9 +25,10 @@ mod frame;
 mod image;
 mod rect;
 mod style;
-mod view;
+pub(crate) mod view;
 
 pub mod glyph;
+pub mod png;
 
 pub use canvas::Canvas;
 pub use cell::Cell;

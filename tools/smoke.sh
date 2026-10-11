@@ -4,7 +4,8 @@
 # Grimmoire only changes terminal state in ways a real terminal can observe, so
 # this drives the binary through a pseudo-terminal and checks the bytes it emits:
 # the alternate screen is entered and left, the cursor is hidden and shown again,
-# and every image this application created is deleted on the way out.
+# nothing is cleared up after leaving, and — by default — no graphics are sent at
+# all, because the world is ASCII.
 #
 # The Kitty keyboard protocol is requested behind a query that a bare
 # pseudo-terminal does not answer, so the pop cannot be observed here; it is
@@ -18,17 +19,20 @@ BIN="${1:-./target/release/grimmoire}"
 [ -x "$BIN" ] || { printf 'no executable at %s\n' "$BIN" >&2; exit 1; }
 
 python3 - "$BIN" <<'PY'
-import fcntl, os, pty, select, struct, sys, termios, time
+import fcntl, os, pty, select, struct, sys, tempfile, termios, time
 
 binary = os.path.abspath(sys.argv[1])
 project = os.getcwd()
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
-    # Force the graphics path so the image lifecycle is exercised even though a
-    # pseudo-terminal cannot confirm support.
+    # Still force the terminal capability on, so the startup contract is
+    # exercised without a real Kitty window.
     os.environ["GRIMMOIRE_ASSUME_KITTY"] = "1"
-    os.environ.setdefault("GRIMMOIRE_ASSETS", os.path.join(project, "assets"))
+    # Never touch the real save: a stale one would start the game somewhere else
+    # and make this test lie.
+    scratch = tempfile.mkdtemp(prefix="grimmoire-smoke-")
+    os.environ["XDG_DATA_HOME"] = scratch
     os.chdir(project)
     os.execvp(binary, [binary])
 
@@ -52,12 +56,13 @@ def drain(seconds):
 
 # Start at the reference size: the world should compose rather than suspend.
 resize(120, 40)
-time.sleep(1.0)
-out = drain(0.2)
+time.sleep(1.2)
+out = drain(1.0)
 for keys in (b"s", b"w", b"a", b"d", b"h"):
     os.write(fd, keys)
     time.sleep(0.3)
     out += drain(0.2)
+
 # Too small: the game suspends and says so, without losing its state.
 resize(40, 12)
 time.sleep(0.8)
@@ -77,20 +82,21 @@ except ChildProcessError:
     pass
 out += drain(1.5)
 
-# The startup frame may have been composed before the window size reached the
-# child, so everything observed counts as the session's output.
+# Everything observed counts as the session's output.
 out += suspended + resumed
 
 checks = [
     ("entered the alternate screen", b"\x1b[?1049h" in out),
     ("hid the cursor", b"\x1b[?25l" in out),
-    ("composed the world", b"#" in out),
+    ("composed the ASCII world", b"\xe2\x80\xa2" in out or b"#" in out),
+    ("drew the player", b"(o)" in out),
     ("showed the controls", b"interact" in out),
     ("suspended below the minimum viewport", b"too small" in suspended),
     ("resumed after the resize", b"Ruined Chapel" in resumed),
     ("showed the cursor again", b"\x1b[?25h" in out),
     ("left the alternate screen", b"\x1b[?1049l" in out),
-    ("deleted its images", b"\x1b_Ga=d,d=A" in out),
+    ("sent no graphics by default", b"\x1b_Ga=t" not in out),
+    ("cleaned up any images", b"\x1b_Ga=d,d=A" in out),
     ("exited cleanly", status == 0),
 ]
 

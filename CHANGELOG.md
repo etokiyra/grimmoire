@@ -9,6 +9,63 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — a custom ASCII renderer, and movement paced by screen speed
+
+- **A custom ASCII scenery renderer** (`ui::scenery`). The world is drawn as
+  glyphs, and *how* a tile is drawn depends on what surrounds it: a wall with open
+  floor above shows a lit cap, one with floor below shows its shadowed base, one
+  with open floor beside it shows a dressed face, and one standing alone in a room
+  is drawn as a pillar. That is what turns a tile grid into architecture.
+- **Variation that does not shimmer.** Floors, paths, water, rubble and moss pick
+  their glyph from a hash of their *world* position, so the same tile looks the
+  same every time it is drawn and neighbouring tiles never match.
+- **Characters drawn as ASCII art.** The player and the hooded figure are small
+  figures three cells square, with four facing directions and a two-frame walk
+  cycle, instead of a single coloured letter. Water ripples, and the player's
+  light falls away with distance.
+- **Sprint.** `Shift` (or an upper-case movement key) doubles the pace. A sprint
+  steps, collides and stops exactly like a walk.
+- **Per-axis movement pacing, which fixes a real complaint.** A step moves the view
+  one cell, and cells are about twice as tall as they are wide, so at one cadence a
+  step north crossed more than twice the screen distance of a step east — vertical
+  movement felt fast and horizontal felt slow. Both axes are now paced from one
+  speed in *pixels per second* (`ui::motion::WALK_SPEED`, doubled for
+  `SPRINT_SPEED`), with the cell size taken from the terminal.
+- **`cargo run --example preview`**, which prints a rendered area as text, so art
+  changes can be read and diffed without a screenshot.
+- A test asserting that the default path emits **no graphics sequence at all**.
+
+### Changed
+
+- The world is no longer rendered as a software pixel-art image. That work was
+  reverted on instruction: it looked like a different game. The pixel renderer
+  survives as an off-by-default interface extra (see below).
+- The three-step ambient shade ramp now drives the scenery's cell backgrounds, and
+  the far distance is dimmed with the `dim` attribute rather than a second colour
+  per role.
+- `assets` no longer reads files or validates PNG signatures; artwork is source
+  text, and the optional interface pieces are rendered to PNG in memory.
+
+### Removed
+
+- The arrival plates and their generator (`tools/generate-assets.sh`, `assets/`).
+  Entering an area still plays the travel curtain; there is no illustrated plate.
+- The scene image layer and its protocol plumbing (`SceneFrame`,
+  `Frame::place_scene`, `Presenter::present_layered`, `Graphics::sync_scene`, the
+  z-index placement form, and the pixel-art scene, layout and tile modules).
+
+### Notes — the optional pixel interface
+
+- `--pixel-ui` (or `GRIMMOIRE_PIXEL_UI=1`) draws interface pieces as pixel art —
+  the dialogue portrait, and the study's portrait panel. It is off by default, the
+  game never depends on it, and `src/pixel` is not reachable from the default
+  rendering path. `fdeflate` is a dependency solely for this.
+- Verified live in Kitty 0.49.2: the chapel and cellar render as ASCII, the player
+  and the hooded figure are distinct, one press is one step, a ten-press burst
+  inside one cadence moves exactly one tile, sprint paces and indicates, travel
+  works both ways, and the dialogue draws its panel, ASCII bust and lines over the
+  world.
+
 ### Added — Kitty-first rendering, a full-screen world, and responsive movement
 
 - **Kitty graphics backend, replacing sixel.** Images are PNG transmitted inline
@@ -43,11 +100,9 @@ it starts releasing.
 - **A role-based theme extension**: `separator`, `text_secondary`, `focus`,
   `interactive`, `player`, `character`, `warning`, and the ambient ramp, alongside
   the existing roles.
-- **Original artwork and the arrival plate.** `tools/generate-assets.sh` produces
-  two area plates and a portrait procedurally (so the repository carries no
-  third-party imagery and no rights to track). A plate is shown when you enter an
-  area, after the travel curtain, and removed shortly after. Dialogue now shows an
-  image-backed portrait beside the speaker.
+- **Original artwork.** A portrait was produced procedurally, so the repository
+  carries no third-party imagery. (The area plates this added were later removed in
+  the ASCII phase; see above.)
 - `tools/smoke.sh`, a quoted pty smoke test asserting terminal lifecycle and image
   cleanup, and `examples/bench`, which measures the exploration path.
 - Content tests that every walkable tile is reachable, that entities can be walked
@@ -90,9 +145,9 @@ it starts releasing.
 
 ### Notes
 
-- Verified live in Kitty 0.49.2: launching into the world, moving in every
-  direction, holding and releasing, travelling both ways, the arrival plate, the
-  dialogue portrait, and the keyboard protocol and images being released on exit.
+- Verified live in Kitty 0.49.2 at the time: launching into the world, moving in
+  every direction, holding and releasing, travelling both ways, and the keyboard
+  protocol and images being released on exit.
 - No license has been chosen yet, so none is included.
 - The story, setting, characters, and detailed mechanics remain undecided. All
   current area names, entities, dialogue, and art are placeholder content.

@@ -58,9 +58,26 @@ pub trait Screen {
     /// use this rather than reading the environment themselves.
     fn on_terminal_ready(&mut self, _key_releases: bool) {}
 
-    /// Whether this screen currently has motion in progress.
+    /// Called when the terminal reports how large one character cell is.
+    ///
+    /// Screens that pace something in screen terms use this; the renderer itself
+    /// does not care, because a cell is a cell.
+    fn on_cell_metrics(&mut self, _cell_px: Option<(u16, u16)>) {}
+
+    /// Whether this screen currently has continuous motion in progress.
     fn is_animating(&self) -> bool {
         false
+    }
+
+    /// How long until this screen wants to be composed again.
+    ///
+    /// `Some(ZERO)` means "as soon as possible", for continuous motion;
+    /// `Some(d)` requests a frame in `d` for slow motion that is not worth a
+    /// 60 Hz loop, such as ambient scenery; `None` means the screen is settled
+    /// and needs nothing until input arrives. This is what lets a mostly idle
+    /// game stay cheap without freezing its animation entirely.
+    fn next_frame(&self) -> Option<Duration> {
+        None
     }
 }
 
@@ -166,10 +183,26 @@ impl ScreenStack {
         }
     }
 
-    /// Whether any screen has motion in progress.
+    /// Notifies every screen of the terminal's cell size.
+    pub fn on_cell_metrics(&mut self, cell_px: Option<(u16, u16)>) {
+        for screen in &mut self.screens {
+            screen.on_cell_metrics(cell_px);
+        }
+    }
+
+    /// Whether any screen has continuous motion in progress.
     #[must_use]
     pub fn is_animating(&self) -> bool {
         self.screens.iter().any(|screen| screen.is_animating())
+    }
+
+    /// The soonest any screen wants another frame.
+    #[must_use]
+    pub fn next_frame(&self) -> Option<Duration> {
+        self.screens
+            .iter()
+            .filter_map(|screen| screen.next_frame())
+            .min()
     }
 
     /// Routes `key` to the active screen and applies the returned command.

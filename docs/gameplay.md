@@ -19,6 +19,7 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 | Key | Action |
 | --- | --- |
 | `w` `a` `s` `d` or arrow keys | Move (and face that way). Hold to keep walking. |
+| `Shift` + a direction | Sprint | 
 | `e` | Interact with whatever you are facing, or whatever is adjacent |
 | `h`, `?`, `F1` | Help and renderer diagnostics |
 | `F3` | The presentation study (a rendering prototype) |
@@ -31,10 +32,15 @@ two areas are larger than a normal terminal, so walking scrolls the view.
 Grimmoire draws its own background, so the terminal's theme never shows through.
 
 The bottom two rows are an overlay, not part of the world. The upper row shows a
-prompt for whatever is within reach, or the result of your last action. The lower
-row shows the area you are in, your position, the direction you face, and the
-essential controls. When you enter an area, an illustrated plate is shown briefly
-and then removed.
+prompt for whatever is within reach, or the result of your last action, and says
+`sprinting »` while a sprint is in progress. The lower row shows the area you are
+in, your position, the direction you face, and the essential controls.
+
+The world itself is **ASCII art**. Walls are drawn with a lit cap, a shadowed
+base, a side face, or as a pillar depending on what surrounds them; floors, paths,
+rubble and moss vary by position; water ripples. The player and the people you meet
+are small ASCII figures with a facing direction and a walk cycle, not single
+letters.
 
 Play needs a viewport of at least 80×24. Below that the game suspends to a short
 explanation, ignores input, keeps all of its state, and resumes by itself when the
@@ -85,17 +91,26 @@ an out-of-bounds grid.
   - Nothing within reach produces a message saying so. This is not an error.
 - **Dialogue.** The panel is a screen pushed on top of the game, so input goes
   to it and you cannot walk while talking. It is an overlay: the world stays
-  visible around it, and the speaker's portrait is drawn beside their words when
-  artwork is available. It closes on `Enter`, `Space`, or
+  visible around it, and a small ASCII bust of the speaker is drawn beside their
+  words. It closes on `Enter`, `Space`, or
   `Esc` — deliberately *not* on `e`, the key that opens it, because a terminal
   that reports auto-repeats as ordinary presses would otherwise close it the
   instant it appeared.
 - **Movement and repeat.** Movement is **event-driven**, not timer-driven. A press
   steps immediately, with no delay. While a direction is held, the terminal's
-  auto-repeats step again but no faster than one step every **125 ms**, so holding
-  cannot sprint and the pace is Grimmoire's rather than the terminal's. Releasing
-  stops at once. Because steps come only from key events, a tap is always exactly
-  one step, and no lost or missing event can leave you walking on your own.
+  auto-repeats step again, but no faster than the cadence, so holding cannot
+  sprint and the pace is Grimmoire's rather than the terminal's. Releasing stops at
+  once. Because steps come only from key events, a tap is always exactly one step,
+  and no lost or missing event can leave you walking on your own.
+- **Both axes move at the same screen speed.** Terminal cells are taller than they
+  are wide (about 9 by 20 pixels), so a step north crosses more than twice the
+  screen distance of a step east. The two axes are therefore paced from a single
+  speed — **150 pixels a second**, doubling while sprinting — rather than from one
+  step rate. North and south step every ~133 ms, east and west every ~60 ms, and
+  the cell size comes from the terminal, so this adapts to the font.
+- **Sprint.** Hold `Shift` while moving (or send an upper-case movement key) and
+  the pace doubles. A sprint is not a different kind of movement: it steps,
+  collides, and stops exactly like a walk.
 - **Releases.** Grimmoire asks Kitty for the keyboard protocol's event types, so it
   sees press, repeat, and release separately. Releasing a key stops the walk
   immediately. If a release is ever missed, the walk stops anyway once events stop
@@ -143,10 +158,10 @@ need a different design, and inventing one now would be premature.
 | `src/game/world.rs` | The player's place in the world: movement, collision, interaction, travel, snapshots |
 | `src/game/areas.rs` | The two prototype areas (temporary content) |
 | `src/save.rs` | The versioned save format and the file store |
-| `src/ui/motion.rs` | The movement model: press, cadence, release, stall guard |
-| `src/ui/exploration.rs` | The exploration screen: key mapping, camera, lighting, and the HUD overlay |
-| `src/ui/dialogue.rs` | The dialogue overlay and its portrait |
-| `src/assets.rs` | Loading and validating the artwork |
+| `src/ui/motion.rs` | The movement model: press, cadence, release, sprint, stall guard |
+| `src/ui/scenery.rs` | The ASCII world renderer: terrain glyphs, props, characters, light |
+| `src/ui/exploration.rs` | The exploration screen: key mapping, camera, and the HUD overlay |
+| `src/ui/dialogue.rs` | The dialogue overlay and its ASCII portrait |
 
 The `game` and `save` modules never draw and never touch a terminal. The UI maps
 tiles and entity kinds onto glyphs and colours; the game model never decides how
@@ -162,7 +177,8 @@ anything looks.
 
 `tools/generate-areas.py` draws the two areas and prints them; it seals off any
 pocket that is not reachable from the main space, so a map cannot contain a region
-the player can see but never enter.
+the player can see but never enter. `cargo run --example preview -- chapel` prints
+a rendered area, which is the quickest way to check how a layout will look.
 
 The tests in `areas.rs` check that every spawn and arrival is on walkable ground,
 that every portal sits on a door tile and is reachable from both sides, that every

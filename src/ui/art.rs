@@ -166,15 +166,11 @@ pub fn draw_stencil(view: &mut CanvasView, x: u16, y: u16, lines: &[&str], style
 
 /// The named artwork the game uses.
 ///
-/// Screens refer to artwork by role rather than by filename, so renaming a file
-/// changes one line here. Every field is optional: a missing asset degrades to
-/// the screen's cell-based fallback rather than failing at draw time.
+/// Screens refer to artwork by role rather than by name, so the one place that
+/// knows which picture belongs to a speaker is here. The world itself is not an
+/// asset: it is rendered per frame by [`crate::pixel`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Art {
-    /// The establishing plate for the Ruined Chapel.
-    pub chapel: Option<AssetId>,
-    /// The establishing plate for the Sunken Cellar.
-    pub cellar: Option<AssetId>,
     /// The hooded figure, for the dialogue overlay.
     pub portrait: Option<AssetId>,
 }
@@ -183,37 +179,24 @@ impl Art {
     /// No artwork at all; every screen falls back to cells.
     #[must_use]
     pub const fn none() -> Self {
-        Art {
-            chapel: None,
-            cellar: None,
-            portrait: None,
-        }
+        Art { portrait: None }
     }
 
-    /// Resolves the named assets from a loaded store.
+    /// Resolves the named assets from a built store.
     #[must_use]
     pub fn resolve(assets: &Assets) -> Art {
         Art {
-            chapel: assets.named("chapel").map(Asset::id),
-            cellar: assets.named("cellar").map(Asset::id),
-            portrait: assets.named("portrait").map(Asset::id),
+            portrait: assets.named("portrait-hooded").map(Asset::id),
         }
     }
 
-    /// The names of the required assets that are missing.
+    /// The portrait to show beside a speaker's words, if there is one.
+    ///
+    /// One portrait exists in the prototype, so every speaker shares it; when
+    /// there are more, this is where the mapping belongs.
     #[must_use]
-    pub fn missing(&self) -> Vec<&'static str> {
-        let mut missing = Vec::new();
-        if self.chapel.is_none() {
-            missing.push("chapel.png");
-        }
-        if self.cellar.is_none() {
-            missing.push("cellar.png");
-        }
-        if self.portrait.is_none() {
-            missing.push("portrait.png");
-        }
-        missing
+    pub const fn portrait_for(&self, _speaker: &str) -> Option<AssetId> {
+        self.portrait
     }
 }
 
@@ -279,29 +262,12 @@ mod tests {
     }
 
     #[test]
-    fn art_names_resolve_to_handles() {
+    fn the_built_assets_resolve_to_a_portrait() {
         use crate::assets::Assets;
-        let dir = std::env::temp_dir().join(format!(
-            "grimmoire-art-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-        png.extend_from_slice(&[0, 0, 0, 0]);
-        for name in ["chapel", "cellar", "portrait"] {
-            std::fs::write(dir.join(format!("{name}.png")), &png).expect("write");
-        }
-        let assets = Assets::load_dir(&dir).expect("load");
+        let assets = Assets::built();
         let art = Art::resolve(&assets);
-        assert!(art.chapel.is_some() && art.cellar.is_some() && art.portrait.is_some());
-        assert!(art.missing().is_empty());
-
-        let empty = Art::none();
-        assert_eq!(3, empty.missing().len());
-
-        std::fs::remove_dir_all(&dir).expect("cleanup");
+        assert!(art.portrait.is_some());
+        assert_eq!(art.portrait, art.portrait_for("the Hooded Figure"));
+        assert!(Art::none().portrait_for("anyone").is_none());
     }
 }

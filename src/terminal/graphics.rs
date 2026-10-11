@@ -204,6 +204,19 @@ impl Graphics {
         kitty::PROTOCOL
     }
 
+    /// Discards all knowledge of what the terminal is holding.
+    ///
+    /// Called when the screen has been cleared, because the clear-screen escape
+    /// code also clears images. Everything is re-established afterwards.
+    pub fn reset<W: Write>(&mut self, out: &mut W) -> io::Result<()> {
+        self.loaded.clear();
+        self.placed.clear();
+        if !self.support.is_available() {
+            return Ok(());
+        }
+        kitty::delete_all(out)
+    }
+
     /// Makes the terminal display exactly `wanted`.
     ///
     /// `reset` must be true when the screen has just been cleared, because the
@@ -223,9 +236,7 @@ impl Graphics {
 
         let mut report = SyncReport::default();
         if reset {
-            kitty::delete_all(out)?;
-            self.loaded.clear();
-            self.placed.clear();
+            self.reset(out)?;
         }
 
         // Desired state: placement ids follow the request order, so a screen that
@@ -284,12 +295,7 @@ impl Graphics {
 
     /// Deletes every image and placement this application created.
     pub fn clear<W: Write>(&mut self, out: &mut W) -> io::Result<()> {
-        self.loaded.clear();
-        self.placed.clear();
-        if !self.support.is_available() {
-            return Ok(());
-        }
-        kitty::delete_all(out)
+        self.reset(out)
     }
 }
 
@@ -300,23 +306,11 @@ mod tests {
     use crate::render::{AssetId, ImagePlacement, Rect};
 
     fn assets() -> Assets {
-        // Build a store without touching the filesystem: two distinguishable
-        // payloads behind stable handles.
-        let dir = std::env::temp_dir().join(format!(
-            "grimmoire-graphics-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        let mut first = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-        first.extend_from_slice(&[1, 2, 3, 4]);
-        std::fs::write(dir.join("a.png"), &first).expect("write");
-        std::fs::write(dir.join("b.png"), &first).expect("write");
-        let assets = Assets::load_dir(&dir).expect("load");
-        std::fs::remove_dir_all(&dir).expect("cleanup");
-        assets
+        // Two distinguishable payloads behind stable handles.
+        let mut first = super::super::kitty::base64(b"first").into_bytes();
+        first.truncate(8);
+        let second = first.clone();
+        Assets::from_raw(vec![("a", first), ("b", second)])
     }
 
     fn text(bytes: &[u8]) -> String {

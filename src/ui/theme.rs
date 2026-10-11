@@ -129,9 +129,9 @@ impl Palette {
         nature: Color::Indexed(107),
         relic: Color::Indexed(110),
         warning: Color::Indexed(203),
-        shade_deep: Color::Indexed(233),
-        shade_mid: Color::Indexed(235),
-        shade_near: Color::Indexed(238),
+        shade_deep: Color::Indexed(234),
+        shade_mid: Color::Indexed(236),
+        shade_near: Color::Indexed(240),
         highlight_fg: Color::Indexed(232),
     };
 

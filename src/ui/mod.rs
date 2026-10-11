@@ -2,6 +2,10 @@
 //!
 //! The UI layer decides *what* a screen looks like. It may read capability and
 //! frame information, but it performs no terminal I/O and no game rules.
+//!
+//! The world is drawn by [`scenery`], a custom ASCII renderer: tiles choose their
+//! glyph from what surrounds them, vary by world position, and are shaded by
+//! distance from the player's light.
 
 pub mod art;
 pub mod dialogue;
@@ -9,6 +13,7 @@ pub mod exploration;
 pub mod help;
 pub mod layout;
 pub mod motion;
+pub mod scenery;
 pub mod screen;
 pub mod showcase;
 pub mod stage;

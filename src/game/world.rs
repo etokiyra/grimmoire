@@ -282,6 +282,18 @@ impl World {
         self.player = position;
     }
 
+    /// Puts the player at `position` without a step.
+    ///
+    /// For tools, tests and restoring a save: it validates the spot so nothing
+    /// can be placed inside a wall, and returns whether it worked.
+    pub fn place_player(&mut self, position: Position) -> bool {
+        if !self.area().is_valid_standing_spot(position) {
+            return false;
+        }
+        self.player = position;
+        true
+    }
+
     /// Finds the index of an area by id.
     fn index_of(&self, id: AreaId) -> Option<usize> {
         self.areas.iter().position(|area| area.id() == id)

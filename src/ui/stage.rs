@@ -896,8 +896,6 @@ mod tests {
         let with_backend = FrameContext {
             graphics: GraphicsSupport::Forced,
             art: crate::ui::art::Art {
-                chapel: None,
-                cellar: None,
                 portrait: Some(AssetId::new(0)),
             },
             ..context()
@@ -920,8 +918,6 @@ mod tests {
         let with_backend = FrameContext {
             graphics: GraphicsSupport::Forced,
             art: crate::ui::art::Art {
-                chapel: None,
-                cellar: None,
                 portrait: Some(AssetId::new(0)),
             },
             ..context()

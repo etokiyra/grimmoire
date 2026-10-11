@@ -12,6 +12,11 @@ categories = ["games"]
 publish = false
 
 [dependencies]
+# DEFLATE compression, used only to encode the optional pixel-art interface
+# pieces enabled by `--pixel-ui`. `fdeflate` is purpose-built for PNG scanline
+# data and pulls in nothing but a fast Adler-32. The game's own rendering is
+# ASCII and needs no images at all.
+fdeflate = "0.3"
 # Terminal lifecycle (raw mode, alternate screen), input events, and the escape
 # sequences the renderer backend paints with. Chosen over `termion` (less
 # actively maintained, Unix-only) and `ratatui` (a full widget/TUI framework

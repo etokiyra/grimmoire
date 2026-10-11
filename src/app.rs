@@ -4,6 +4,14 @@
 //! buffer. It deliberately keeps responsibilities thin: it advances time, routes
 //! input, recomposes the frame on demand, and hands the frame to the presenter.
 //! Frame layout lives in [`crate::ui`], terminal I/O in [`crate::terminal`].
+//!
+//! # When frames happen
+//!
+//! Screens report how soon they want another frame. Continuous motion (a step
+//! being interpolated, a transition) asks for frames at the animation rate; slow
+//! ambient scenery asks for one every few hundred milliseconds; a settled screen
+//! asks for none and the loop blocks on input. An idle game therefore costs
+//! almost nothing while still breathing.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -32,7 +40,7 @@ pub struct Startup {
     pub capabilities: Capabilities,
     /// Whether terminal graphics can be used.
     pub graphics: GraphicsSupport,
-    /// Loaded artwork.
+    /// Generated artwork.
     pub assets: Assets,
     /// The artwork, by role.
     pub art: Art,
@@ -76,6 +84,8 @@ pub struct App {
     stats: PresentStats,
     frame_time: Duration,
     key_releases: bool,
+    /// The terminal's cell size in device pixels, when it reports one.
+    cell_px: Option<(u16, u16)>,
     running: bool,
     dirty: bool,
 }
@@ -119,6 +129,7 @@ impl App {
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
             key_releases: false,
+            cell_px: None,
             running: true,
             dirty: true,
         }
@@ -133,6 +144,7 @@ impl App {
         terminal.enter()?;
         self.key_releases = terminal.keyboard_enhanced();
         self.stack.on_terminal_ready(self.key_releases);
+        self.refresh_cell_px();
 
         let result = self.event_loop(terminal);
         self.stack.on_exit();
@@ -146,12 +158,15 @@ impl App {
     /// The main loop: pump input, advance time, recompose when needed, present.
     fn event_loop(&mut self, terminal: &mut Terminal) -> io::Result<()> {
         let mut last = Instant::now();
+        let mut last_frame = Instant::now();
         while self.running {
-            let animating = self.is_animating();
-            let timeout = if animating {
+            let continuous = self.is_animating();
+            let timeout = if continuous {
                 FRAME_INTERVAL
             } else {
-                IDLE_TIMEOUT
+                self.stack
+                    .next_frame()
+                    .map_or(IDLE_TIMEOUT, |wait| wait.min(IDLE_TIMEOUT))
             };
             let had_event = self.pump_events(terminal, timeout)?;
 
@@ -164,7 +179,11 @@ impl App {
             let (width, height) = terminal.size()?;
             self.set_size(width, height);
 
-            if self.dirty || had_event || animating {
+            let elapsed = now.saturating_duration_since(last_frame);
+            let frame_due =
+                continuous || self.stack.next_frame().is_some_and(|wait| wait <= elapsed);
+
+            if self.dirty || had_event || frame_due {
                 self.compose_frame();
                 self.stats = self.presenter.present_with(
                     &self.frame,
@@ -173,6 +192,7 @@ impl App {
                     terminal.writer(),
                 )?;
                 self.dirty = false;
+                last_frame = now;
             }
         }
         Ok(())
@@ -194,7 +214,10 @@ impl App {
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::Key(key) => self.handle_key(key),
-            Event::Resize { .. } => self.dirty = true,
+            Event::Resize { .. } => {
+                self.refresh_cell_px();
+                self.dirty = true;
+            }
         }
     }
 
@@ -232,6 +255,19 @@ impl App {
     fn advance(&mut self, delta: Duration) {
         self.stack.update(delta);
         self.transition.tick(delta);
+    }
+
+    /// Re-reads the terminal's cell size, which the pixel scene needs to keep its
+    /// own pixels square.
+    fn refresh_cell_px(&mut self) {
+        self.cell_px = crossterm::terminal::window_size()
+            .ok()
+            .and_then(|size| {
+                (size.columns > 0 && size.rows > 0)
+                    .then(|| (size.width / size.columns, size.height / size.rows))
+            })
+            .filter(|(width, height)| *width > 0 && *height > 0);
+        self.stack.on_cell_metrics(self.cell_px);
     }
 
     /// Resizes the frame buffer if the terminal size changed.
@@ -358,7 +394,7 @@ mod tests {
         let app = fixture();
         let text = frame_text(&app);
         assert!(text.contains("Ruined Chapel"), "area name missing");
-        assert!(text.contains('@'), "player missing");
+        assert!(text.contains("(o)"), "player missing");
         assert!(text.contains("facing"), "status missing");
     }
 
@@ -378,6 +414,8 @@ mod tests {
 
     #[test]
     fn every_composed_cell_owns_its_background() {
+        // Without graphics the cell layer must paint the whole frame, so the
+        // terminal's own background can never show through.
         let mut app = fixture();
         for stage in ["game", "help"] {
             app.compose_frame();
@@ -420,16 +458,23 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_game_asks_for_no_continuous_frames() {
-        // Movement is event-driven and there is no ambient animation, so the loop
-        // can idle: no polling storm, no wasted CPU.
+    fn frames_are_only_asked_for_while_something_is_moving() {
+        // Movement is event-driven and ambient scenery is slow, so the loop can
+        // idle: no polling storm, no wasted CPU.
         let mut app = fixture();
-        assert!(!app.is_animating());
-        app.handle_key(Key::char('w'));
         assert!(
             !app.is_animating(),
-            "a step should be a single frame, not a stream"
+            "an idle game needs no continuous frames"
         );
+        assert!(
+            app.stack
+                .next_frame()
+                .is_some_and(|wait| wait > Duration::ZERO),
+            "an idle game should still breathe slowly"
+        );
+
+        app.handle_key(Key::char('w'));
+        assert!(!app.is_animating(), "a step is instant, not a stream");
     }
 
     #[test]

@@ -46,6 +46,19 @@ fn main() -> ExitCode {
     }
 }
 
+/// Whether to draw interface pieces as pixel art.
+///
+/// Off by default, and deliberately so: the game is ASCII. This exists so the
+/// software pixel renderer can be looked at in the presentation study without
+/// making it part of the game's identity.
+fn pixel_interface_requested(args: &mut impl Iterator<Item = String>) -> bool {
+    let from_env = matches!(
+        std::env::var("GRIMMOIRE_PIXEL_UI").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    );
+    from_env || args.any(|arg| arg == "--pixel-ui")
+}
+
 impl Mode {
     /// Interprets command-line arguments.
     fn from_args(args: impl Iterator<Item = String>) -> Mode {
@@ -78,20 +91,14 @@ fn run(mode: Mode) -> io::Result<()> {
         GraphicsSupport::Confirmed | GraphicsSupport::Forced => {}
     }
 
-    let assets = load_assets()?;
+    // The world needs no images: it is ASCII. Optional interface art is built
+    // only when the development flag asks for it.
+    let assets = if pixel_interface_requested(&mut std::env::args().skip(1)) {
+        Assets::built()
+    } else {
+        Assets::default()
+    };
     let art = Art::resolve(&assets);
-    let missing = art.missing();
-    if !missing.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "artwork is missing: {}\n\
-                 set GRIMMOIRE_ASSETS to the directory containing the PNG files, or run\n\
-                 tools/generate-assets.sh from the repository root.",
-                missing.join(", ")
-            ),
-        ));
-    }
 
     let startup = Startup {
         capabilities,
@@ -107,20 +114,6 @@ fn run(mode: Mode) -> io::Result<()> {
         Mode::Play | Mode::Help => App::new(startup),
     };
     app.run(&mut terminal)
-}
-
-/// Loads the artwork, naming the directory it looked in when it fails.
-fn load_assets() -> io::Result<Assets> {
-    let Some(dir) = Assets::default_dir() else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "could not find the artwork directory.\n\
-             Grimmoire looks in $GRIMMOIRE_ASSETS, then for an `assets` directory beside the\n\
-             executable, then for `assets` in the working directory. Run from the repository\n\
-             root, or run tools/generate-assets.sh to create the files.",
-        ));
-    };
-    Assets::load_dir(&dir)
 }
 
 /// The error shown when the terminal cannot draw Grimmoire at all.
@@ -142,11 +135,15 @@ fn graphics_error() -> io::Error {
 fn print_usage() {
     println!("grimmoire — a terminal-native, ASCII-first dark-fantasy wizard RPG");
     println!();
-    println!("usage: grimmoire [--study]");
+    println!("usage: grimmoire [--study] [--pixel-ui]");
     println!();
     println!("  (no arguments)  play the exploration prototype");
     println!("  --study         open the presentation study: a rendering prototype");
+    println!("  --pixel-ui      development: allow pixel-art interface pieces");
     println!("  -h, --help      show this message");
+    println!();
+    println!("controls: wasd or arrows to move (hold to keep walking), shift to sprint,");
+    println!("          e to interact, h for help, q or Esc to quit.");
     println!();
     println!("Requires the Kitty terminal emulator (graphics protocol) and a viewport of");
     println!("at least 80x24.");
