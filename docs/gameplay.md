@@ -70,14 +70,18 @@ Areas are authored as fixed-width ASCII rows, which keeps the content readable
 and lets the layout be reviewed like the game it produces:
 
 ```
-#################+################
-#...............,,,..............#
-#...............######,,,#####...#
+#################+++++###################
+#.................,,,,,..................#
+#.................#####,,,,,#####........#
 ```
 
 `#` is wall, `.` floor, `,` path, `~` water, `T` tree, and `+` a door. Rows are
 padded or truncated to the first row's width, so a ragged row can never produce
 an out-of-bounds grid.
+
+Note the widths: the doorway is five cells and the nave is five, because the
+character sprite is five cells wide. **Nothing the player walks through may be
+narrower than three cells** — see [`map-design.md`](map-design.md).
 
 ## Rules
 
@@ -189,17 +193,26 @@ anything looks.
    walkable ground.
 3. Add it to `areas::all()` and point an existing portal at it.
 
-`tools/generate-areas.py` draws the two areas and prints them; it seals off any
-pocket that is not reachable from the main space, so a map cannot contain a region
-the player can see but never enter. `cargo run --example preview -- chapel` prints
-a rendered area, which is the quickest way to check how a layout will look.
+**Every passage must fit the character.** The sprite is five cells wide, so no
+tile the player can stand in may be narrower than three cells, and the routes
+walked constantly are drawn wider still. This covers anything passed *through*:
+corridors, chamber mouths, the gaps between pillars and pews, and the approach to a
+doorway. Read [`map-design.md`](map-design.md) before drawing a map — it lists the
+rule, the widths in use, and the other rules a layout already has to satisfy.
+
+`tools/generate-areas.py` draws the two areas and prints them; it widens a passage
+under the minimum, seals off any pocket that is not reachable from the main space —
+so a map cannot contain a region the player can see but never enter — and refuses
+to emit a map that is still too narrow. `cargo run --example preview -- chapel`
+prints a rendered area, which is the quickest way to check how a layout will look.
 
 The tests in `areas.rs` check that every spawn and arrival is on walkable ground,
 that every portal sits on a door tile and is reachable from both sides, that every
-entity can be walked up to, that most of each area is one connected space, that
-each area is at least as large as the reference viewport, and that entity glyphs
-are printable ASCII — so most authoring mistakes are caught without launching the
-game.
+doorway is a full character wide, that no walkable tile is in a passage the
+character does not fit through, that every entity can be walked up to, that most of
+each area is one connected space, that each area is at least as large as the
+reference viewport, and that entity glyphs are printable ASCII — so most authoring
+mistakes are caught without launching the game.
 
 ## Not implemented
 

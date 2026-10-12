@@ -174,6 +174,12 @@ and each cast member carries its own `Inks` value. That is what lets one small
 figure have pink hair, warm skin, a violet dress with white lace, big bright eyes
 and a star wand at once.
 
+Because the sprite is five cells wide, the world is authored to match it: **no
+passage the player can stand in is narrower than three cells**, and the routes
+walked constantly are drawn wider. A one-cell corridor would put her shoulders
+through the wall on both sides. [`map-design.md`](map-design.md) states the rule
+and the widths in use; `areas::MIN_PASSAGE` and the generator enforce it.
+
 ```
  ^ ^                  ___
 (●:●)   the bunny    (o@o)   Ysolde

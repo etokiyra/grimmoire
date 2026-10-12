@@ -54,8 +54,26 @@ These are settled and should guide new work:
   `Cargo.toml`. Do not add an image decoder: Kitty decodes.
 
 Explicitly **undecided** (do not treat as settled, and do not invent them): the
-story, world, characters, detailed mechanics, art direction beyond "ASCII", and
-licensing. All current area names, entities, and dialogue lines are placeholders.
+story, world, characters, detailed mechanics, and art direction beyond "ASCII".
+All current area names, entities, and dialogue lines are placeholders.
+
+**Licensing is settled: GPL-3.0-or-later.** `LICENSE` holds the GPLv3 text and
+`Cargo.toml` carries the SPDX id. Do not relicense, and keep the two in step.
+
+## Map design
+
+- **Every passage fits the character.** No tile the player can stand in may be
+  narrower than `areas::MIN_PASSAGE` (three cells; the sprite is five wide). It
+  covers anything passed *through*: corridors, chamber mouths, the gaps between
+  pillars and pews, and the approach to a doorway. Routes walked constantly are
+  drawn wider — the chapel nave is nine cells, its crossings and both stair
+  doorways five. Doorways in outer walls are `areas::DOORWAY` (five) wide.
+- The rule is enforced twice, so a hand edit cannot quietly regress it:
+  `tools/generate-areas.py` (`widen`) widens a narrow map and refuses to emit
+  one, and `src/game/areas.rs` asserts it in `every_passage_fits_the_character`.
+- Read [`docs/map-design.md`](docs/map-design.md) before drawing or editing an
+  area. It also lists the rules a map already had to satisfy (reachability,
+  doorway placement, viewport size).
 
 ## Architecture invariants
 
@@ -210,6 +228,8 @@ After substantial changes, update the documentation in the same change:
   and where the code lives.
 - `docs/renderer-design.md` — rendering, the ASCII scenery renderer, the movement
   model, the optional pixel interface, measurements, and verification.
+- `docs/map-design.md` — the rules an area must satisfy, above all that every
+  passage fits the character, and how the generator and the tests enforce them.
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

@@ -136,9 +136,11 @@ Delivered:
 
 - **Characters with identities.** Figure art plus, for the first time, *inks*: a
   figure's rows name hair, skin, cloth, trim and eyes, and each cast member
-  carries its own set. The mage has silver hair, a face with two eyes, an indigo
-  robe with a gold clasp and a crystal staff; Ysolde has a cowl, a trim rim, and
-  two violet points of light where a face should be.
+  carries its own set. The player is a kawaii mage bunny — pink ears, a pale face
+  with two big bright eyes, a violet robe with white lace and a twinkling star
+  wand — and Ysolde is a cowl with two violet points of light where a face should
+  be. Figures were rescaled to **five cells wide and three tall**, the height of a
+  doorway or a tree, so they stand in the world rather than over it.
 - **Names in the model.** The NPC is a named individual, and `Entity::name` /
   `Dialogue::speaker` remain the only places character names appear.
 - **Life in the world.** Candles gutter along wall faces, motes drift over bare
@@ -154,6 +156,14 @@ Delivered:
   composition time cannot accumulate into drift, dropping to a slow ambient tick
   when idle. Measured at 60–64 frames a second while walking and 8.7 idle, at
   about 2% of a core moving and 0.5% idle.
+- **The world brought to the character's scale.** The sprite is five cells wide,
+  and the first maps had one- and two-cell passages, so she walked through the
+  walls with her shoulders out. Both areas were redrawn so that no walkable tile is
+  narrower than three cells and the routes walked constantly are wider still; the
+  rule is enforced by the generator and by tests, and recorded as an instruction in
+  [`docs/map-design.md`](docs/map-design.md).
+- **An open-source face.** GPL-3.0-or-later, stated in `LICENSE` and `Cargo.toml`,
+  and a README written as a project front page rather than a status note.
 
 ## Phase 8 — Dialogue and story
 

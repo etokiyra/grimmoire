@@ -9,6 +9,28 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Changed — passages the character can actually walk through, and GPLv3
+
+- **Every passage now fits the character.** The sprite is five cells wide, and the
+  maps had one- and two-cell corridors and doorways, so she walked through the
+  walls with her shoulders out. The chapel nave is now nine cells across, its
+  crossings five tall edge to edge, both stair doorways five, the cellar's
+  connecting corridors three tall, and the bridges over the flooded chamber three
+  wide. **No tile the player can stand in is narrower than three cells.**
+- **The rule is written down and enforced twice.** `tools/generate-areas.py` widens
+  a map after drawing it — filling in a nook that cannot be widened rather than
+  leaving a gap nothing fits in — and refuses to emit one that is still too narrow.
+  `areas::MIN_PASSAGE` and `areas::DOORWAY` state the rule, three tests in
+  `src/game/areas.rs` enforce it on every run, and
+  [`docs/map-design.md`](docs/map-design.md) records it as an instruction for
+  future map design.
+- **Grimmoire is now GPL-3.0-or-later.** `LICENSE` holds the GPLv3 text and
+  `Cargo.toml` carries the SPDX id, so licensing is settled rather than an open
+  question.
+- **The README is a project front page now**: badges, screenshots of the chapel,
+  the dialogue, the cellar and the cast, the controls table, the architecture and
+  the dependency rationale.
+
 ### Changed — a kawaii mage bunny, with readable profiles
 
 - **The character reads as a bunny now, so she is one.** The pointed head was

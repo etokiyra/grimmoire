@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Generate the two prototype areas as rectangular ASCII maps."""
+"""Generate the two prototype areas as rectangular ASCII maps.
+
+# Passage width
+
+The character sprite is **five cells wide and three tall**. A one-cell corridor
+therefore has her shoulders through the wall on both sides, which is exactly what
+it used to look like.
+
+Every tile the player can stand in must therefore be **at least three cells
+across** (five minus two, the most the sprite can overlap without looking wrong),
+and the routes a player uses constantly are drawn wider: the chapel nave is nine
+cells, its crossings five, and both stair doorways five. `widen` enforces the
+three-cell floor automatically, and `MIN_CLEARANCE` records the rule for anyone
+editing a map by hand.
+
+The same rule applies to anything the player has to pass *through* - doorways,
+chamber mouths, corridors, and the gaps between pillars and pews.
+"""
+
+#: The narrowest a passage may be, in cells. See the module docstring.
+MIN_CLEARANCE = 3
 
 def blank(w, h, ch='.'): return [[ch]*w for _ in range(h)]
 def box(g,x0,y0,x1,y1,ch='#'):
@@ -65,12 +85,16 @@ def chapel():
         for dy in range(7):
             for dx in range(7):
                 if (dx*3+dy*5)%4!=0: g[y0+dy][x0+dx]='#'
-    for (x,y) in [(7,H-8),(8,H-8),(9,H-8),(7,H-7),(8,H-7),(10,H-9),(11,H-8),(6,H-6)]:
-        g[y][x]='~'
+    # A standing pool, as a solid block: scattered single cells would leave
+    # one-cell gaps of floor between them, which the character cannot fit in.
+    for y in range(H-9, H-5):
+        for x in range(6, 13):
+            g[y][x]='~'
     for (x,y) in [(14,46),(15,47),(20,44),(24,47),(W-16,45),(W-17,44),(W-22,47),(30,47),
                   (95,46),(110,45),(W-40,47),(50,46),(60,45),(80,47)]:
         g[y][x]='T'
-    g[H-1][aisle]='+'
+    # The stair down: five cells wide, the width of the character.
+    wide_doors(g, aisle, H-1, 5)
     return g,aisle
 
 def crypt():
@@ -83,24 +107,37 @@ def crypt():
         box(g,x0,y0,x1,y1)
         rect(g,x0+1,y0+1,x1-1,y1-1,'.')
         niches(g,x0,y0,x1,y1,step=6,inset=1)
-    # Doorways between the chambers.
+    # Doorways between the chambers, three cells tall so the character fits.
     for (x0,y0,x1,y1) in chambers:
         cy=(y0+y1)//2
-        g[cy][x0]='.'; g[cy][x0+1]='.'
-    for (mx) in (66,67,68,69,70,71,72,73):
-        g[13][mx]=','; g[31][mx]=','
-    for y in (22,23):
-        for x in (66,67,68,69,70,71,72,73): g[y][x]=','
+        for dy in (-1, 0, 1):
+            g[cy+dy][x0]='.'; g[cy+dy][x0+1]='.'
+    for mx in range(66, 74):
+        for dy in (-1, 0, 1):
+            g[13+dy][mx]=','; g[31+dy][mx]=','
+    for y in (22, 23, 24):
+        for x in range(66, 74): g[y][x]=','
     # The flooded south-west chamber, drawn before the walkways so that the
     # walkways cross it as bridges.
-    for y in range(25,38):
-        for x in range(7,60):
-            if (x*3+y*5)%11!=0: g[y][x]='~'
-    # Walkways inside the chambers: laid over the water as bridges.
+    (sx0, sy0, sx1, sy1) = chambers[2]
+    for y in range(sy0+1, sy1):
+        for x in range(sx0+1, sx1):
+            g[y][x] = '~'
+    # Three-cell bridges over the water. A one-cell bridge would have the
+    # character's shoulders over the water on both sides.
+    cx, cy = (sx0+sx1)//2, (sy0+sy1)//2
+    for y in range(cy-1, cy+2):
+        hline(g, y, sx0+1, sx1-1, ',')
+    for x in range(cx-1, cx+2):
+        vline(g, x, sy0+1, sy1-1, ',')
+    # Walkways in the other chambers, which stand on dry floor.
     for (x0,y0,x1,y1) in chambers:
+        if (x0,y0,x1,y1) == (sx0,sy0,sx1,sy1):
+            continue
         hline(g,(y0+y1)//2,x0+1,x1-1,',')
         vline(g,(x0+x1)//2,y0+1,y1-1,',')
-    # The dais with the sigil, in the north-east chamber.
+    # The dais with the sigil, in the north-east chamber. Its mouth faces south
+    # onto the chamber floor and is five cells wide, like every other doorway.
     dx,dy = 118,13
     box(g,dx-6,dy-3,dx+6,dy+3)
     rect(g,dx-5,dy-2,dx+5,dy+2,',')
@@ -108,10 +145,8 @@ def crypt():
     # The stair up: a doorway in the north wall with a short corridor down onto
     # the floor of the north-west chamber, so the way back is short and obvious.
     sx = 20
-    g[0][sx] = '+'
-    for y in range(1, 9):
-        g[y][sx] = ','
-    for y in (9, 10):
+    wide_doors(g, sx, 0, 5)
+    for y in range(1, 11):
         for x in range(sx - 1, sx + 2):
             g[y][x] = ','
     # Debris, kept off the water and the walkways.
@@ -119,6 +154,97 @@ def crypt():
         x = 4 + ((i*37)%(W-8)); y = 4 + ((i*53)%(H-8))
         if g[y][x]=='.' and (x*7+y*3)%5!=0: g[y][x]='#'
     return g,(dx,dy),(sx,10)
+
+def run_length(g, x, y, dx, dy):
+    """How many walkable cells lie in a straight line through (x, y)."""
+    W, H = len(g[0]), len(g)
+    run = 1
+    for sign in (1, -1):
+        cx, cy = x + dx*sign, y + dy*sign
+        while 0 <= cx < W and 0 <= cy < H and g[cy][cx] in '.,':
+            run += 1
+            cx += dx*sign; cy += dy*sign
+    return run
+
+
+def clearance(g, x, y):
+    """The narrowest cross-section through this tile, in cells."""
+    return min(run_length(g, x, y, 1, 0), run_length(g, x, y, 0, 1))
+
+
+def widen_axis(g, x, y, dx, dy, target):
+    """Carves the walls at the ends of (x, y)'s run until it reaches target."""
+    W, H = len(g[0]), len(g)
+    carved = 0
+    for _ in range(target * 2):
+        if run_length(g, x, y, dx, dy) >= target:
+            break
+        for sign in (1, -1):
+            if run_length(g, x, y, dx, dy) >= target:
+                break
+            cx, cy = x, y
+            while 0 <= cx + dx*sign < W and 0 <= cy + dy*sign < H and g[cy + dy*sign][cx + dx*sign] in '.,':
+                cx += dx*sign; cy += dy*sign
+            nx, ny = cx + dx*sign, cy + dy*sign
+            # Never touch the outer wall: that is the edge of the world.
+            if 1 <= nx < W - 1 and 1 <= ny < H - 1 and g[ny][nx] == '#':
+                g[ny][nx] = ','
+                carved += 1
+    return carved
+
+
+def widen(g, target=MIN_CLEARANCE, limit=40):
+    """Widens every passage narrower than `target` cells.
+
+    The narrow axis is the one that matters: a one-cell corridor twenty cells
+    long is still one cell wide, however far it runs.
+
+    Carving is tried first. If nothing can be carved - a tile pinched between
+    water and a tree, say - the nook is filled in instead, because a gap the
+    character cannot stand in is worse than no gap at all.
+    """
+    W, H = len(g[0]), len(g)
+    for _ in range(limit):
+        changed = 0
+        for y in range(1, H - 1):
+            for x in range(1, W - 1):
+                if g[y][x] not in '.,' or clearance(g, x, y) >= target:
+                    continue
+                if run_length(g, x, y, 1, 0) < target:
+                    changed += widen_axis(g, x, y, 1, 0, target)
+                if run_length(g, x, y, 0, 1) < target:
+                    changed += widen_axis(g, x, y, 0, 1, target)
+        if changed:
+            continue
+
+        nooks = [(x, y) for y in range(1, H - 1) for x in range(1, W - 1)
+                 if g[y][x] in '.,' and clearance(g, x, y) < target]
+        if not nooks:
+            break
+        for (x, y) in nooks:
+            water = any(g[y+dy][x+dx] == '~'
+                        for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
+            g[y][x] = '~' if water else '#'
+    return g
+
+
+def narrowest(g):
+    """The narrowest cross-section anywhere a player can stand."""
+    W, H = len(g[0]), len(g)
+    return min((clearance(g, x, y)
+                for y in range(H) for x in range(W) if g[y][x] in '.,'),
+               default=99)
+
+
+def wide_doors(g, x, y, length, horizontal=True):
+    """Cuts a doorway `length` cells wide, centred on (x, y)."""
+    half = length // 2
+    for step in range(-half, half + 1):
+        if horizontal:
+            g[y][x + step] = '+'
+        else:
+            g[y + step][x] = '+'
+
 
 def reachable(g, start):
     from collections import deque
@@ -225,23 +351,30 @@ def show(name, g):
     for row in g: print(''.join(row))
 
 c, a = chapel()
+widen(c)
 keep_c = seal_islands(c)
 keep_c = carve_to(c, keep_c, a, 51)
 chapel_spawn = pick(c, keep_c, a, 44)
 chapel_npc = pick(c, keep_c, 56, 33)
 chapel_basin = pick(c, keep_c, 76, 6)
 chapel_arrive = pick(c, keep_c, a, 49)
+assert narrowest(c) >= MIN_CLEARANCE, f"chapel has a {narrowest(c)}-cell passage"
+print(f"// chapel narrowest passage={narrowest(c)} cells (rule: {MIN_CLEARANCE})")
 print(f"// chapel keep={len(keep_c)} walkable=", sum(1 for r in c for ch in r if ch in '.,'))
 print(f"// chapel spawn={chapel_spawn} npc={chapel_npc} basin={chapel_basin} arrive={chapel_arrive}")
 show("chapel", c); print()
 
 d, dais, stair = crypt()
+widen(d)
 keep_d = seal_islands(d)
-door = next((x for x in range(len(d[0])) if d[0][x] == '+'), 0)
+door_run = [x for x in range(len(d[0])) if d[0][x] == '+']
+door = door_run[len(door_run) // 2] if door_run else 0
 keep_d = carve_to(d, keep_d, door, 0)
 cellar_spawn = pick(d, keep_d, door, 12)
 cellar_sigil = pick(d, keep_d, dais[0], dais[1])
 cellar_arrive = pick(d, keep_d, door, 12)
+assert narrowest(d) >= MIN_CLEARANCE, f"cellar has a {narrowest(d)}-cell passage"
+print(f"// cellar narrowest passage={narrowest(d)} cells (rule: {MIN_CLEARANCE})")
 print(f"// cellar keep={len(keep_d)} walkable=", sum(1 for r in d for ch in r if ch in '.,'))
 print(f"// cellar door={door} spawn={cellar_spawn} sigil={cellar_sigil} arrive={cellar_arrive} "
       f"door->spawn={path_length(d, (door, 0), cellar_spawn)} spawn->sigil={path_length(d, cellar_spawn, cellar_sigil)}")

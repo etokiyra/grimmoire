@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A terminal-native, ASCII-first dark-fantasy wizard RPG."
+license = "GPL-3.0-or-later"
 repository = "https://github.com/etokiyra/grimmoire"
+homepage = "https://github.com/etokiyra/grimmoire"
 readme = "README.md"
-keywords = ["game", "terminal", "tui", "roguelike"]
+keywords = ["game", "terminal", "tui", "roguelike", "ascii"]
 categories = ["games"]
 # Not published to crates.io; Grimmoire ships as a binary.
 publish = false

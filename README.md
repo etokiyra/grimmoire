@@ -1,25 +1,90 @@
-# Grimmoire
+<div align="center">
 
-A terminal-native, ASCII-first dark-fantasy wizard RPG written in Rust.
+# ⛧ Grimmoire
+
+**A terminal-native, ASCII-first dark-fantasy wizard RPG.**
+
+Every wall, every candle, every face is a character drawn into a cell grid by a
+renderer Grimmoire owns. No image files, no sprites, no graphics protocol — just
+glyphs, ink, and light.
 
 [![CI](https://github.com/etokiyra/grimmoire/actions/workflows/ci.yml/badge.svg)](https://github.com/etokiyra/grimmoire/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![Terminal: Kitty](https://img.shields.io/badge/terminal-kitty-2E8B57.svg)](https://sw.kovidgoyal.net/kitty/)
+[![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](#requirements)
+[![Art: source text](https://img.shields.io/badge/art-source%20text-8a2be2.svg)](#why-it-looks-the-way-it-does)
 
-> **Status: early development.** There is no stable release and no tagged version
-> yet. Grimmoire is a small, playable **exploration prototype** — two connected
+<img src="docs/images/chapel.png" alt="The mage bunny standing in the nave of the Ruined Chapel, looking north towards the altar" width="820">
+
+</div>
+
+> **Status: early development.** There is no release and no tagged version yet.
+> Grimmoire is a small, playable **exploration prototype** — two large connected
 > areas, responsive movement with sprinting, interaction, one NPC, and fail-soft
 > saving — on top of a custom ASCII renderer. It is not a complete game.
 
-## What Grimmoire is
+## What it is
 
-A game about a wizard who grows stronger through knowledge rather than gear, built
-for the terminal and taking **ASCII art as its primary visual language**. The
-long-term vision includes exploration, character-focused dialogue, strategic
-turn-based magic combat, skill trees, story-and-mastery progression, and
-persistent saves.
+A game about a wizard who grows stronger through **knowledge rather than gear**,
+built for the terminal and taking **ASCII art as its primary visual language**
+rather than as a limitation to escape.
 
-The story, world, characters, and detailed mechanics are **deliberately
-undecided**. Everything currently in the game is placeholder content. See
-[`ROADMAP.md`](ROADMAP.md) for phasing.
+The long-term vision is exploration, character-focused dialogue, strategic
+turn-based magic combat, skill trees, and story-and-mastery progression. The
+story, world, characters, and detailed mechanics are **deliberately undecided** —
+everything currently in the game is placeholder content. See
+[`ROADMAP.md`](ROADMAP.md).
+
+## Why it looks the way it does
+
+- **ASCII is the identity, not a fallback.** The world is a grid of glyphs drawn
+  by a renderer Grimmoire owns (`ui::scenery`). Block and box glyphs (`█`, `▓`,
+  `▀`, `·`) are legitimate drawing elements. There is no hidden image underneath.
+- **Structure comes from neighbours.** A wall shows a lit cap where floor is
+  above it, a shadowed base where floor is below, a side face, or a pillar when it
+  stands alone. Terrain is not a repeating tile.
+- **Variation comes from position, never from time.** Each tile's texture is a
+  hash of its *world* coordinates, so the world never shimmers when the clock
+  advances.
+- **Light comes from distance.** Tiles near the player fall into a warm autumn
+  wash; the far walls drop into the dark. The space reads as lit rather than flat.
+- **Characters are figures with several inks at once.** A cast member carries its
+  own ink set, and each row of its sprite names one — so hair, skin, cloth, trim
+  and eyes are separate colours. Figures are **five cells wide and three tall**,
+  the height of a doorway or a tree.
+- **Maps are authored at the character's scale.** No passage the player can stand
+  in is narrower than three cells, and the routes walked constantly are wider
+  still. The generator refuses to emit a map that breaks the rule, and a test
+  enforces it. See [`docs/map-design.md`](docs/map-design.md).
+
+The player is a kawaii mage bunny: long pink ears, a pale face with two big bright
+eyes, a violet robe with white lace, and a star wand that twinkles.
+
+<div align="center">
+<img src="docs/images/bunny.png" alt="The mage bunny drawn as ASCII, zoomed" width="330">
+</div>
+
+## Screenshots
+
+<div align="center">
+
+**Speaking with Ysolde, who has no face** — the dialogue panel rises into place
+rather than appearing, and the world keeps breathing behind it.
+
+<img src="docs/images/dialogue.png" alt="The dialogue panel open, showing Ysolde's ASCII portrait and two lines of dialogue" width="820">
+
+**The Sunken Cellar** — the arrival is marked, and the stair has not been swept in
+a long while.
+
+<img src="docs/images/cellar.png" alt="The mage bunny arriving in the Sunken Cellar" width="820">
+
+**The altar in the apse**, and a walk through the nave.
+
+<img src="docs/images/altar.png" alt="The apse of the Ruined Chapel with a glowing sigil" width="400">
+<img src="docs/images/nave.png" alt="The mage bunny in profile walking east through the nave" width="400">
+
+</div>
 
 ## Requirements
 
@@ -29,8 +94,8 @@ walk, release to stop" work properly. If it cannot establish that the terminal c
 do this, it says so and exits rather than starting in a mode that would feel
 broken.
 
-Everything else it needs is a Rust toolchain and a terminal of at least **80×24**
-reporting 256 colours.
+Everything else it needs is a Rust toolchain (**1.85+**, edition 2024) and a
+terminal of at least **80×24** reporting 256 colours.
 
 ## Play it
 
@@ -40,94 +105,71 @@ kitty --directory "$PWD" cargo run --release
 
 You start in the **Ruined Chapel**. The stair down to the Sunken Cellar is at the
 south end of the nave; **Ysolde** and a cracked basin are elsewhere in the chapel,
-and a faded sigil waits at the far side of the cellar. Press `e` when the prompt
-appears.
+and a faded sigil waits at the far side of the cellar. Press <kbd>e</kbd> when the
+prompt appears.
 
 | Key | Action |
 | --- | --- |
-| `w` `a` `s` `d` or arrow keys | Move (and face that way). Hold to keep walking. |
-| `Shift` + a direction | Sprint |
-| `e` | Interact with what you face |
-| `h`, `?`, `F1` | Help and diagnostics |
-| `F3` | Presentation study (rendering prototype) |
-| `F2` | Renderer showcase (development screen) |
-| `Esc`, `q`, `Ctrl`+`C` | Quit |
+| <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or arrows | Move, and face that way. **Hold to keep walking.** |
+| <kbd>Shift</kbd> + a direction | Sprint |
+| <kbd>E</kbd> | Interact with what you face |
+| <kbd>H</kbd>, <kbd>?</kbd>, <kbd>F1</kbd> | Help and diagnostics |
+| <kbd>F3</kbd> | Presentation study (rendering prototype) |
+| <kbd>F2</kbd> | Renderer showcase (development screen) |
+| <kbd>Esc</kbd>, <kbd>Q</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> | Quit |
 
-To look at the interface pieces instead, launch the **presentation study**:
-
-```sh
-kitty --directory "$PWD" cargo run --release -- --study
-```
-
-Progress saves automatically on quit and whenever you move between areas; see
+Progress saves automatically on quit and whenever you move between areas — see
 [`docs/gameplay.md`](docs/gameplay.md) for the save location and format.
 
 Below **80×24** the game suspends, shows a short explanation, and swallows input
-so you cannot act blind — then resumes exactly where you were when the window
+so you cannot act blind, then resumes exactly where you were when the window
 grows. Grimmoire cannot maximise your window; that part is yours.
 
-## Implemented today
+## What works today
 
 **The exploration prototype**
 
 - Two large connected areas that are **bigger than the viewport**, so the camera
   scrolls and the environment fills the screen.
-- Tile-based movement with collision against terrain, boundaries, and entities,
+- Tile-based movement with collision against terrain, boundaries and entities,
   plus a facing direction so you can face what you want to use.
 - **Event-driven movement**: a press steps at once, holding walks at a steady
-  cadence, releasing stops immediately, and `Shift` sprints. A tap is always
-  exactly one step, and no lost event can leave you walking on your own.
+  cadence, releasing stops immediately, and <kbd>Shift</kbd> sprints. A tap is
+  always exactly one step, and no lost event can leave you walking on your own.
 - **Visible feedback**: a refused step pulses the tile that refused it, an
   interaction flashes whatever answered and throws off sparkles, and arriving
-  somewhere new marks the spot — all without ever hiding a glyph.
-- **Animation that keeps pace**: characters stride once per step (never on a free
+  somewhere new marks the spot — all as a style change, so nothing can ever hide a
+  glyph.
+- **Animation that keeps pace**: characters stride once per *step* (never on a free
   running clock), sprint with a lean and a wake, breathe and blink when idle, and
   the dialogue panel rises and settles rather than appearing.
-- **Both axes move at the same screen speed.** Terminal cells are taller than
-  they are wide, so the two axes are paced from one speed in pixels per second
-  rather than a single step rate — which is what stops vertical movement feeling
-  twice as fast as horizontal.
+- **Both axes move at the same screen speed.** Terminal cells are taller than they
+  are wide, so the two axes are paced from one speed in pixels per second rather
+  than a single step rate — which is what stops vertical movement feeling twice as
+  fast as horizontal.
 - An interaction model resolved deterministically from the adjacent tiles, with a
   contextual prompt instead of permanent instructions.
-- A dialogue overlay, pushed as a screen so input cannot leak through it.
-- Autumn-tinted floors around the player, so the space reads as lit rather than
-  flat.
-- Automatic, versioned, fail-soft persistence of area, position, and discovered
-  areas.
+- Automatic, versioned, **fail-soft** persistence of area, position and discovered
+  areas: anything unrecognised means "start a new game", never a half-loaded one.
 
-**The renderer and framework underneath**
+**The renderer underneath**
 
-- A **custom ASCII scenery renderer**: walls show lit caps, shadowed bases, side
-  faces and pillars depending on what surrounds them; floors, paths, water and
-  rubble vary by position without ever shimmering; water rolls; candles gutter
-  along the walls; motes drift; and each area has an inlaid motif cut into its open
-  floors.
-- **Characters drawn as ASCII figures**, three cells tall — the same as a doorway
-  or a tree — and several *inks* at once. The player is a kawaii mage bunny: long
-  pink ears, a pale face with two big bright eyes, a violet robe with white lace,
-  and a star wand that twinkles. Ysolde is a cowl with two violet points of light
-  and no face. Four facing directions with the eye placed toward the direction of
-  travel, a stride that swishes the robe, a sprint, and an idle breath that
-  blinks.
+- A **custom ASCII scenery renderer** — neighbour-aware walls, position-hashed
+  floors, rolling water, guttering candles, drifting motes, and an inlaid motif cut
+  into each area's open floors.
 - A pure, terminal-agnostic cell renderer: `Canvas`, `Cell`, `Style`, `Color`,
   `Rect`, and a clipped local-coordinate `CanvasView`.
-- A **fully opaque, application-owned background**: the theme paints every cell,
-  and foreground-only draws inherit the surface, so the terminal's own theme never
-  shows through.
-- A role-based theme: background, surfaces, borders and separators, three weights
-  of text, accents, focus, interactive objects, player, character, effects,
-  warnings, and an ambient light ramp.
-- `Frame` composition that separates **cell rendering** from **image placement**.
-- **Diffed presentation**: only changed cells are written. An unchanged frame
-  costs sixteen bytes.
-- **A 60 Hz animation loop while anything is moving** (measured at 60–64 frames a
-  second), dropping to a slow ambient tick when the world is merely breathing, so
-  an untouched game costs about half a percent of a core.
+- A **fully opaque, application-owned background**: the theme paints every cell and
+  foreground-only draws inherit the surface, so the terminal's own theme can never
+  show through.
+- **Diffed presentation**: only changed cells are written. An unchanged frame costs
+  sixteen bytes.
+- **A 60 Hz loop while anything is moving** (measured at 60–64 frames a second),
+  dropping to a slow ambient tick when the world is merely breathing, so an
+  untouched game costs about **half a percent of a core**.
 - Time-based animation with an explicitly advanced, testable clock.
-- A screen stack with push/pop, input routed to the active screen, and layered
-  composition, plus a curtain transition between screens.
-- A **minimum-viewport policy** (80×24): below it, play suspends safely and resumes
-  on its own.
+- A screen stack with layered composition, a curtain transition, and a
+  **minimum-viewport policy**.
 - Optional **pixel interface art** behind a development flag, off by default; the
   game itself never emits a graphics sequence.
 
@@ -157,6 +199,7 @@ on a recoverable error, and from a panic.
 | --- | --- |
 | `GRIMMOIRE_ASSUME_KITTY=1` | Assume the terminal is Kitty even if it cannot be confirmed. For inspecting the game in another terminal, and for the pty smoke test. |
 | `GRIMMOIRE_PIXEL_UI=1` | Draw interface pieces (the dialogue portrait) as pixel art. Off by default; equivalent to `--pixel-ui`. |
+| `GRIMMOIRE_FRAME_STATS=1` | Print the measured frame rate on exit. |
 
 ## Development
 
@@ -172,15 +215,19 @@ cargo build --release
 Three tools are kept honest by use:
 
 ```sh
-tools/smoke.sh                            # pty smoke test: terminal lifecycle and cleanup
-cargo run --release --example preview     # print the ASCII world to the terminal
-cargo run --release --example bench       # the performance numbers in the design doc
+tools/smoke.sh                     # pty smoke test: terminal lifecycle and cleanup
+cargo run --release --example preview    # print the ASCII world to the terminal
+cargo run --release --example bench      # the performance numbers in the design doc
 ```
 
 `examples/preview` is the quickest way to look at scenery: it renders a real area
 as text, so art changes can be read and diffed without a screenshot.
 
 ## Architecture
+
+Grimmoire owns its drawing model, layout, frame composition, scenery and
+animation. It borrows plumbing for low-level terminal operations and does **not**
+build a terminal emulator.
 
 | Module | Responsibility |
 | --- | --- |
@@ -191,46 +238,51 @@ as text, so art changes can be read and diffed without a screenshot.
 | `anim` | Time-based animation with an explicitly advanced clock. |
 | `input` | Terminal-independent key and event types, including press/repeat/release. |
 | `ui` | Frame composition: the ASCII scenery renderer, character animation, feedback effects, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
-| `app` | Wires input, update, compose, and present together. |
+| `app` | Wires input, update, compose and present together. |
 | `pixel` | Software pixel rendering, used only by optional interface art. |
 
-Documentation:
+The dependency list is deliberately short: **`crossterm`** for terminal lifecycle
+and input, **`unicode-width`** for the text width policy, and **`fdeflate`** solely
+to encode the optional pixel interface art. `ratatui` was rejected because it would
+own the drawing model. No image decoder is needed — Kitty decodes.
+
+### Documentation
 
 - [`docs/renderer-design.md`](docs/renderer-design.md) — the rendering
-  architecture, the ASCII scenery renderer, the movement model and why the two
-  axes are paced differently, the measured numbers, and what was verified live.
+  architecture, the ASCII scenery renderer, the movement model and why the two axes
+  are paced differently, the measured numbers, and what was verified live.
 - [`docs/gameplay.md`](docs/gameplay.md) — the world model, controls, movement,
   interaction rules, and save format.
-- [`docs/phase5-audit.md`](docs/phase5-audit.md) — the audit that started this
-  work, before any change.
+- [`docs/map-design.md`](docs/map-design.md) — the rules an area must satisfy, and
+  how they are enforced.
+- [`AGENTS.md`](AGENTS.md) — the vision, the boundaries, and the invariants.
+- [`ROADMAP.md`](ROADMAP.md) — phasing for future work.
 
-### Key decisions
+## Key decisions
 
 - **ASCII is the identity, not a fallback.** The world is a glyph grid drawn by a
   renderer Grimmoire owns. Pixel rendering exists only as an off-by-default
   interface extra, and the default path sends no graphics at all.
 - **Kitty is the supported terminal**, for its keyboard protocol and colour depth.
-  `crossterm` is the sole terminal library; `ratatui` was rejected because it would
-  own the drawing model.
 - **Movement is event-driven, never timer-driven.** A press steps at once, holding
-  walks at a cadence, releasing stops. No sequence of lost events can make the
-  player walk on their own.
+  walks at a cadence, releasing stops.
 - **The two axes share a screen speed, not a cadence.** Cells are not square, and
   pretending otherwise is what made vertical movement feel fast.
+- **Animation is time-based, and the walk cycle is locked to steps.** A slow machine
+  must not slow the world down, and the legs must not drift away from the movement
+  they are illustrating.
+- **A frame is composed when something changed, and only changed cells are written.**
 - **The world is larger than the viewport**, and the camera scrolls; the HUD is an
   overlay of two rows rather than rows taken from the world.
-- **The viewport owns its background.** Foreground-only draws inherit the surface
-  colour, so the terminal's theme can never leak into the game.
-- **Animation is time-based, and the walk cycle is locked to steps.** A slow
-  machine must not slow the world down, and the legs must not drift away from the
-  movement they are illustrating.
-- **A hard minimum viewport (80×24).** Grimmoire is designed for a large terminal
-  and suspends safely below it rather than degrading into noise.
+- **A hard minimum viewport (80×24).** Grimmoire suspends safely below it rather
+  than degrading into noise.
 - **No ECS, no scripting engine, no widget toolkit** until a phase needs one.
-- **Game logic is pure.** Movement, collision, interaction, and travel are testable
+- **Game logic is pure.** Movement, collision, interaction and travel are testable
   without a terminal; the UI decides how things look.
-- **Persistence is narrow and fail-soft.** Only area, position, and discovery are
-  stored; anything unrecognised means "start a new game".
+- **Artwork is source text, not files.** The world is glyph tables and neighbour
+  rules; the optional interface art is ASCII sprite tables rendered in memory.
+  Nothing is read from disk, so there is no third-party imagery and no missing file
+  to break the game.
 
 ## Known limitations
 
@@ -248,7 +300,9 @@ Documentation:
 
 ## License
 
-No license has been chosen yet, so none is included. This is an open decision and
-must be settled before the project is distributed or reused. See `AGENTS.md`. All
-artwork is generated from source text in this repository and carries no
+Grimmoire is free software, released under the **GNU General Public License,
+version 3 or later** ([GPL-3.0-or-later](LICENSE)). You may use, study, share and
+modify it under those terms.
+
+All artwork is generated from source text in this repository and carries no
 third-party rights.
