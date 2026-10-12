@@ -14,7 +14,7 @@
 //! the compiler points at every place that has to know about a new one.
 
 use super::area::{Direction, Position};
-use super::dialogue::Speech;
+use super::conversation::Conversation;
 use super::discovery::Discovery;
 use super::progress::MoonPhase;
 
@@ -37,17 +37,29 @@ pub enum Figure {
     Priestess,
     /// A bound revenant, wrapped and chained.
     Revenant,
+    /// A shrine apprentice: ribbons, charms, and far too much energy.
+    Apprentice,
+    /// A wandering mage under an enormous hat.
+    Wanderer,
+    /// A wood spirit, small and mossy, who speaks in halves.
+    Spirit,
+    /// A warden in steel, with a plumed helm and a notebook.
+    Warden,
 }
 
 impl Figure {
     /// Every figure a character can be drawn as.
-    pub const ALL: [Figure; 6] = [
+    pub const ALL: [Figure; 10] = [
         Figure::Mage,
         Figure::Veiled,
         Figure::Lantern,
         Figure::Scavenger,
         Figure::Priestess,
         Figure::Revenant,
+        Figure::Apprentice,
+        Figure::Wanderer,
+        Figure::Spirit,
+        Figure::Warden,
     ];
 }
 
@@ -95,8 +107,10 @@ impl Prop {
 pub enum EntityKind {
     /// A character who speaks, from a fixed direction.
     Npc {
-        /// What they say, and how that changes as the player learns.
-        speech: Speech,
+        /// The conversation they will have. Every character has one: a character
+        /// who only ever says one thing is a conversation with a single node, not
+        /// a second kind of thing.
+        talk: &'static Conversation,
         /// Which silhouette and inks to draw them with.
         figure: Figure,
         /// The way they are standing, so they can face what they are about.
@@ -143,15 +157,15 @@ impl Entity {
     pub const fn npc(
         position: Position,
         name: &'static str,
-        speech: Speech,
         figure: Figure,
         facing: Direction,
+        talk: &'static Conversation,
     ) -> Self {
         Entity {
             position,
             name,
             kind: EntityKind::Npc {
-                speech,
+                talk,
                 figure,
                 facing,
             },
@@ -217,24 +231,30 @@ impl Entity {
 mod tests {
     use super::{Entity, EntityKind, Figure, Prop};
     use crate::game::area::{Direction, Position};
-    use crate::game::dialogue::{Dialogue, Speech};
+    use crate::game::conversation::{Conversation, Node, NodeId};
     use crate::game::discovery::Discovery;
     use crate::game::progress::MoonPhase;
 
+    static NODES: [Node; 1] = [Node::saying(NodeId::new("hi"), "Someone", &["Hello."])];
+    static TALK: Conversation = Conversation {
+        nodes: &NODES,
+        entries: &[],
+        fallback: NodeId::new("hi"),
+    };
+
     #[test]
-    fn npc_entities_carry_speech_figure_and_facing() {
-        let speech = Speech::always(Dialogue::new("Someone", &["Hello."]));
+    fn npc_entities_carry_conversation_figure_and_facing() {
         let entity = Entity::npc(
             Position::new(1, 2),
             "Someone",
-            speech,
             Figure::Lantern,
             Direction::West,
+            &TALK,
         );
         assert_eq!(Position::new(1, 2), entity.position);
         assert_eq!(
             EntityKind::Npc {
-                speech,
+                talk: &TALK,
                 figure: Figure::Lantern,
                 facing: Direction::West,
             },

@@ -193,6 +193,7 @@ mod tests {
             capabilities: Capabilities::conservative(),
             graphics: crate::terminal::GraphicsSupport::Forced,
             art: crate::ui::art::Art::none(),
+            motion: crate::ui::settings::Motion::Full,
             key_releases: true,
             palette: Palette::BASIC,
             stats: PresentStats {

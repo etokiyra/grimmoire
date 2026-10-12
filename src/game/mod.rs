@@ -6,7 +6,7 @@
 //!
 //! * [`area`] — bounded tile grids, terrain, doorways, and positions.
 //! * [`entity`] — the NPCs, props and braziers placed in an area.
-//! * [`dialogue`] — what a character says, including how it changes.
+//! * [`conversation`] — branching dialogue: nodes, choices, conditions, effects.
 //! * [`discovery`] — the things worth learning about the world.
 //! * [`progress`] — what has been learned, and the shrine puzzle's state.
 //! * [`world`] — the player's place in the world and the rules that move them.
@@ -14,15 +14,15 @@
 
 pub mod area;
 pub mod areas;
-pub mod dialogue;
+pub mod conversation;
 pub mod discovery;
 pub mod entity;
 pub mod progress;
 pub mod world;
 
 pub use area::{Area, AreaId, Direction, Portal, Position, Tile};
-pub use dialogue::{Dialogue, Speech};
+pub use conversation::{Choice, Condition, Conversation, Effect, Flag, Known, Mood, Node, NodeId};
 pub use discovery::Discovery;
 pub use entity::{Entity, EntityKind, Figure, Prop};
 pub use progress::{Lighted, MoonPhase, Progress};
-pub use world::{Interaction, Prompt, Target, World};
+pub use world::{Interaction, Prompt, TalkStart, Target, World};

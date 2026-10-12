@@ -13,6 +13,7 @@
 
 use std::collections::BTreeSet;
 
+use super::conversation::{Effect, Flag, Known};
 use super::discovery::Discovery;
 
 /// One of the three moon phases cut into the shrine's dial and braziers.
@@ -95,6 +96,9 @@ pub enum Lighted {
 pub struct Progress {
     known: BTreeSet<Discovery>,
     journal: Vec<Discovery>,
+    /// Story facts a conversation established, such as who has been told what.
+    /// Deliberately a closed set of *facts* rather than a variable soup.
+    flags: BTreeSet<Flag>,
     braziers: Vec<MoonPhase>,
 }
 
@@ -105,7 +109,44 @@ impl Progress {
         Progress {
             known: BTreeSet::new(),
             journal: Vec::new(),
+            flags: BTreeSet::new(),
             braziers: Vec::new(),
+        }
+    }
+
+    /// A snapshot of what is known, for a conversation to walk its graph with.
+    #[must_use]
+    pub fn snapshot_known(&self) -> Known {
+        let mut known = Known::new();
+        for discovery in &self.known {
+            known.remembered(*discovery);
+        }
+        for flag in &self.flags {
+            known.flagged(*flag);
+        }
+        known
+    }
+
+    /// Whether a story fact holds.
+    #[must_use]
+    pub fn has(&self, flag: Flag) -> bool {
+        self.flags.contains(&flag)
+    }
+
+    /// Whether any of these flags has been set, for building a hint.
+    #[must_use]
+    pub fn any(&self, flags: &[Flag]) -> bool {
+        flags.iter().any(|flag| self.has(*flag))
+    }
+
+    /// Applies what a conversation did.
+    ///
+    /// Returns whether anything was genuinely new, so the interface can celebrate
+    /// a discovery once and stay quiet after that.
+    pub fn apply(&mut self, effect: Effect) -> bool {
+        match effect {
+            Effect::Learn(discovery) => self.record(discovery),
+            Effect::Set(flag) => self.flags.insert(flag),
         }
     }
 
@@ -194,11 +235,16 @@ impl Progress {
     /// discoveries and phases; this is the constructor save loading uses, and it
     /// exists so that the fields stay private and cannot drift out of step.
     #[must_use]
-    pub fn restored(journal: Vec<Discovery>, braziers: Vec<MoonPhase>) -> Progress {
+    pub fn restored(
+        journal: Vec<Discovery>,
+        flags: Vec<Flag>,
+        braziers: Vec<MoonPhase>,
+    ) -> Progress {
         let mut progress = Progress::new();
         for discovery in journal {
             progress.record(discovery);
         }
+        progress.flags = flags.into_iter().collect();
         progress.braziers = braziers;
         progress
     }
@@ -209,6 +255,15 @@ impl Progress {
         self.journal
             .iter()
             .map(|item| item.id().to_string())
+            .collect()
+    }
+
+    /// The lit braziers as save ids.
+    #[must_use]
+    pub fn flag_ids(&self) -> Vec<String> {
+        self.flags
+            .iter()
+            .map(|flag| flag.id().to_string())
             .collect()
     }
 
@@ -225,6 +280,7 @@ impl Progress {
 #[cfg(test)]
 mod tests {
     use super::{Lighted, MOON_ORDER, MoonPhase, Progress};
+    use crate::game::conversation::{Effect, Flag};
     use crate::game::discovery::Discovery;
 
     #[test]
@@ -286,6 +342,32 @@ mod tests {
     }
 
     #[test]
+    fn a_conversation_effect_is_applied_once_and_remembered() {
+        let mut progress = Progress::new();
+        assert!(!progress.has(Flag::CassenAccused));
+        assert!(progress.apply(Effect::Set(Flag::CassenAccused)));
+        assert!(
+            !progress.apply(Effect::Set(Flag::CassenAccused)),
+            "already set"
+        );
+        assert!(progress.has(Flag::CassenAccused));
+        assert!(progress.apply(Effect::Learn(Discovery::VillageWell)));
+        assert!(!progress.apply(Effect::Learn(Discovery::VillageWell)));
+        assert_eq!(1, progress.discovered());
+
+        let known = progress.snapshot_known();
+        assert!(known.holds(crate::game::conversation::Condition::Flag(
+            Flag::CassenAccused
+        )));
+        assert!(known.holds(crate::game::conversation::Condition::Knows(
+            Discovery::VillageWell
+        )));
+        assert!(!known.holds(crate::game::conversation::Condition::Flag(
+            Flag::MarenConfessed
+        )));
+    }
+
+    #[test]
     fn phases_and_discoveries_round_trip_through_their_ids() {
         for phase in MoonPhase::ALL {
             assert_eq!(Some(phase), MoonPhase::from_id(phase.id()));
@@ -301,6 +383,11 @@ mod tests {
                 .journal_ids()
                 .iter()
                 .filter_map(|id| Discovery::from_id(id))
+                .collect(),
+            progress
+                .flag_ids()
+                .iter()
+                .filter_map(|id| Flag::from_id(id))
                 .collect(),
             progress
                 .brazier_ids()

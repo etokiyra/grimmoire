@@ -195,10 +195,29 @@ Delivered:
   bust, so the renderer draws a role rather than a hardcoded character. Props got
   the same treatment.
 
-## Phase 9 — Dialogue and story
+## Phase 9 — Identity, conversations, and an opening (done)
 
-- A dialogue system with branching *choices*, built on the overlay that already
-  carries a bust and on the speech variants a discovery unlocks.
+The game had a region and a loop. This phase gave it a face.
+
+Delivered:
+
+- **An opening.** A title screen with an animated glyph sky, a composed logo, a
+  menu that reflects the save, and a safe confirmation before starting over. The
+  game no longer begins as though it were a command that ran.
+- **Conversations.** Dialogue became a graph — nodes, choices, conditions,
+  effects — and the discovery-reactive speech became one case of it. Nine
+  characters now have branching conversations, and what you do in one changes
+  what another says.
+- **Nine characters**, four of them new, each with a four-row figure, a portrait
+  with four expressions, and their own inks.
+- **Presentation throughout**: a visual-novel conversation plate, expression
+  changes, a discovery announcement, and a shared ornament vocabulary so the
+  title, the conversation, the journal and the HUD look like one game.
+- **Settings**, in their own file: full, reduced, or no motion. Every animation
+  can be turned off and the game stays entirely playable.
+
+## Phase 10 — Story
+
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.
 - Conversation state that persists, and quests built on top.

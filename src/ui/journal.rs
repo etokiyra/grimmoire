@@ -263,6 +263,7 @@ mod tests {
             frame_time: Duration::ZERO,
             animating: false,
             key_releases: true,
+            motion: crate::ui::settings::Motion::Full,
         }
     }
 

@@ -68,23 +68,18 @@ fn viewpoint(area: AreaId) -> Position {
 fn figures() {
     // A bare stage with the whole cast standing clear of the player and of each
     // other, so every design can be read without overlap.
-    let cast = [
-        ("Ysolde", grimmoire::game::Figure::Veiled),
-        ("Rin", grimmoire::game::Figure::Lantern),
-        ("Cassen", grimmoire::game::Figure::Scavenger),
-        ("Ioreth", grimmoire::game::Figure::Priestess),
-        ("Vesper", grimmoire::game::Figure::Revenant),
-    ];
+    // The sheet reads the real cast, so art can never drift from the game.
+    let cast = grimmoire::game::areas::roster();
     let entities = cast
         .iter()
         .enumerate()
-        .map(|(index, (name, figure))| {
+        .map(|(index, member)| {
             Entity::npc(
                 Position::new(3 + index as u16 * 6, 5),
-                name,
-                grimmoire::game::Speech::always(grimmoire::game::Dialogue::new(name, &["..."])),
-                *figure,
+                member.name,
+                member.figure,
                 Direction::South,
+                member.talk,
             )
         })
         .collect();
@@ -124,19 +119,19 @@ fn figures() {
     // An NPC's facing is content, not something the viewer can pose: each one is
     // built standing the way it is asked about, so the sheet shows what the world
     // would really draw.
-    for (name, figure) in cast {
-        println!("=== {name} ===");
+    for member in cast {
+        println!("=== {} ===", member.name);
         for facing in Direction::ALL {
-            let mut world = single(name, figure, facing);
+            let mut world = single(member, facing);
             let _ = world.place_player(Position::new(13, 10));
             let canvas = draw_pose(&world, grimmoire::ui::animation::Pose::idle(facing), 20, 14);
-            println!("--- {name}, facing {} ---", facing.name());
+            println!("--- {}, facing {} ---", member.name, facing.name());
             print_crop(&canvas, 8, 3, 10, 5);
         }
     }
 
     // And the player, in every stage of the walk.
-    let mut world = single("the mage", grimmoire::game::Figure::Mage, Direction::South);
+    let mut world = single(&MAGE_MEMBER, Direction::South);
     let _ = world.place_player(Position::new(13, 10));
 
     for (label, stage) in [
@@ -159,19 +154,27 @@ fn figures() {
     }
 }
 
+/// A stand-in cast member for the player, who is not part of the cast.
+static MAGE_MEMBER: grimmoire::game::areas::CastMember = grimmoire::game::areas::CastMember {
+    name: "the mage",
+    figure: grimmoire::game::Figure::Mage,
+    facing: Direction::South,
+    talk: &grimmoire::game::areas::YOADLE_TALK,
+};
+
 /// A stage holding one figure, so it can be read at every facing without its
 /// neighbours in the way.
-fn single(name: &'static str, figure: grimmoire::game::Figure, facing: Direction) -> World {
+fn single(member: &'static grimmoire::game::areas::CastMember, facing: Direction) -> World {
     let area = Area::new(
         AreaId::new("stage"),
         "Stage",
         &[".............................."; 12],
         vec![Entity::npc(
             Position::new(13, 5),
-            name,
-            grimmoire::game::Speech::always(grimmoire::game::Dialogue::new(name, &["..."])),
-            figure,
+            member.name,
+            member.figure,
             facing,
+            member.talk,
         )],
         Vec::new(),
         Position::new(5, 5),

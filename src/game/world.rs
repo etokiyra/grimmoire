@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use super::area::{Area, AreaId, Direction, Position};
-use super::dialogue::Dialogue;
+use super::conversation::{Conversation, Effect, Flag, Known};
 use super::discovery::Discovery;
 use super::entity::{EntityKind, Figure};
 use super::progress::{Lighted, MoonPhase, Progress};
@@ -36,20 +36,28 @@ pub enum Prompt {
     Sealed(&'static str),
 }
 
+/// Everything a conversation screen needs to begin, and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TalkStart {
+    /// The conversation to walk.
+    pub talk: &'static Conversation,
+    /// Who is speaking, for the nameplate and the prompt.
+    pub name: &'static str,
+    /// Which silhouette to draw them with.
+    pub figure: Figure,
+    /// What the player already knows, so the graph can be resolved.
+    pub known: Known,
+}
+
 /// The outcome of an interaction attempt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Interaction {
     /// Nothing was within reach; a message explains this.
     Nothing,
     /// Feedback was recorded in the message line.
     Message,
-    /// A dialogue should be shown, with the figure who is speaking it.
-    Dialogue {
-        /// What is said.
-        dialogue: Dialogue,
-        /// Who said it, so the interface can draw the right face.
-        figure: Figure,
-    },
+    /// A conversation should begin.
+    Talk(TalkStart),
     /// Something was learned for the first time, and recorded in the journal.
     Discovered(Discovery),
     /// The player stepped through into another area.
@@ -115,6 +123,22 @@ impl World {
     #[must_use]
     pub fn knows(&self, discovery: Discovery) -> bool {
         self.progress.knows(discovery)
+    }
+
+    /// Applies what a conversation did, in order.
+    ///
+    /// Returns the discoveries that were genuinely new, so the interface can make
+    /// a moment of the first one and stay quiet about the rest.
+    pub fn apply(&mut self, effects: &[Effect]) -> Vec<Discovery> {
+        let mut learned = Vec::new();
+        for effect in effects {
+            if self.progress.apply(*effect) {
+                if let Effect::Learn(discovery) = effect {
+                    learned.push(*discovery);
+                }
+            }
+        }
+        learned
     }
 
     /// The area the player is currently in.
@@ -331,12 +355,14 @@ impl World {
     /// compiler says so.
     fn use_entity(&mut self, name: &'static str, kind: EntityKind) -> Interaction {
         match kind {
-            EntityKind::Npc { speech, figure, .. } => {
+            EntityKind::Npc { talk, figure, .. } => {
                 self.message = format!("You speak with {name}.");
-                Interaction::Dialogue {
-                    dialogue: speech.resolve(&self.progress),
+                Interaction::Talk(TalkStart {
+                    talk,
+                    name,
                     figure,
-                }
+                    known: self.progress.snapshot_known(),
+                })
             }
             EntityKind::Object {
                 description,
@@ -440,6 +466,7 @@ impl World {
                 .collect(),
             journal: self.progress.journal_ids(),
             braziers: self.progress.brazier_ids(),
+            flags: self.progress.flag_ids(),
         }
     }
 
@@ -488,7 +515,12 @@ impl World {
             .iter()
             .filter_map(|id| MoonPhase::from_id(id))
             .collect();
-        self.progress = Progress::restored(journal, braziers);
+        let flags = data
+            .flags
+            .iter()
+            .filter_map(|id| Flag::from_id(id))
+            .collect();
+        self.progress = Progress::restored(journal, flags, braziers);
         true
     }
 }
@@ -497,13 +529,24 @@ impl World {
 mod tests {
     use super::{Interaction, Prompt, Target, World};
     use crate::game::area::{Area, AreaId, Direction, Portal, Position};
-    use crate::game::dialogue::{Dialogue, Speech};
+    use crate::game::conversation::{Conversation, Effect, Flag, Node, NodeId};
     use crate::game::discovery::Discovery;
-    use crate::game::entity::{Entity, Figure, Prop};
+    use crate::game::entity::{Entity, EntityKind, Figure, Prop};
     use crate::game::progress::MoonPhase;
 
     const A: AreaId = AreaId::new("a");
     const B: AreaId = AreaId::new("b");
+
+    static STRANGER_NODES: [Node; 1] = [Node::saying(
+        NodeId::new("greeting"),
+        "a stranger",
+        &["Keep to the path."],
+    )];
+    static STRANGER: Conversation = Conversation {
+        nodes: &STRANGER_NODES,
+        entries: &[],
+        fallback: NodeId::new("greeting"),
+    };
 
     fn areas() -> Vec<Area> {
         let first = Area::new(
@@ -531,9 +574,9 @@ mod tests {
             vec![Entity::npc(
                 Position::new(2, 2),
                 "a stranger",
-                Speech::always(Dialogue::new("a stranger", &["Keep to the path."])),
                 Figure::Veiled,
                 Direction::South,
+                &STRANGER,
             )],
             vec![Portal::new(
                 Position::new(2, 0),
@@ -644,11 +687,15 @@ mod tests {
         world.move_player(Direction::East); // (2, 1)
         assert_eq!(Some(Prompt::Speak("a stranger")), world.prompt());
         match world.interact() {
-            Interaction::Dialogue { dialogue, .. } => {
-                assert_eq!("a stranger", dialogue.speaker);
-                assert_eq!(&["Keep to the path."], dialogue.lines);
+            Interaction::Talk(start) => {
+                assert_eq!("a stranger", start.name);
+                let node = start
+                    .talk
+                    .entry(|condition| start.known.holds(condition))
+                    .expect("an entry node");
+                assert_eq!(&["Keep to the path."], node.lines);
             }
-            other => panic!("expected dialogue, got {other:?}"),
+            other => panic!("expected a conversation, got {other:?}"),
         }
     }
 
@@ -755,20 +802,89 @@ mod tests {
         let mut world = region();
         // Ysolde, in the chapel, before anything has been found.
         stand_facing(&mut world, Position::new(55, 33), Direction::East);
-        let Interaction::Dialogue { dialogue, figure } = world.interact() else {
-            panic!("expected dialogue");
+        let Interaction::Talk(start) = world.interact() else {
+            panic!("expected a conversation");
         };
-        assert_eq!("Ysolde", dialogue.speaker);
-        assert_eq!(Figure::Veiled, figure);
-
-        world.record_for_test(Discovery::ChapelBasin);
-        let Interaction::Dialogue { dialogue, .. } = world.interact() else {
-            panic!("expected dialogue");
-        };
+        assert_eq!("Ysolde", start.name);
+        assert_eq!(Figure::Veiled, start.figure);
+        let opening = start
+            .talk
+            .entry(|condition| start.known.holds(condition))
+            .expect("an entry node");
         assert!(
-            dialogue.lines.iter().any(|line| line.contains("basin")),
+            opening.lines.iter().any(|line| line.contains("remember")),
+            "her greeting changed unexpectedly: {:?}",
+            opening.lines
+        );
+
+        // And once something is found, she has something else to say first.
+        world.record_for_test(Discovery::ChapelBasin);
+        let Interaction::Talk(start) = world.interact() else {
+            panic!("expected a conversation");
+        };
+        let reacted = start
+            .talk
+            .entry(|condition| start.known.holds(condition))
+            .expect("an entry node");
+        assert!(
+            reacted.lines.iter().any(|line| line.contains("basin")),
             "she should react to what was found: {:?}",
-            dialogue.lines
+            reacted.lines
+        );
+        assert_ne!(opening.id, reacted.id, "the entry should have moved");
+    }
+
+    /// The node a named character would start a conversation at right now.
+    fn entry_of(world: &World, name: &str) -> crate::game::NodeId {
+        let entity = world
+            .area()
+            .entities()
+            .iter()
+            .find(|entity| entity.name == name)
+            .unwrap_or_else(|| panic!("{name} is not here"));
+        let EntityKind::Npc { talk, .. } = entity.kind else {
+            panic!("{name} does not talk");
+        };
+        let known = world.progress().snapshot_known();
+        talk.entry(|condition| known.holds(condition))
+            .expect("an entry node")
+            .id
+    }
+
+    #[test]
+    fn what_one_conversation_does_changes_what_another_says() {
+        // The point of a flag: accusing Cassen is something the *world* keeps,
+        // and Maren has an opinion about it that she did not have before.
+        let mut world = region();
+        world.goto_for_test(crate::game::areas::VILLAGE);
+        let cassen_before = entry_of(&world, "Cassen");
+        let maren_before = entry_of(&world, "Maren");
+
+        world.apply(&[Effect::Set(Flag::CassenAccused)]);
+
+        assert_ne!(
+            cassen_before,
+            entry_of(&world, "Cassen"),
+            "Cassen should answer an accusation differently"
+        );
+        assert_ne!(
+            maren_before,
+            entry_of(&world, "Maren"),
+            "and Maren should have something to say about it"
+        );
+    }
+
+    #[test]
+    fn a_conversation_effect_that_teaches_something_joins_the_journal() {
+        let mut world = region();
+        let learned = world.apply(&[Effect::Learn(Discovery::VillageWell)]);
+        assert_eq!(vec![Discovery::VillageWell], learned);
+        assert!(world.journal().contains(&Discovery::VillageWell));
+        // Applying it again is not news.
+        assert!(
+            world
+                .apply(&[Effect::Learn(Discovery::VillageWell)])
+                .is_empty()
         );
     }
 

@@ -64,6 +64,8 @@ pub struct Startup {
     pub art: Art,
     /// Where to save, if anywhere.
     pub save: Option<SaveStore>,
+    /// The player's preferences, shared with the screens that change them.
+    pub settings: crate::ui::Shared,
 }
 
 impl Startup {
@@ -76,6 +78,7 @@ impl Startup {
             assets: Assets::default(),
             art: Art::none(),
             save: None,
+            settings: crate::ui::Shared::new(crate::ui::Settings::new()),
         }
     }
 }
@@ -114,6 +117,8 @@ pub struct App {
     /// The most recent measured frame rate.
     frames_per_second: f32,
     key_releases: bool,
+    /// The player's preferences, shared with the screens that change them.
+    settings: crate::ui::Shared,
     /// The terminal's cell size in device pixels, when it reports one.
     cell_px: Option<(u16, u16)>,
     running: bool,
@@ -126,7 +131,8 @@ impl App {
     pub fn new(mut startup: Startup) -> Self {
         let portrait = startup.art.portrait;
         let save = startup.save.take();
-        let screen = ExplorationScreen::from_save(save, portrait);
+        let settings = startup.settings.clone();
+        let screen = crate::ui::TitleScreen::new(save, portrait, settings);
         Self::with_root(startup, Box::new(screen))
     }
 
@@ -150,6 +156,7 @@ impl App {
             graphics: startup.graphics,
             assets: startup.assets,
             art: startup.art,
+            settings: startup.settings,
             palette: Palette::for_colors(startup.capabilities.colors),
             stack,
             transition: Animator::new(),
@@ -425,6 +432,7 @@ impl App {
             frame_time: self.frame_time,
             animating: self.is_animating(),
             key_releases: self.key_releases,
+            motion: self.settings.get().motion,
         };
 
         {
@@ -482,6 +490,23 @@ mod tests {
         app
     }
 
+    /// An application whose root is the world rather than the title screen.
+    fn world_fixture() -> App {
+        world_fixture_with(Startup::headless(Capabilities::conservative()))
+    }
+
+    fn world_fixture_with(startup: Startup) -> App {
+        let world = crate::game::World::new(crate::game::areas::all(), crate::game::areas::CHAPEL);
+        let save = startup.save.clone();
+        let mut app = App::with_root(
+            startup,
+            Box::new(crate::ui::ExplorationScreen::new(world, save, None)),
+        );
+        app.set_size(120, 40);
+        app.compose_frame();
+        app
+    }
+
     fn frame_text(app: &App) -> String {
         let canvas = app.frame();
         let mut text = String::new();
@@ -510,11 +535,30 @@ mod tests {
     }
 
     #[test]
-    fn composing_the_root_screen_produces_the_world() {
-        let app = fixture();
+    fn the_application_opens_on_the_title_screen() {
+        let mut startup = Startup::headless(Capabilities::conservative());
+        // With motion off the title composes whole on its first frame, so the
+        // menu can be read without waiting for the opening to play.
+        startup.settings = crate::ui::Shared::new(crate::ui::Settings {
+            motion: crate::ui::Motion::Off,
+        });
+        let mut app = App::new(startup);
+        app.set_size(120, 40);
+        app.compose_frame();
+        assert_eq!("title", app.stack.active_name());
+        let text = frame_text(&app);
+        assert!(text.contains("New Game"), "the menu is missing:\n{text}");
+        assert!(text.contains("Continue"), "{text}");
+    }
+
+    #[test]
+    fn composing_the_world_produces_the_world() {
+        // The world is reached through the title, so the world is what this
+        // checks: the title's own composition is tested where it lives.
+        let app = world_fixture();
         let text = frame_text(&app);
         assert!(text.contains("Ruined Chapel"), "area name missing");
-        assert!(text.contains("(●:●)"), "the witch is missing");
+        assert!(text.contains("(o:o)"), "the mage is missing");
         assert!(text.contains("facing"), "status missing");
     }
 
@@ -624,7 +668,7 @@ mod tests {
         let store = SaveStore::at(directory.join("save.txt"));
         let mut startup = Startup::headless(Capabilities::conservative());
         startup.save = Some(store.clone());
-        let mut app = App::new(startup);
+        let mut app = world_fixture_with(startup);
         app.set_size(120, 40);
 
         app.handle_key(Key::char('w'));

@@ -54,14 +54,31 @@ def drain(seconds):
             out += chunk
     return out
 
-# Start at the reference size: the world should compose rather than suspend.
+# Wait for something rather than sleeping a fixed time: on a pseudo-terminal the
+# keyboard handshake can take a while to give up, and the title's own opening
+# plays after that. Polling is what makes this check about the game and not about
+# how fast the harness guessed the timings.
+def wait_for(needle, limit=25.0):
+    seen = b""
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        seen += drain(0.4)
+        if needle in seen:
+            break
+    return seen
+
+# Start at the reference size: the title should compose rather than suspend.
 resize(120, 40)
-time.sleep(1.2)
-out = drain(1.0)
+title = wait_for(b"New Game", 20.0)
+
+# Enter the world the way a player does, so everything after this is the game.
+os.write(fd, b"\r")
+out = wait_for(b"Ruined Chapel", 20.0)
 for keys in (b"s", b"w", b"a", b"d", b"h"):
     os.write(fd, keys)
     time.sleep(0.3)
     out += drain(0.2)
+out += title
 
 # Too small: the game suspends and says so, without losing its state.
 resize(40, 12)
@@ -83,12 +100,14 @@ except ChildProcessError:
 out += drain(1.5)
 
 # Everything observed counts as the session's output.
-out += suspended + resumed
+out += suspended + resumed + title
 
 checks = [
     ("entered the alternate screen", b"\x1b[?1049h" in out),
     ("hid the cursor", b"\x1b[?25l" in out),
     ("composed the ASCII world", b"\xe2\x80\xa2" in out or b"#" in out),
+    # The title is the first thing the game says, and it says it in glyphs.
+    ("composed the title screen", b"New Game" in title),
     # The witch's hair ink. Nothing else in the palette uses it, and the face
     # cannot be matched as text because every ink change between its cells emits
     # an escape sequence.
@@ -96,6 +115,7 @@ checks = [
     ("showed the controls", b"interact" in out),
     ("suspended below the minimum viewport", b"too small" in suspended),
     ("resumed after the resize", b"Ruined Chapel" in resumed),
+    ("kept the world through the title", b"Ruined Chapel" in out),
     ("showed the cursor again", b"\x1b[?25h" in out),
     ("left the alternate screen", b"\x1b[?1049l" in out),
     ("sent no graphics by default", b"\x1b_Ga=t" not in out),

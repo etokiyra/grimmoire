@@ -19,6 +19,7 @@
 //! | --- | --- | --- |
 //! | 1 | `area`, `pos`, `visited` | every version |
 //! | 2 | the above, plus `journal` and `braziers` | 2 and later |
+//! | 3 | the above, plus `flags` | 3 and later |
 //!
 //! Files are always *written* at [`VERSION`]. Older files are still *read*: a
 //! version 1 save loads with an empty journal and no braziers lit, which is
@@ -37,7 +38,7 @@ use std::path::{Path, PathBuf};
 const MAGIC: &str = "grimmoire-save";
 
 /// The save format version. Bump this when the layout changes incompatibly.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The oldest save version this build still understands.
 pub const OLDEST_SUPPORTED: u32 = 1;
@@ -57,6 +58,8 @@ pub struct SaveData {
     pub journal: Vec<String>,
     /// The moonwell braziers lit so far, in the order they were lit.
     pub braziers: Vec<String>,
+    /// Story facts conversations established, such as who has been told what.
+    pub flags: Vec<String>,
 }
 
 impl SaveData {
@@ -72,14 +75,21 @@ impl SaveData {
             visited,
             journal: Vec::new(),
             braziers: Vec::new(),
+            flags: Vec::new(),
         }
     }
 
     /// Adds the recorded progression.
     #[must_use]
-    pub fn with_progress(mut self, journal: Vec<String>, braziers: Vec<String>) -> Self {
+    pub fn with_progress(
+        mut self,
+        journal: Vec<String>,
+        braziers: Vec<String>,
+        flags: Vec<String>,
+    ) -> Self {
         self.journal = journal;
         self.braziers = braziers;
+        self.flags = flags;
         self
     }
 }
@@ -108,6 +118,9 @@ pub fn encode(data: &SaveData) -> String {
     out.push('\n');
     out.push_str("braziers=");
     out.push_str(&data.braziers.join(" "));
+    out.push('\n');
+    out.push_str("flags=");
+    out.push_str(&data.flags.join(" "));
     out.push('\n');
     out
 }
@@ -141,6 +154,7 @@ pub fn decode(text: &str) -> Option<SaveData> {
     let mut visited: Option<Vec<String>> = None;
     let mut journal: Option<Vec<String>> = None;
     let mut braziers: Option<Vec<String>> = None;
+    let mut flags: Option<Vec<String>> = None;
 
     for line in lines {
         if line.trim().is_empty() {
@@ -174,6 +188,9 @@ pub fn decode(text: &str) -> Option<SaveData> {
             "braziers" if version >= 2 => {
                 braziers = Some(value.split_whitespace().map(str::to_string).collect());
             }
+            "flags" if version >= 3 => {
+                flags = Some(value.split_whitespace().map(str::to_string).collect());
+            }
             _ => return None,
         }
     }
@@ -186,6 +203,7 @@ pub fn decode(text: &str) -> Option<SaveData> {
         visited: visited.unwrap_or_default(),
         journal: journal.unwrap_or_default(),
         braziers: braziers.unwrap_or_default(),
+        flags: flags.unwrap_or_default(),
     })
 }
 
@@ -331,9 +349,27 @@ mod tests {
     #[test]
     fn the_newest_version_writes_every_field() {
         let text = encode(&sample());
-        assert!(text.starts_with("grimmoire-save 2"));
+        assert!(text.starts_with("grimmoire-save 3"));
         assert!(text.contains("\njournal="));
         assert!(text.contains("\nbraziers="));
+        assert!(text.contains("\nflags="));
+    }
+
+    #[test]
+    fn a_version_two_save_migrates_with_no_flags() {
+        // Exactly what version 2 wrote.
+        let two = "grimmoire-save 2\narea=hollow-village\npos=62 30\nvisited=ruined-chapel whispering-woods hollow-village\njournal=village-well\nbraziers=waning\n";
+        let data = decode(two).expect("a version 2 save must still load");
+        assert_eq!("hollow-village", data.area);
+        assert_eq!(1, data.journal.len());
+        assert_eq!(1, data.braziers.len());
+        assert!(data.flags.is_empty(), "there were no flags in version 2");
+    }
+
+    #[test]
+    fn a_version_two_file_carrying_a_flags_field_is_rejected() {
+        let forged = "grimmoire-save 2\narea=a\npos=0 0\nflags=cassen-accused\n";
+        assert_eq!(None, decode(forged));
     }
 
     #[test]
@@ -341,6 +377,7 @@ mod tests {
         let data = sample().with_progress(
             vec!["village-well".to_string(), "woods-glade".to_string()],
             vec!["waning".to_string()],
+            vec!["cassen-accused".to_string()],
         );
         assert_eq!(Some(data.clone()), decode(&encode(&data)));
     }
@@ -357,7 +394,7 @@ mod tests {
 
     #[test]
     fn a_future_version_is_rejected_rather_than_guessed() {
-        assert_eq!(None, decode("grimmoire-save 3\narea=a\npos=0 0\n"));
+        assert_eq!(None, decode("grimmoire-save 4\narea=a\npos=0 0\n"));
     }
 
     #[test]

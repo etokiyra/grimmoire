@@ -28,6 +28,8 @@ between the shrine and the catacombs; it does not gate a place.
 | `Shift` + a direction | Sprint |
 | `e` | Interact with whatever you are facing, or whatever is adjacent |
 | `j` | The journal of what you have found |
+| `w` `s`, `enter` | In a conversation: move between choices, and say one |
+| `esc` | In a conversation: leave (what was said still counts) |
 | `h`, `?`, `F1` | Help and renderer diagnostics |
 | `F3` | The presentation study (a rendering prototype) |
 | `F2` | The renderer showcase (a development screen) |
@@ -154,6 +156,27 @@ narrower than three cells** — see [`map-design.md`](map-design.md).
   releases are not activations and auto-repeat is ignored, so holding `e` cannot
   interact over and over.
 
+## Conversations
+
+Talking is a **graph**: a node names its speaker, their expression, their lines,
+what reaching it does, and where it goes next; a choice can be hidden until the
+player has earned it, and can do something when taken (`game::conversation`).
+
+- **Entry nodes are chosen by what the player knows.** This is the generalisation
+  of the old discovery-reactive speech, so a character still reacts to a
+  discovery — and can now also react to something the player *did*.
+- **Effects are the only way a conversation changes anything**: teaching a
+  discovery, or setting a story fact. The conversation screen walks the graph
+  itself and hands the world the list when it closes.
+- **Choices can change what someone else says.** Accusing Cassen is what makes
+  Maren admit she cut the rope; promising the letters back is what makes Ysolde
+  talk about them.
+- **Leaving early is not a loss.** `esc` ends the conversation and still applies
+  everything that happened before it.
+
+The title screen's **Journal** entry reads the saved journal without continuing,
+so a returning player can see what they found before deciding.
+
 ## Progression and discoveries
 
 A **discovery** is a stable, saveable id with its content attached: a title and a
@@ -190,12 +213,13 @@ Only state that cannot be reconstructed is stored — the current area, the play
 position, the areas visited, the journal, and the braziers lit:
 
 ```
-grimmoire-save 2
+grimmoire-save 3
 area=sunken-cellar
 pos=20 12
 visited=ruined-chapel sunken-cellar
 journal=chapel-basin village-well
 braziers=waning
+flags=cassen-accused
 ```
 
 The format is versioned and parsed strictly. Anything unexpected — an unknown
@@ -211,6 +235,7 @@ interrupted write cannot corrupt an existing save.
 | --- | --- | --- |
 | 1 | `area`, `pos`, `visited` | every version |
 | 2 | the above, plus `journal` and `braziers` | 2 and later |
+| 3 | the above, plus `flags` | 3 and later |
 
 Files are always *written* at the current version and older files are still
 *read*. A version 1 save loads with an empty journal and no braziers lit, which is
@@ -235,7 +260,7 @@ need more design, and inventing it now would be premature.
 | --- | --- |
 | `src/game/area.rs` | Tiles, positions, directions, doorways, and the ASCII area parser |
 | `src/game/entity.rs` | NPCs, props and braziers; the figures and props they name |
-| `src/game/dialogue.rs` | Dialogue, and the speech variants a discovery unlocks |
+| `src/game/conversation.rs` | Branching dialogue: nodes, choices, conditions, effects |
 | `src/game/discovery.rs` | What can be learned, and the journal text for each |
 | `src/game/progress.rs` | What has been learned, and the moonwell's state |
 | `src/game/world.rs` | The player's place in the world: movement, collision, interaction, travel, progression, snapshots |
@@ -247,7 +272,10 @@ need more design, and inventing it now would be premature.
 | `src/ui/animation.rs` | The character animation model: stride, sprint, idle, blink |
 | `src/ui/effects.rs` | Transient feedback pulses |
 | `src/ui/exploration.rs` | The exploration screen: key mapping, camera, and the HUD overlay |
-| `src/ui/dialogue.rs` | The dialogue overlay and the speaker's bust |
+| `src/ui/title.rs` | The opening: the animated sky, the logo, and the menu |
+| `src/ui/dialogue.rs` | The conversation overlay: portraits, expressions, choices |
+| `src/ui/ornament.rs` | The shared glyph vocabulary for frames, rules and markers |
+| `src/ui/settings.rs` | Preferences, in their own file |
 | `src/ui/journal.rs` | The journal panel |
 
 The `game` and `save` modules never draw and never touch a terminal. The UI maps
@@ -292,5 +320,6 @@ viewport — so most authoring mistakes are caught without launching the game.
 ## Not implemented
 
 No combat, spells, inventory, quests, skill trees, or story. Items cannot be
-picked up. Dialogue branches only on what has been discovered. There is one puzzle
-and five characters, and the content is placeholder throughout.
+picked up. Conversations branch on what you know and what you have done, but there
+is no quest log and no scripting beyond the graph. There is one puzzle, nine
+characters, and the content is placeholder throughout.

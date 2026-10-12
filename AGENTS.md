@@ -80,6 +80,31 @@ All current area names, entities, and dialogue lines are placeholders.
   doorway placement, viewport size) and the material/air/motif identity each area
   should carry.
 
+## Conversation and presentation
+
+- **A conversation is data, not code.** Nodes, choices, conditions and effects
+  live in `game::conversation`; the world applies the effects and nothing else
+  mutates state. Adding a conversation must not add a branch to the renderer, and
+  must not add a special case to a screen.
+- **A screen cannot reach the world.** A pushed screen hands its outcome back
+  through `Command::Return` and `Screen::receive`; that is the only route by which
+  a conversation changes anything, and it is what keeps input routing — not a mode
+  flag — responsible for stopping movement during one.
+- **The graph is checked, not trusted.** `every_conversation_in_the_game_is_a_sound_graph`
+  walks every conversation the game can put a player inside: no dangling node, no
+  unreachable node, no empty speech, no line too long to read.
+- **Effects are idempotent and by stable id.** A flag or a discovery this build
+  does not know costs only itself in a save, and applying an effect twice changes
+  nothing.
+- **The ornament vocabulary is shared.** Frames, rules, selectors and markers come
+  from `ui::ornament`, so the title, a conversation, the journal and the HUD are
+  visibly one game. Do not draw a new border inline.
+- **Everything animates from elapsed time, and everything can be turned off.**
+  `Motion::Off` must leave every screen fully usable and still — the title, the
+  conversation, the world and the transitions included.
+- **Nothing the player must act on may be hidden.** A panel may announce, but it
+  must not cover an exit, a landmark, or the player.
+
 ## Content and progression
 
 - **A discovery is the reward.** Recording one is what "finding something" means,

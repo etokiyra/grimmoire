@@ -194,6 +194,34 @@ and ink. Before, objects were told apart by their single drawing character, whic
 meant adding one meant editing a match in the renderer and hoping no two shared a
 glyph.
 
+### Speaking: portraits, expressions and choices
+
+A conversation is drawn on a plate with the speaker's face in an inset of its
+own. The inset is darker than the panel on purpose: Ysolde is a hood with no face
+and is drawn in inks that are almost the colour of the surface, so a portrait
+needs a background that is deliberately *behind* it. Every character's portrait
+is eight rows tall with the face on row three, and row three is swapped for one
+of four eye rows to change the expression — the same art, four moods.
+
+Lines arrive a character at a time and any key that would advance completes them
+first, so the reveal is never in the way of reading quickly. With motion off the
+lines are simply there.
+
+Options sit at the bottom of the plate rather than under the lines, so moving the
+selector never makes the text jump, and the hint on the last row says what the
+keys do for the state the conversation is actually in.
+
+### Opening: the title screen
+
+The title is a sky, a moon, a horizon with the chapel on it, and the name. Every
+part of it is a function of one number — how long the screen has been open — so
+the stars twinkle on a hash of their position and the clock, the runes rise, the
+name reveals left to right and the menu assembles a row at a time. Nothing is
+stored and nothing drifts.
+
+The name is drawn with a vertical ramp, gold at the top and ember at the base,
+with a one-row shadow so it sits on the sky rather than in it.
+
 ### Place: material and air
 
 Two knobs give an area its identity, and both are small:

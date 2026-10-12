@@ -44,8 +44,8 @@ use super::effects::{Effects, Pulse};
 use super::theme::{Inks, Palette};
 use crate::render::{CanvasView, Color, Style};
 
-/// How many rows a figure's head takes, above its hem.
-const HEAD_ROWS: i32 = 2;
+/// How many rows a figure takes above its hem: two of head, then a body.
+const HEAD_ROWS: i32 = 3;
 
 /// The primary glyph families, grouped so the art can be read at a glance.
 mod art {
@@ -780,12 +780,18 @@ impl Scenery<'_> {
         let art = cast::art(figure);
         let inks = cast::inks(self.palette, figure);
         let head = &art.heads[pose.facing.index()];
-        let hem = art.hems[usize::from(sway)];
+        let body = &art.bodies[usize::from(sway)];
+        let hem = &art.hems[usize::from(sway)];
         let width = head[0].chars().count() as i32;
         let left = i32::from(sx) - (width - 1) / 2;
-        let top = i32::from(sy) - (HEAD_ROWS + 1 - 1);
+        let top = i32::from(sy) - HEAD_ROWS;
 
-        for (row, line) in head.iter().chain(std::iter::once(&hem)).enumerate() {
+        for (row, line) in head
+            .iter()
+            .chain(std::iter::once(body))
+            .chain(std::iter::once(hem))
+            .enumerate()
+        {
             for (column, ch) in line.chars().enumerate() {
                 if ch == ' ' {
                     continue;
@@ -1198,7 +1204,7 @@ mod tests {
                 );
             }
         }
-        assert!(text.contains("(●:●)"), "no bunny drawn:\n{text}");
+        assert!(text.contains("(o:o)"), "no bunny drawn:\n{text}");
     }
 
     /// The glyph the renderer chooses for a wall with the given neighbours.
@@ -1301,10 +1307,16 @@ mod tests {
         // The eye sits toward the direction of travel: that is the whole cue.
         world.move_player(Direction::East);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        assert!(text.contains(":●)"), "expected an east-facing eye:\n{text}");
+        assert!(text.contains(":o)"), "expected an east-facing eye:\n{text}");
         world.move_player(Direction::West);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        assert!(text.contains("(●:"), "expected a west-facing eye");
+        // The space in `(o: )` is transparent, so the terrain shows through it.
+        // What matters is that the eye is on the near side and not the far one.
+        assert!(text.contains("(o:"), "expected a west-facing eye");
+        assert!(
+            !text.contains(":o)"),
+            "the west profile should not carry an east-facing eye"
+        );
     }
 
     #[test]
@@ -1498,7 +1510,7 @@ mod tests {
         // or a mote would have put there, the figure's own glyph is on top.
         let world = World::new(areas::all(), areas::CHAPEL);
         let (_, text) = draw(&world, 120, 40, 0.0);
-        assert!(text.contains("(●:●)"), "the face is missing");
+        assert!(text.contains("(o:o)"), "the face is missing");
         let ears = text
             .lines()
             .filter(|line| line.matches('^').count() >= 2)
@@ -1509,7 +1521,7 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         let face = lines
             .iter()
-            .position(|line| line.contains("(●:●)"))
+            .position(|line| line.contains("(o:o)"))
             .expect("the face");
         assert!(
             lines[face - 1].matches('^').count() >= 2,
@@ -1539,6 +1551,6 @@ mod tests {
         );
         let world = World::new(vec![area], AreaId::new("stage"));
         let (_, text) = draw(&world, 12, 10, 0.0);
-        assert!(text.contains("(●:●)"), "no figure:\n{text}");
+        assert!(text.contains("(o:o)"), "no figure:\n{text}");
     }
 }

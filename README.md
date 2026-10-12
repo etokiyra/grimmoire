@@ -8,6 +8,9 @@ Every wall, every candle, every face is a character drawn into a cell grid by a
 renderer Grimmoire owns. No image files, no sprites, no graphics protocol — just
 glyphs, ink, and light.
 
+Talk to people. Ask things. Some of them lie, and remembering that changes what
+they say next.
+
 [![CI](https://github.com/etokiyra/grimmoire/actions/workflows/ci.yml/badge.svg)](https://github.com/etokiyra/grimmoire/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
@@ -15,15 +18,16 @@ glyphs, ink, and light.
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](#requirements)
 [![Art: source text](https://img.shields.io/badge/art-source%20text-8a2be2.svg)](#why-it-looks-the-way-it-does)
 
-<img src="docs/images/chapel.png" alt="The mage bunny standing in the nave of the Ruined Chapel, looking north towards the altar" width="820">
+<img src="docs/images/title.png" alt="The Grimmoire title screen: a night sky over a ruined chapel, with the name in glyphs" width="820">
 
 </div>
 
 > **Status: early development.** There is no release and no tagged version yet.
-> Grimmoire is a small, playable **exploration RPG** — a region of six connected
-> places, five characters with something to say, a journal of what you have
-> found, one puzzle, and fail-soft saving — on top of a custom ASCII renderer. It
-> is not a complete game.
+> Grimmoire is a small, playable **anime-inspired exploration RPG** — a title
+> screen, a region of six connected places, nine characters to talk to, a journal
+> of what you have found, one puzzle, conversations with real choices, and
+> fail-soft saving — on top of a custom ASCII renderer. It is not a complete
+> game.
 
 ## The region
 
@@ -61,6 +65,12 @@ something worth examining writes an entry in the **journal** (<kbd>J</kbd>): the
 setting, told a piece at a time. Discoveries change what characters say, and one
 of them opens a door that was not going to open.
 
+Talking is the other half of it. Conversations branch: you can ask, refuse,
+press someone on a lie, or say nothing at all, and what you choose is
+remembered. Accusing the village scavenger of cutting the well-rope changes how
+he greets you afterwards, and is what makes the mage who has been "passing
+through" for nine years admit she cut it herself.
+
 There is no experience, no loot, and no combat yet — and deliberately so: the
 reward for looking closely is knowing more. The long-term vision is
 character-focused dialogue, strategic turn-based magic combat, skill trees, and
@@ -97,7 +107,8 @@ content. See [`ROADMAP.md`](ROADMAP.md).
   every journal line are content; the renderer has no idea what any of them say.
 
 The player is a kawaii mage bunny: long pink ears, a pale face with two big bright
-eyes, a violet robe with white lace, and a star wand that twinkles.
+eyes, a violet robe with white lace, and a star wand that twinkles. Four rows
+tall, drawn from the same legend every other character is.
 
 <div align="center">
 <img src="docs/images/bunny.png" alt="The mage bunny drawn as ASCII, zoomed" width="330">
@@ -107,27 +118,32 @@ eyes, a violet robe with white lace, and a star wand that twinkles.
 
 <div align="center">
 
-**Speaking with Ysolde, who has no face.** The dialogue panel rises into place
-rather than appearing, and the world keeps breathing behind it. Five characters
-have their own silhouette, their own inks, and their own face when they talk.
+**The opening.** A night sky of twinkling glyphs, a moon, a horizon with the
+chapel standing on it, and the name in a warm ramp. The menu knows whether there
+is a journey to continue, and starting again over one asks first.
 
-<img src="docs/images/dialogue.png" alt="The dialogue panel open, showing Ysolde's ASCII bust and two lines of dialogue" width="820">
+<img src="docs/images/title.png" alt="The Grimmoire title screen" width="820">
 
-**The Whispering Woods** — a dark mass of trees with the green at its edges, a
-trodden trail through it, and a glade the trail does not advertise.
+**Conversations.** A speaker's face in its own inset, their name set into the
+plate, lines that arrive a character at a time — and, when they are asking
+something, the things you can say back.
 
-<img src="docs/images/woods.png" alt="The mage bunny at a standing stone in a dark forest clearing" width="820">
+<img src="docs/images/dialogue.png" alt="A conversation with Ysolde, offering four choices" width="400">
+<img src="docs/images/conversation.png" alt="Ysolde answering a question, wearing a warmer expression" width="400">
 
-**The Hollow Village** — a crossroad, six fallen houses, and a well that is dry
-to the bottom.
+**Finding something.** A discovery announces itself over the world and is written
+into the journal, which is the reward the game gives.
 
+<img src="docs/images/discovery.png" alt="A discovery plate announcing The Quiet Glade" width="400">
+<img src="docs/images/journal.png" alt="The journal, listing what has been found" width="400">
+
+**The world.** A dark wood, a dead village, a shrine of pale stone, and a
+catacomb of bone.
+
+<img src="docs/images/woods.png" alt="The mage bunny at a standing stone in a dark forest clearing" width="400">
 <img src="docs/images/village.png" alt="The mage bunny in a ruined village street" width="400">
 <img src="docs/images/shrine.png" alt="The Moonwell Shrine, its water lit and its braziers burning" width="400">
-
-**The Forgotten Catacombs**, and the journal that records what you find.
-
 <img src="docs/images/catacombs.png" alt="The mage bunny in a bone-floored catacomb gallery" width="400">
-<img src="docs/images/journal.png" alt="The journal panel listing discoveries" width="400">
 
 </div>
 
@@ -159,6 +175,7 @@ you have found so far.
 | <kbd>Shift</kbd> + a direction | Sprint |
 | <kbd>E</kbd> | Interact with what you face |
 | <kbd>J</kbd> | The journal of what you have found |
+| <kbd>W</kbd>/<kbd>S</kbd>, <kbd>Enter</kbd> | Move between choices, and say one |
 | <kbd>H</kbd>, <kbd>?</kbd>, <kbd>F1</kbd> | Help and diagnostics |
 | <kbd>F3</kbd> | Presentation study (rendering prototype) |
 | <kbd>F2</kbd> | Renderer showcase (development screen) |
@@ -177,12 +194,21 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 - Six connected areas that are **bigger than the viewport**, so the camera scrolls
   and the environment fills the screen. Every one is reachable from the start.
-- **Five characters**, each with a silhouette, a palette and a voice of their own:
+- **An animated opening** with a menu that reflects the save, a safe
+  confirmation before starting again, and settings of their own.
+- **Nine characters**, each with their own silhouette, inks, portrait and voice:
   a veiled keeper of the chapel, a lantern child in the wood, a scavenger who is
   lying about something, a priestess who answers in the right order for the wrong
-  reasons, and something in the catacombs that resents being awake.
+  reasons, something in the catacombs that resents being awake, a shrine
+  apprentice with too much energy, a wandering mage under an enormous hat, a
+  moss-and-mushroom spirit who speaks in halves, and a warden in steel with a
+  notebook.
+- **Conversations with choices.** Ask, refuse, press, or stay quiet; what you
+  choose is remembered, changes what that character says next, and sometimes
+  changes what someone else says too.
 - **A journal** of what you have found, written when you find it rather than when
-  you arrive somewhere, and kept across saves.
+  you arrive somewhere, and kept across saves. Discoveries announce themselves
+  over the world the moment they are made.
 - **Discoveries that matter**: what you learn changes what a character will say to
   you, and answering the moonwell opens a way that was sealed — for both
   directions, so it is a shortcut and not a toll.
@@ -208,9 +234,12 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 - An interaction model resolved deterministically from the adjacent tiles, with a
   contextual prompt instead of permanent instructions.
 - Automatic, versioned, **fail-soft** persistence of area, position, discovered
-  areas, the journal and the shrine's progress. Anything unrecognised means "start
-  a new game", never a half-loaded one; a save written by an older version is
-  *migrated*, not discarded.
+  areas, the journal, the shrine's progress, and the story facts conversations
+  established. Anything unrecognised means "start a new game", never a
+  half-loaded one; a save written by an older version is *migrated*, not
+  discarded.
+- **Preferences of their own** (full, reduced, or no motion), in a file of their
+  own, so turning the animation off cannot be lost by starting a new game.
 
 **The renderer underneath**
 
@@ -293,13 +322,15 @@ build a terminal emulator.
 | Module | Responsibility |
 | --- | --- |
 | `game` | The world model and its rules: areas, tiles, entities, movement, collision, interaction, travel, and progression. Pure — no rendering, no I/O. |
+| `game::conversation` | Branching dialogue as data: nodes, choices, conditions, effects. |
 | `game::discovery`, `game::progress` | What can be learned, what has been, and the shrine puzzle's state. |
 | `save` | A small versioned format, its migration path, and the only code that touches the save file. |
 | `render` | Pure, terminal-agnostic drawing: cells, styles, colours, rectangles, canvases, views, `Frame` composition, image handles, and the optional PNG encoder. |
 | `terminal` | The **only** module that talks to the terminal: raw mode, alternate screen, the Kitty keyboard and graphics protocols, input, capability detection, and diffed presentation. |
 | `anim` | Time-based animation with an explicitly advanced clock. |
 | `input` | Terminal-independent key and event types, including press/repeat/release. |
-| `ui` | Frame composition: the ASCII scenery renderer, the cast table, character animation, feedback effects, the journal, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
+| `ui` | Frame composition: the ASCII scenery renderer, the cast table, character animation, feedback effects, the title screen, conversations, the journal, the ornament vocabulary, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
+| `ui::settings` | The player's preferences, in their own file, shared with the screens that change them. |
 | `app` | Wires input, update, compose and present together. |
 | `pixel` | Software pixel rendering, used only by optional interface art. |
 
@@ -338,7 +369,8 @@ own the drawing model. No image decoder is needed — Kitty decodes.
   overlay of two rows rather than rows taken from the world.
 - **A hard minimum viewport (80×24).** Grimmoire suspends safely below it rather
   than degrading into noise.
-- **No ECS, no scripting engine, no widget toolkit** until a phase needs one.
+- **No ECS, no scripting engine, no widget toolkit** until a phase needs one. A
+  conversation is a data graph, not a scripting language.
 - **Game logic is pure.** Movement, collision, interaction and travel are testable
   without a terminal; the UI decides how things look.
 - **Artwork is source text, not files.** The world is glyph tables and neighbour
@@ -359,8 +391,9 @@ own the drawing model. No image decoder is needed — Kitty decodes.
   model has no continuation cell.
 - Presentation repaints per changed cell rather than tracking damage rectangles. A
   step with a scrolled camera rewrites a few thousand cells.
-- The world is six rooms with five characters, branching only on discoveries.
-  Nothing is generated, and the art and content are placeholders.
+- The world is six rooms with nine characters. Dialogue branches on what you know
+  and on what you have done, but there is no conversation tree beyond that, no
+  quest log, and no combat. The art and content are placeholders.
 - Visual verification was done on Linux under Kitty 0.49.2; other platforms are
   untested.
 - Terminal restoration cannot be guaranteed against `SIGKILL` or power loss.

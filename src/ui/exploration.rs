@@ -27,13 +27,14 @@ use super::effects::{Effects, Pulse};
 use super::help::{Binding, HelpOverlay};
 use super::journal::JournalScreen;
 use super::motion::{Motion, Movement};
+use super::ornament;
 use super::scenery::Scenery;
-use super::screen::{Command, Screen};
+use super::screen::{Command, Message, Screen};
 use super::showcase::Showcase;
 use super::theme::Palette;
 use super::transition;
 use super::{FrameContext, viewport};
-use crate::game::{Direction, Figure, Interaction, Prompt, World, areas};
+use crate::game::{Direction, Discovery, Figure, Interaction, Prompt, World, areas};
 use crate::input::{Key, KeyCode};
 use crate::render::{AssetId, Frame, Rect, Style, glyph};
 use crate::save::SaveStore;
@@ -47,6 +48,15 @@ const HUD_ROWS: u16 = 2;
 /// Slow enough that an untouched game costs almost nothing, fast enough that the
 /// water, the motes and the candles are visibly alive.
 const AMBIENT_PERIOD: Duration = Duration::from_millis(90);
+/// How long a discovery announces itself before folding away.
+const DISCOVERY_MOMENT: Duration = Duration::from_millis(2600);
+
+/// How often the world's ambient detail advances, for screens that pace
+/// themselves the same way.
+#[must_use]
+pub const fn ambient_period() -> Duration {
+    AMBIENT_PERIOD
+}
 
 /// Bindings listed by the help overlay while exploring.
 const CONTROLS: [Binding; 9] = [
@@ -79,6 +89,8 @@ pub struct ExplorationScreen {
     tick: Duration,
     /// Seconds of world time elapsed, for everything that moves.
     phase: f32,
+    /// The discovery being announced, and how long ago it was made.
+    discovery: Option<(Discovery, Duration)>,
 }
 
 impl ExplorationScreen {
@@ -95,6 +107,7 @@ impl ExplorationScreen {
             travel: Duration::ZERO,
             tick: AMBIENT_PERIOD,
             phase: 0.0,
+            discovery: None,
         }
     }
 
@@ -208,21 +221,18 @@ impl ExplorationScreen {
             }
         }
         match self.world.interact() {
-            Interaction::Dialogue { dialogue, figure } => {
+            Interaction::Talk(start) => {
                 // The optional image is a portrait of the veiled figure; every
                 // other character is drawn from their own ASCII bust.
-                let portrait = if figure == Figure::Veiled {
+                let portrait = if start.figure == Figure::Veiled {
                     self.portrait
                 } else {
                     None
                 };
-                Command::Push(Box::new(DialogueScreen::new(dialogue, figure, portrait)))
+                Command::Push(Box::new(DialogueScreen::new(start, portrait)))
             }
-            Interaction::Discovered(_) => {
-                // Finding something is worth a flourish, and it is written down
-                // immediately rather than waiting for a quit, so a discovery
-                // cannot be lost to a crash.
-                self.effects.spawn(self.world.player(), Pulse::Arrived);
+            Interaction::Discovered(discovery) => {
+                self.celebrate(discovery);
                 self.persist();
                 Command::None
             }
@@ -234,6 +244,14 @@ impl ExplorationScreen {
             }
             Interaction::Nothing | Interaction::Message => Command::None,
         }
+    }
+
+    /// Marks a discovery: a flourish on the spot, and a plate that says what was
+    /// found. Finding something is the reward the game gives, so it is the one
+    /// thing that interrupts.
+    fn celebrate(&mut self, discovery: Discovery) {
+        self.effects.spawn(self.world.player(), Pulse::Arrived);
+        self.discovery = Some((discovery, Duration::ZERO));
     }
 
     /// Draws the world across the whole viewport.
@@ -384,12 +402,18 @@ impl Screen for ExplorationScreen {
         if self.travel > Duration::ZERO {
             self.travel = self.travel.saturating_sub(delta);
         }
+        if let Some((discovery, age)) = self.discovery {
+            let age = age.saturating_add(delta);
+            self.discovery = (age < DISCOVERY_MOMENT).then_some((discovery, age));
+        }
     }
 
     fn compose(&self, frame: &mut Frame, context: &FrameContext) {
         let palette = &context.palette;
         self.compose_world(frame, palette);
         self.compose_hud(frame, palette);
+
+        self.compose_discovery(frame, palette);
 
         if self.travel > Duration::ZERO {
             let progress = 1.0 - self.travel.as_secs_f32() / TRAVEL_DURATION.as_secs_f32();
@@ -399,9 +423,10 @@ impl Screen for ExplorationScreen {
 
     fn is_animating(&self) -> bool {
         // Continuous frames only while something is actually moving: a step, a
-        // fading pulse, or an area transition. A merely-idle world is paced by
-        // `next_frame` instead.
+        // fading pulse, an announcement, or an area transition. A merely-idle
+        // world is paced by `next_frame` instead.
         self.travel > Duration::ZERO
+            || self.discovery.is_some()
             || self.effects.is_active()
             || self.performance.is_animated(self.movement.is_held())
     }
@@ -411,6 +436,22 @@ impl Screen for ExplorationScreen {
             Some(Duration::ZERO)
         } else {
             Some(self.tick)
+        }
+    }
+
+    fn receive(&mut self, message: Message) -> Command {
+        match message {
+            // A conversation walked its own graph; the world applies what it did.
+            // This is the only way a conversation can change anything, and it is
+            // why the effects are reported rather than written directly.
+            Message::Talk(effects) => {
+                let learned = self.world.apply(&effects);
+                if let Some(discovery) = learned.first() {
+                    self.celebrate(*discovery);
+                }
+                self.persist();
+                Command::None
+            }
         }
     }
 
@@ -444,6 +485,85 @@ impl Screen for ExplorationScreen {
 
     fn on_exit(&mut self) {
         self.persist();
+    }
+}
+
+impl ExplorationScreen {
+    /// Announces a discovery over the top of the world.
+    ///
+    /// It rises, holds, and folds away, and it never covers the player: the world
+    /// stays the thing being looked at, and the plate is a note laid over it.
+    fn compose_discovery(&self, frame: &mut Frame, palette: &Palette) {
+        let Some((discovery, age)) = self.discovery else {
+            return;
+        };
+        let bounds = frame.bounds();
+        if bounds.width < 40 || bounds.height < 12 {
+            return;
+        }
+        let total = DISCOVERY_MOMENT.as_secs_f32();
+        let t = (age.as_secs_f32() / total).clamp(0.0, 1.0);
+        // In quickly, hold, out slowly.
+        let presence = if t < 0.12 {
+            t / 0.12
+        } else if t > 0.82 {
+            (1.0 - t) / 0.18
+        } else {
+            1.0
+        };
+        if presence <= 0.02 {
+            return;
+        }
+        let width = (bounds.width.saturating_sub(8)).min(64);
+        let height = 5u16;
+        let top = bounds.y.saturating_add(2);
+        let plate = Rect::new(bounds.centered_x(width), top, width, height);
+        let mut view = frame.view(plate);
+        let plate_bounds = view.bounds();
+        let ink = if presence > 0.6 {
+            palette.focus
+        } else {
+            palette.effect_dim
+        };
+        view.fill_style(
+            plate_bounds,
+            Style::new()
+                .with_fg(palette.text)
+                .with_bg(palette.surface_raised),
+        );
+        ornament::plate(
+            &mut view,
+            plate_bounds,
+            Some("you noticed something"),
+            Style::new().with_fg(ink),
+            Style::new().with_fg(ink).bold(),
+        );
+        view.put_str(
+            plate_bounds.x.saturating_add(2),
+            plate_bounds.y.saturating_add(1),
+            discovery.title(),
+            Style::new().with_fg(palette.text).bold(),
+        );
+        view.put_str(
+            plate_bounds
+                .right()
+                .saturating_sub(glyph::display_width("[j] journal") + 2),
+            plate_bounds.y.saturating_add(1),
+            "[j] journal",
+            palette.muted_style(),
+        );
+        for (offset, line) in glyph::wrap(discovery.journal(), plate_bounds.width.saturating_sub(4))
+            .into_iter()
+            .take(2)
+            .enumerate()
+        {
+            view.put_str(
+                plate_bounds.x.saturating_add(2),
+                plate_bounds.y.saturating_add(2 + offset as u16),
+                &line,
+                palette.secondary_style(),
+            );
+        }
     }
 }
 
@@ -490,6 +610,7 @@ mod tests {
             frame_time: Duration::ZERO,
             animating: false,
             key_releases: true,
+            motion: crate::ui::settings::Motion::Full,
         }
     }
 
@@ -525,6 +646,47 @@ mod tests {
             text.push('\n');
         }
         text
+    }
+
+    #[test]
+    fn a_conversation_effect_reaches_the_world_and_is_persisted() {
+        use crate::game::{Effect, Flag};
+        use crate::ui::screen::Message;
+
+        let mut screen = screen();
+        // A conversation hands its effects back through the stack.
+        assert!(matches!(
+            screen.receive(Message::Talk(vec![
+                Effect::Set(Flag::WrenToldOfRin),
+                Effect::Learn(crate::game::Discovery::WoodsGlade),
+            ])),
+            Command::None
+        ));
+        assert!(screen.world().progress().has(Flag::WrenToldOfRin));
+        assert!(screen.world().knows(crate::game::Discovery::WoodsGlade));
+        assert!(
+            screen.discovery.is_some(),
+            "a discovery should announce itself"
+        );
+        assert!(screen.is_animating(), "and it needs frames to do it");
+    }
+
+    #[test]
+    fn an_announcement_settles_and_stops_asking_for_frames() {
+        use crate::game::{Effect, Flag};
+        use crate::ui::screen::Message;
+
+        let mut screen = screen();
+        screen.receive(Message::Talk(vec![Effect::Set(Flag::CassenAccused)]));
+        assert!(screen.discovery.is_none(), "a flag is not a discovery");
+        screen.receive(Message::Talk(vec![Effect::Learn(
+            crate::game::Discovery::VillageWell,
+        )]));
+        assert!(screen.discovery.is_some());
+        for _ in 0..40 {
+            screen.update(Duration::from_millis(120));
+        }
+        assert!(screen.discovery.is_none(), "it folds away");
     }
 
     #[test]
@@ -828,7 +990,7 @@ mod tests {
         let (canvas, _) = compose_into(&screen, 120, 40);
         let text = frame_text(&canvas);
         assert!(
-            text.contains("(●:●)"),
+            text.contains("(o:o)"),
             "the bunny's face is missing:\n{text}"
         );
         // The gap between the ears is transparent, so they are counted rather

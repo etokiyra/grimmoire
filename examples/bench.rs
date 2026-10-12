@@ -66,6 +66,7 @@ fn main() {
         frame_time: Duration::ZERO,
         animating: false,
         key_releases: true,
+        motion: grimmoire::ui::Motion::Full,
     };
     let (width, height) = (120u16, 40u16);
     println!(

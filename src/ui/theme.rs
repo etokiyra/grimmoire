@@ -121,6 +121,14 @@ pub struct Palette {
     pub priestess: Inks,
     /// A bound revenant: bone, grave-wrappings, and rust.
     pub revenant: Inks,
+    /// A shrine apprentice: copper hair, teal cloth, white ribbons.
+    pub apprentice: Inks,
+    /// A wandering mage: weathered, crimson cloak, and gold.
+    pub wanderer: Inks,
+    /// A wood spirit: moss, bark, and a warm cap.
+    pub spirit: Inks,
+    /// A warden in steel: silver plate and a cold blue cloak.
+    pub warden: Inks,
 }
 
 impl Palette {
@@ -220,6 +228,50 @@ impl Palette {
             eye: Color::LightGreen,
             wood: Color::Red,
             magic: Color::LightGreen,
+            shadow: Color::Black,
+        },
+        apprentice: Inks {
+            skin: Color::LightYellow,
+            hair: Color::LightRed,
+            cloth: Color::Cyan,
+            cloth_dark: Color::Blue,
+            trim: Color::White,
+            eye: Color::LightCyan,
+            wood: Color::Yellow,
+            magic: Color::LightMagenta,
+            shadow: Color::Black,
+        },
+        wanderer: Inks {
+            skin: Color::Yellow,
+            hair: Color::Red,
+            cloth: Color::Red,
+            cloth_dark: Color::Black,
+            trim: Color::Yellow,
+            eye: Color::LightYellow,
+            wood: Color::Yellow,
+            magic: Color::LightRed,
+            shadow: Color::Black,
+        },
+        spirit: Inks {
+            skin: Color::White,
+            hair: Color::Green,
+            cloth: Color::Green,
+            cloth_dark: Color::Black,
+            trim: Color::Yellow,
+            eye: Color::LightGreen,
+            wood: Color::Yellow,
+            magic: Color::LightGreen,
+            shadow: Color::Black,
+        },
+        warden: Inks {
+            skin: Color::White,
+            hair: Color::LightCyan,
+            cloth: Color::Blue,
+            cloth_dark: Color::Black,
+            trim: Color::White,
+            eye: Color::LightCyan,
+            wood: Color::Cyan,
+            magic: Color::LightBlue,
             shadow: Color::Black,
         },
     };
@@ -330,6 +382,59 @@ impl Palette {
             wood: Color::Indexed(137),
             magic: Color::Indexed(155),
             shadow: Color::Indexed(233),
+        },
+        // Nim: warm copper hair, teal shrine cloth, and white ribbon. Bright,
+        // warm, and the only character dressed in a colour that is not also in
+        // the landscape.
+        apprentice: Inks {
+            skin: Color::Indexed(223),
+            hair: Color::Indexed(215),
+            cloth: Color::Indexed(80),
+            cloth_dark: Color::Indexed(31),
+            trim: Color::Indexed(231),
+            eye: Color::Indexed(87),
+            wood: Color::Indexed(137),
+            magic: Color::Indexed(213),
+            shadow: Color::Indexed(234),
+        },
+        // Maren: sun-bleached, crimson, and gold. The loudest of the wanderers,
+        // which is what the hat is for.
+        wanderer: Inks {
+            skin: Color::Indexed(180),
+            hair: Color::Indexed(131),
+            cloth: Color::Indexed(124),
+            cloth_dark: Color::Indexed(88),
+            trim: Color::Indexed(220),
+            eye: Color::Indexed(222),
+            wood: Color::Indexed(137),
+            magic: Color::Indexed(209),
+            shadow: Color::Indexed(234),
+        },
+        // Wren: moss, bark, and a warm cap. Almost camouflage, so a glimpse of
+        // her is easy to miss and worth having.
+        spirit: Inks {
+            skin: Color::Indexed(187),
+            hair: Color::Indexed(113),
+            cloth: Color::Indexed(65),
+            cloth_dark: Color::Indexed(22),
+            trim: Color::Indexed(180),
+            eye: Color::Indexed(194),
+            wood: Color::Indexed(101),
+            magic: Color::Indexed(156),
+            shadow: Color::Indexed(234),
+        },
+        // Tamsin: steel and silver, lit cold. She is the only figure in the
+        // catacombs that is not bone-coloured, which is the point of her.
+        warden: Inks {
+            skin: Color::Indexed(223),
+            hair: Color::Indexed(250),
+            cloth: Color::Indexed(60),
+            cloth_dark: Color::Indexed(17),
+            trim: Color::Indexed(255),
+            eye: Color::Indexed(117),
+            wood: Color::Indexed(144),
+            magic: Color::Indexed(195),
+            shadow: Color::Indexed(234),
         },
     };
 

@@ -106,6 +106,10 @@ fn run(mode: Mode) -> io::Result<()> {
         assets,
         art,
         save: grimmoire::save::SaveStore::default_location(),
+        // Preferences are read before the terminal is entered, so a bad file is
+        // noticed while messages still print normally, and so the first frame is
+        // already drawn the way the player asked for.
+        settings: grimmoire::ui::Shared::new(grimmoire::ui::Settings::load()),
     };
 
     let mut terminal = Terminal::new()?;

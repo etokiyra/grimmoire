@@ -17,11 +17,14 @@ pub mod help;
 pub mod journal;
 pub mod layout;
 pub mod motion;
+pub mod ornament;
 pub mod scenery;
 pub mod screen;
+pub mod settings;
 pub mod showcase;
 pub mod stage;
 pub mod theme;
+pub mod title;
 pub mod transition;
 pub mod viewport;
 
@@ -31,9 +34,11 @@ pub use help::HelpOverlay;
 pub use journal::JournalScreen;
 pub use layout::Layout;
 pub use screen::{Command, Outcome, Screen, ScreenStack};
+pub use settings::{Motion, Settings, Shared};
 pub use showcase::{Scene, Showcase};
 pub use stage::StageScreen;
 pub use theme::Palette;
+pub use title::TitleScreen;
 
 use std::time::Duration;
 
@@ -63,4 +68,6 @@ pub struct FrameContext {
     pub animating: bool,
     /// Whether the terminal reports key releases, for diagnostics.
     pub key_releases: bool,
+    /// How much motion the player has asked for.
+    pub motion: Motion,
 }

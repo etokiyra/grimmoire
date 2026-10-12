@@ -12,6 +12,20 @@ use crate::render::{Frame, Rect};
 
 use super::FrameContext;
 
+/// A message from a screen to the screen underneath it.
+///
+/// A pushed screen cannot reach the screen that pushed it, by design: screens do
+/// not know about each other. When one *has* to hand something back — a
+/// conversation that has to tell the world what the player decided — it says so
+/// as it leaves, and the stack delivers the message on its way out. That keeps
+/// the stack in charge of who sees input, which is what stops a dialogue panel
+/// from quietly becoming a mode flag inside the game.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Message {
+    /// A conversation ended, having done these things. The world applies them.
+    Talk(Vec<crate::game::Effect>),
+}
+
 /// What a screen asks the stack to do after handling input.
 ///
 /// Screens never mutate the stack directly; they return a command and the stack
@@ -25,6 +39,8 @@ pub enum Command {
     Push(Box<dyn Screen>),
     /// Return to the screen beneath this one.
     Pop,
+    /// Leave this screen, handing `message` to the screen beneath.
+    Return(Message),
 }
 
 /// A distinct mode of the application with its own input, state, and visuals.
@@ -42,6 +58,13 @@ pub trait Screen {
 
     /// Composes this screen into `frame`.
     fn compose(&self, frame: &mut Frame, context: &FrameContext);
+
+    /// Handles a message from a screen that was pushed from this one.
+    ///
+    /// The default ignores it: a screen only receives what it asks for.
+    fn receive(&mut self, _message: Message) -> Command {
+        Command::None
+    }
 
     /// Called when the terminal size changes, before the next compose.
     fn on_resize(&mut self, _area: Rect) {}
@@ -286,6 +309,26 @@ impl ScreenStack {
                     }
                 }
             }
+            Command::Return(message) => {
+                if self.screens.len() <= 1 {
+                    // Nothing beneath to tell; treat it as leaving.
+                    return Outcome {
+                        quit: true,
+                        changed: false,
+                    };
+                }
+                self.screens.pop();
+                // The screen beneath may answer the message with a command of its
+                // own — opening another conversation, for instance — so the result
+                // is applied rather than discarded.
+                let follow_up = match self.screens.last_mut() {
+                    Some(screen) => screen.receive(message),
+                    None => Command::None,
+                };
+                let mut outcome = self.apply(follow_up);
+                outcome.changed = true;
+                outcome
+            }
         }
     }
 }
@@ -366,6 +409,7 @@ mod tests {
             capabilities: Capabilities::conservative(),
             graphics: crate::terminal::GraphicsSupport::Forced,
             art: crate::ui::art::Art::none(),
+            motion: crate::ui::settings::Motion::Full,
             key_releases: true,
             palette: Palette::BASIC,
             stats: PresentStats::default(),

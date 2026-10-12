@@ -9,6 +9,75 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — a title screen, branching conversations, and a cast of nine
+
+- **An animated title screen.** The game opens on a night sky over the chapel:
+  stars twinkling on a hash of their position, a moon and a horizon, runes rising
+  off the ground, and the name composed out of glyphs in a warm ramp, revealed
+  left to right. The menu assembles a row at a time. It is the game's first
+  impression rather than a panel that disappears.
+- **A menu that tells the truth.** New Game, Continue, Journal, Settings, Quit.
+  Continue and Journal are disabled — and *skipped* while navigating — when there
+  is no save, and the footer names where the save left off. Starting again over a
+  save asks first ("Starting again will replace the journey you have saved"), and
+  `esc` backs out of it safely. Settings change the motion level and are written
+  to their own file, never into the save.
+- **Conversations instead of lines.** Dialogue is now a graph of nodes with
+  choices, conditions and effects (`game::conversation`): a node names its
+  speaker, its mood, its lines, what it does and where it goes. Entry nodes are
+  chosen by what the player knows, which is how the old discovery-reactive speech
+  was generalised rather than replaced. Every existing conversation still reacts
+  to discoveries; several now ask questions too.
+- **Choices with consequences.** Accusing Cassen of cutting the rope is
+  remembered, changes how he greets you afterwards, and is what makes Maren admit
+  she cut it; promising to return the letters changes what Ysolde says about them;
+  telling Nim about the moonwell, Wren about the lantern keeper, and Tamsin the
+  scribe's name are all story facts that persist. Some choices teach a discovery
+  outright, exactly as examining a relic would.
+- **Four new characters**, each with their own silhouette, inks, portrait and
+  voice: **Nim**, the shrine's apprentice (ribbons and far too much energy),
+  **Maren**, a wandering mage under an enormous hat who has been "passing
+  through" for nine years, **Wren**, a moss-and-mushroom spirit who keeps the
+  glade and speaks in halves, and **Tamsin**, a warden in steel with a notebook
+  and a gentler manner than the armour suggests.
+- **A visual-novel conversation panel.** A speaker's face in its own darker
+  inset, the name set into the plate's edge, lines that arrive a character at a
+  time and can be completed with one key, and the options listed at the bottom
+  with a selector that moves between them. The portrait changes expression with
+  the speaker's mood.
+- **Discoveries announce themselves**: a plate over the top of the world naming
+  what was found, with a line from the journal, folding away after a few seconds.
+- **A records screen from the title**, so a returning player can read what they
+  found before deciding to continue.
+
+### Changed — characters are four rows tall, and drawn from a bigger vocabulary
+
+- Figure art is now **two head rows, a body and a hem**, with the body and hem
+  each in a still and a swaying pair, so a step moves the garment. Faces, hoods,
+  hats, plumes and ribbons are all distinct enough to name a character at a
+  glance.
+- Dialogue portraits are 12 × 8 with **four eye rows** per character, swapped for
+  the speaker's expression.
+
+### Changed — save version 3
+
+- Adds `flags`: the story facts conversations establish. Version 1 and version 2
+  files are still read, with no flags, so nobody loses a place or a discovery to
+  this. A flag this build does not know costs only itself.
+
+### Fixed — a conversation's effects are actually applied
+
+- The conversation screen resolves its own graph and hands the world a list of
+  effects when it closes; without the wiring that delivers them, every choice that
+  did something would have silently done nothing. Found and fixed while driving
+  the game in a real terminal.
+
+### Changed — the smoke test waits for the game instead of guessing
+
+- The pty smoke test now polls for the title and then for the world rather than
+  sleeping a fixed time, because the keyboard handshake on a pseudo-terminal
+  takes an unpredictable amount of time. It checks the title as well as the world.
+
 ### Added — a region worth exploring, and something to find in it
 
 - **Four new places, and the world is now a graph rather than two rooms.**
