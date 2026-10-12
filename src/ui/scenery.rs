@@ -62,6 +62,18 @@ const JOINT_PITCH: u16 = 6;
 /// nothing at all, because one is a treeline and the other is underground. A
 /// place with no apertures says so by returning the masonry it would have drawn
 /// anyway, so the wall keeps its own stone.
+/// How often a run of wall carries a window, in rows.
+///
+/// A chapel is glazed: its bays are close together, and reading as a lit
+/// building rather than a stone one is the whole of its identity. Everywhere
+/// else keeps the wider beat, where a window is an event rather than the rule.
+fn window_pitch(area: AreaId) -> u16 {
+    match area {
+        crate::game::areas::CHAPEL => WINDOW_PITCH / 2,
+        _ => WINDOW_PITCH,
+    }
+}
+
 fn aperture(area: AreaId) -> (char, char) {
     use crate::game::areas;
     match area {
@@ -329,6 +341,29 @@ pub struct Scenery<'a> {
     pub player: Pose,
     /// Live feedback pulses.
     pub effects: &'a Effects,
+    /// Where the tiles' backgrounds come from.
+    pub backdrop: Backdrop,
+}
+
+/// Where the world's cell backgrounds come from.
+///
+/// This is the seam between the material renderer and the atmosphere layer, and
+/// it is deliberately the *only* one: everything else about the two is
+/// independent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Backdrop {
+    /// Each tile paints its own two tones: the light the player carries, and the
+    /// dark outside it. What every place does by default.
+    #[default]
+    Material,
+    /// The tiles leave their backgrounds alone, so a field composed underneath
+    /// them shows through. The place is then lit by its own light, falling
+    /// smoothly, rather than by a step between two colours.
+    ///
+    /// The player's own light is not lost with the tones: it is still what
+    /// chooses a tile's ink (`lit`, `floor_ink`), which is the part that made a
+    /// figure or a wall face readable in the first place.
+    Atmosphere,
 }
 
 /// Which of a tile's neighbours are solid.
@@ -465,10 +500,11 @@ impl Scenery<'_> {
                 let facing = !neighbours.east || !neighbours.west;
                 let in_a_run = neighbours.north && neighbours.south;
                 let (pane, mark) = aperture(self.world.area_id());
-                if facing && in_a_run && position.y % WINDOW_PITCH == 0 {
+                let pitch = window_pitch(self.world.area_id());
+                if facing && in_a_run && position.y % pitch == 0 {
                     return (pane, Style::new().with_fg(arte.window));
                 }
-                if facing && in_a_run && position.y % WINDOW_PITCH == WINDOW_PITCH / 2 {
+                if facing && in_a_run && position.y % pitch == pitch / 2 {
                     return (mark, Style::new().with_fg(arte.window).bold());
                 }
                 // Damage breaks up long runs of masonry.
@@ -1074,6 +1110,11 @@ impl Scenery<'_> {
     /// divided down here to put the player's pool of light at roughly six tiles, a
     /// middle band out to fourteen, and shadow beyond that.
     fn shaded(&self, style: Style, tiles: u16) -> Style {
+        // A field underneath owns the background, and a tile that painted its own
+        // would shut it out. The ink still carries the light the player makes.
+        if self.backdrop == Backdrop::Atmosphere {
+            return style;
+        }
         // Two tones, not a grey ramp: the pool the player carries is the colour
         // of the place they are in, and everything outside it falls into that
         // place's dark. The `dim` attribute is deliberately not used — a terminal
@@ -1205,7 +1246,9 @@ fn hash(x: i32, y: i32, seed: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Neighbours, Scenery, axis_camera, distance, hash, inlay_glyph, motif_for};
+    use super::{
+        Backdrop, Neighbours, Scenery, axis_camera, distance, hash, inlay_glyph, motif_for,
+    };
     use crate::game::{Area, AreaId, Direction, Position, Tile, World, areas};
     use crate::render::{Canvas, Color, Style};
     use crate::ui::Palette;
@@ -1231,6 +1274,7 @@ mod tests {
             player: pose,
             step: 0,
             effects,
+            backdrop: Backdrop::Material,
         }
     }
 

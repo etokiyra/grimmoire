@@ -146,6 +146,8 @@ pub struct Outcome {
 pub struct ScreenStack {
     screens: Vec<Box<dyn Screen>>,
     capabilities: Capabilities,
+    /// The viewport last reported, so a screen pushed later is told it too.
+    area: Rect,
 }
 
 impl ScreenStack {
@@ -161,6 +163,7 @@ impl ScreenStack {
         let mut stack = ScreenStack {
             screens: Vec::new(),
             capabilities: Capabilities::conservative(),
+            area: Rect::new(0, 0, 0, 0),
         };
         stack.push_boxed(Box::new(root));
         stack
@@ -181,10 +184,22 @@ impl ScreenStack {
 
     /// Pushes an already boxed screen.
     ///
-    /// A screen pushed later is told what the terminal can do on the way in, so
-    /// it does not have to be handed the answer twice.
-    pub fn push_boxed(&mut self, mut screen: Box<dyn Screen>) {
+    /// A screen pushed later is told what the terminal can do, and how big it is,
+    /// on the way in. Without that it would compose into a size it has never been
+    /// told, because the application only reports a resize when the size *changes*.
+    pub fn push_boxed(&mut self, screen: Box<dyn Screen>) {
+        self.install(screen);
+    }
+
+    /// Appends a screen, telling it what the application already knows.
+    ///
+    /// Every route that adds a screen goes through here — a pushed command as
+    /// well as a root — because a screen that is not told the viewport composes
+    /// into a size it has never been given, and the application only reports a
+    /// resize when the size *changes*.
+    fn install(&mut self, mut screen: Box<dyn Screen>) {
         screen.on_capabilities(self.capabilities);
+        screen.on_resize(self.area);
         self.screens.push(screen);
     }
 
@@ -209,6 +224,12 @@ impl ScreenStack {
         self.screens.is_empty()
     }
 
+    /// The viewport last reported, for tests and diagnostics.
+    #[must_use]
+    pub const fn area(&self) -> Rect {
+        self.area
+    }
+
     /// The name of the active screen, or `"(none)"` when empty.
     #[must_use]
     pub fn active_name(&self) -> &'static str {
@@ -231,6 +252,7 @@ impl ScreenStack {
 
     /// Notifies every screen that the terminal size changed.
     pub fn on_resize(&mut self, area: Rect) {
+        self.area = area;
         for screen in &mut self.screens {
             screen.on_resize(area);
         }
@@ -314,7 +336,7 @@ impl ScreenStack {
                 changed: false,
             },
             Command::Push(screen) => {
-                self.screens.push(screen);
+                self.install(screen);
                 Outcome {
                     quit: false,
                     changed: true,
@@ -588,6 +610,31 @@ mod tests {
         assert!(stack.is_empty());
         assert!(stack.dispatch(Key::char('a')).quit);
         assert_eq!("(none)", stack.active_name());
+    }
+
+    #[test]
+    fn a_screen_pushed_later_is_told_the_viewport_and_the_shell() {
+        // The application only reports a resize when the size *changes*, so a
+        // screen pushed after the last resize would otherwise never hear about
+        // either and would compose into a size it has never been given.
+        let mut stack = ScreenStack::new();
+        stack.set_capabilities(crate::terminal::Capabilities {
+            colors: crate::terminal::ColorSupport::TrueColor,
+        });
+        stack.on_resize(Rect::from_size(120, 40));
+
+        let log = Log::default();
+        stack.push(FakeScreen {
+            name: "child",
+            log: log.clone(),
+            mode: Mode::Stay,
+        });
+        // The fake records nothing on its own, so ask the stack's own record.
+        assert_eq!(
+            Rect::from_size(120, 40),
+            stack.area(),
+            "the stack forgot the viewport it was told"
+        );
     }
 
     #[test]

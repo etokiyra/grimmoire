@@ -403,6 +403,38 @@ from the terminal's colour support could not know it. `Screen::on_capabilities`
 is that answer, called for every screen including ones pushed later, because the
 stack is what knows what the terminal reported.
 
+### The first gameplay host: the ruined chapel
+
+`ui::scenery` decides a background for every tile it draws: two tones, the light
+the player carries and the dark outside it. That is a *rectangle* around the
+player — a hard-edged patch, which is the one thing a light must not be — and it
+is also the thing that keeps a field out of the world.
+
+The seam between the two is one enum:
+
+```rust
+pub enum Backdrop { Material, Atmosphere }
+```
+
+`Material` is what every place does and is unchanged. `Atmosphere` means the tiles
+leave their backgrounds alone, so a field composed underneath them shows through.
+It is not an all-or-nothing light: the player's own light still chooses a tile's
+*ink* (`lit`, `floor_ink`), which is what made a wall face and a figure readable in
+the first place.
+
+The chapel is the one place that asks for `Atmosphere` so far, and its air is
+[`Sky::cloister`]: cold light from the high windows falling off towards the floor,
+and one warm glow low down where the candles are. It is **resolved once** — a
+place does not move — with only the top of it drifting, so the whole integration
+costs the world nothing per frame. See `docs/renderer-investigation.md` §11.
+
+One latent bug surfaced on the way, and it is worth recording because it would
+have bitten again: **a screen pushed while the game is running was never told the
+viewport or the terminal's capabilities.** The application only reports a resize
+when the size *changes*, and every screen before this one happened to be the root
+and so caught the first one. `ScreenStack::install` now tells every screen what is
+already known on the way in, whichever route added it.
+
 ### Why the wordmark is one row
 
 The name was a figlet banner, five rows of block letters. It could not be made to
@@ -502,6 +534,20 @@ reduction; 120×29 cells at font size 20):
 | A smaller terminal holds | the same composition at 101×24 |
 | The world is untouched | Ruined Chapel renders exactly as before the change |
 
+**The chapel, integrated** (Kitty 0.49.2, fullscreened, `grim`, no palette
+reduction; 120×29 cells at font size 20):
+
+| Check | Result |
+| --- | --- |
+| The hard light patch is gone | the player's background is the place's air, not a rectangle of `arte.light` |
+| The air has a source | cold above, falling away towards the floor, with one warm glow low down |
+| The air is smooth | sampled down a column it steps by 1–3 units of colour out of 255 |
+| The tiles draw over it | every wall, floor, prop and figure glyph keeps the field as its background |
+| The overlay stays opaque | the help plate paints its own surface, as before |
+| The player stays readable | the wizard's silhouette is unchanged; its light is now the tile *ink*, not the background |
+| It costs nothing per frame | 60 fps with 16 of 3480 cells painted; the field resolves once |
+| The fallback is honest | 256 colours keep a smooth (grey) gradient; 16 colours keep the stone |
+
 **Frame rate, measured** (a pseudo-terminal at 200×50, with `GRIMMOIRE_FRAME_STATS=1`
 reporting what the loop actually did): **64 frames/s walking east, 60 walking
 north, 8.7 idle.** The idle figure is the ambient tick, deliberately slow.
@@ -551,6 +597,25 @@ that difference is the whole question):
 | Menu navigation | 2.98 | 151 KiB/s | 11 |
 | A resize | 4.78 | 213 KiB/s | full redraws |
 | 256-colour terminal | 2.00 | 12 KiB/s | 11 |
+
+**The ruined chapel, measured the same way** (150×37, one core, before and after
+the integration). The interesting result is that there is no cost to show:
+
+| Phase | Before | After |
+| --- | --- | --- |
+| Standing idle | 3.83%, 158 KiB/s | 3.32%, 158 KiB/s |
+| Walking | 4.26%, 162 KiB/s | 3.93%, 162 KiB/s |
+| An overlay open | 3.49%, 157 KiB/s | 3.66%, 157 KiB/s |
+| A resize | 5.30%, 248 KiB/s | 4.48%, 248 KiB/s |
+| 16-colour terminal | 2.33%, 12 KiB/s | 2.17%, 12 KiB/s (material backdrop kept) |
+| 256-colour terminal | — | 2.33%, 25 KiB/s |
+
+Walking got *cheaper*. The material backdrop changed a tile's background whenever
+the player crossed the edge of the pool, so the pool's boundary was repainted on
+every step; a field that does not move cannot do that. The chapel's own frame rate
+is unchanged too — its diagnostics panel reads **60 fps with 16 of 3480 cells
+painted in 5 runs** while the ambience is live, and 11 fps on the ambient cadence
+when nothing is happening, which is the cadence the world has always had.
 
 So the atmosphere adds about **1.7 points of a core** during normal idle
 animation, against the 3-point budget the layer was given. The idle is 11 frames a

@@ -340,7 +340,33 @@ Delivered:
 
 Next: one gameplay place, not all six. See the investigation's closing section.
 
-## Phase 15 — Story
+## Phase 15 — The ruined chapel: the first atmospheric world (done)
+
+The atmosphere layer's first gameplay host. **Only the chapel**; the other five
+places are untouched. `docs/renderer-investigation.md` §11 is the report.
+
+Delivered:
+
+- **`Backdrop`**, the single seam between the material renderer and the layer:
+  `Material` (everywhere by default, unchanged) or `Atmosphere`, where the tiles
+  leave their backgrounds alone. It removes the hard-edged rectangular light patch
+  around the player and lets a field show through, without discarding the player's
+  light — that still chooses a tile's ink.
+- **`Sky::cloister`**: cold light from the high windows, a warm glow low where the
+  candles are, resolved once because a place does not move.
+- **A latent bug fixed**: a screen pushed during play was never told the viewport
+  or the terminal's capabilities. Every screen is now told on the way in,
+  whichever route added it.
+- **A 256-colour reduction that uses the grey ramp**, so dark gradients are smooth
+  there; sixteen colours keep the stone.
+- **Measured**: no measurable added cost — idle 3.83% → 3.32% of one core, walking
+  4.26% → 3.93%, and 60 fps with 16 of 3480 cells painted while the ambience runs.
+- **Honest shortcoming**: the light now works and the *architecture* does not. The
+  chapel's map is mostly open floor and the floor carries a shared grit density, so
+  it reads as a field of symbols with thin runs of wall in it. That is the next
+  thing worth doing here, and it is bigger than the atmosphere.
+
+## Phase 16 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

@@ -492,3 +492,128 @@ The next host is one gameplay place, **not all six**: pick the one with the most
 empty sky or air, and measure the same five phases there before touching another.
 Do not give the cellar, the shrine or the catacombs a field to share; each is
 independent and each is reversible on its own.
+
+## 11. Stage 3 outcome: the ruined chapel
+
+Stage 3 put the layer into a gameplay location for the first time. **Only the
+Ruined Chapel**; the other five places are untouched and still render byte for
+byte as they did.
+
+### What the integration is
+
+The material renderer decided a background for every tile: two tones, `arte.light`
+within seven tiles of the player and `arte.dark` beyond. That is a *rectangle*
+around the player — the one thing a light must never be — and it is also what kept
+a field out of the world. The seam is a single enum:
+
+```rust
+pub enum Backdrop { Material, Atmosphere }
+```
+
+`Material` is what every place does and is what they still do. `Atmosphere` means
+the tiles leave their backgrounds alone, so a field composed underneath them shows
+through. The player's own light is *not* thrown away with the tones: it still
+chooses a tile's ink (`lit`, `floor_ink`), which is the part that made a wall face
+readable in the first place.
+
+The chapel's air is `Sky::cloister`: cold light from the high windows falling away
+towards the floor, and one warm glow low and off to one side where the candles
+are. It is **resolved once** — a place does not move — with only the top of it
+drifting at three ticks a second. That is why the integration costs the world
+nothing per frame, and it is the answer to a question worth stating plainly:
+
+> **The 11 fps idle is not the atmosphere's cadence.** It is the world's own
+> ambient cadence (`AMBIENT_PERIOD`, 90 ms), which predates this work: the loop
+> wakes to redraw slow detail, and a frame is composed and diffed on each wake but
+> only the cells that changed are written. The chapel's diagnostics panel says so
+> while the ambience is live: **60 fps, 16 of 3480 cells painted, in 5 runs.** The
+> atmosphere has a 3 Hz clock of its own on top of that; both are slower than or
+> equal to the world's, so neither forces output.
+
+### A latent bug this exposed
+
+**A screen pushed while the game is running was never told the viewport or the
+terminal's capabilities.** The application reports a resize only when the size
+*changes*, and every screen before this one happened to be the root, so it caught
+the first report. The chapel's air is the first thing that needed to know the
+frame size before it composes, and it silently showed nothing at all. The symptoms
+were excellently misleading: the field was not drawn, so the tiles' backgrounds
+fell back to the theme's flat dark, and the scene looked *almost* right. A unit
+test that composes the chapel and counts the cells carrying the air is what
+settled it, and `ScreenStack::install` now tells every screen what is already
+known, whichever route added it.
+
+### The three weakest elements, and what was done
+
+Found by looking at captures of the running game:
+
+1. **The player's light was a hard-edged rectangle** of `arte.light` on
+   `arte.dark`, visible in the baseline as a bright rectangular patch around the
+   wizard. Replaced by the field, which has a falloff.
+2. **The first field was a flat wash with no source.** It read as "blue", not as
+   light in a room. It became two lights in one field: cold at the top where the
+   glazing is, warm and low where the candles are, and off to one side so it is
+   not a band across the frame.
+3. **The 16- and 256-colour paths collapsed the field into two flat tones with an
+   edge**, which is worse than the stone it replaced. Two answers: the 256-colour
+   reduction now considers the palette's **fine grey ramp**, not only the 6×6×6
+   cube whose dark end jumps from 0 straight to 95 — so a dark gradient is smooth
+   again, at the cost of its hue; and the sixteen-colour path **keeps the material
+   backdrop**, because no gradient survives it.
+
+Also: the chapel's glazing pitch is halved, so its bays read as a lit building
+rather than an occasional window.
+
+### Measurements
+
+| Phase (150×37, one core) | Before | After |
+| --- | --- | --- |
+| Standing idle | 3.83%, 158 KiB/s | **3.32%**, 158 KiB/s |
+| Walking | 4.26%, 162 KiB/s | **3.93%**, 162 KiB/s |
+| An overlay | 3.49%, 157 KiB/s | 3.66%, 157 KiB/s |
+| A resize | 5.30%, 248 KiB/s | 4.48%, 248 KiB/s |
+| 16 colours | 2.33%, 12 KiB/s | 2.17% (material backdrop) |
+| 256 colours | — | 2.33%, 25 KiB/s |
+
+The atmosphere adds **nothing measurable** in the chapel, and walking is *cheaper*
+than before: the material backdrop repainted the pool's boundary on every step,
+and a field that does not move cannot. The residual cost of the scene is the
+ambience that was already there.
+
+### Screenshots
+
+Real fullscreened Kitty captures, no palette reduction, in `docs/images/`:
+`chapel-before.png` and `chapel-after.png` (the same spot), `chapel-lit.png` (the
+wizard standing in the warm light), `chapel-walking.png`, `chapel-overlay.png`,
+`chapel-small.png`, `chapel-256.png`, `chapel-16.png`.
+
+### What still looks weak
+
+- **The architecture does not read as a building.** This is the honest headline.
+  The chapel's map is mostly open floor, and the floor carries a shared grit
+  density, so the view is a field of symbols with thin runs of wall in it. Fixing
+  that means changing the floor's material density or the map, and both are
+  renderer-wide or out of scope for this stage. It is the next thing worth doing
+  here, and it is bigger than the atmosphere.
+- **The field is screen-space, not world-space.** It reads as the air of the
+  *view* rather than as a lamp fixed in the room. For a broad wash that is
+  invisible in motion, but it is why the warm glow must stay soft: a tight pool
+  would visibly stick to the camera while walking.
+- **The player no longer carries a visible pool of light** in this place. The ink
+  still brightens near them, but the background ring is gone, and the effect is
+  much subtler than it was. Restoring it as a *glyph-layer* pool — a few cells of
+  ground light, not a background rectangle — is the way to get it back without
+  reintroducing the patch.
+- The candle flames and motes are the existing ones, so the "restrained magical
+  feature" the brief asked for is the architecture's own glazing and the flames
+  rather than anything new. The warm glow in the field supports them; it does not
+  replace them.
+- Sixteen colours keep the old stone, so the chapel's identity is a true-colour
+  and 256-colour one.
+
+### The next safest step
+
+One more gameplay place, again a single place, now that the seam is a one-line
+enum and the stack tells screens what they need. But the honest recommendation is
+to spend the next stage on the chapel's **architecture legibility** first: the
+atmosphere is now doing its job and the stone is what is letting the scene down.

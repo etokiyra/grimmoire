@@ -22,13 +22,14 @@
 use std::time::Duration;
 
 use super::animation::Performance;
+use super::atmosphere::{Atmosphere, Sky};
 use super::dialogue::DialogueScreen;
 use super::effects::{Effects, Pulse};
 use super::help::{Binding, HelpOverlay};
 use super::journal::JournalScreen;
 use super::motion::{Motion, Movement};
 use super::ornament;
-use super::scenery::Scenery;
+use super::scenery::{Backdrop, Scenery};
 use super::screen::{Command, Message, Screen};
 use super::showcase::Showcase;
 use super::theme::Palette;
@@ -38,6 +39,7 @@ use crate::game::{Direction, Discovery, Figure, Interaction, Prompt, World, area
 use crate::input::{Key, KeyCode};
 use crate::render::{AssetId, Frame, Rect, Style, glyph};
 use crate::save::SaveStore;
+use crate::terminal::{Capabilities, ColorSupport};
 
 /// How long the curtain takes to reveal a newly entered area.
 const TRAVEL_DURATION: Duration = Duration::from_millis(300);
@@ -91,6 +93,27 @@ pub struct ExplorationScreen {
     phase: f32,
     /// The discovery being announced, and how long ago it was made.
     discovery: Option<(Discovery, Duration)>,
+    /// The air of the place, where the place has one. Resolved for the frame it
+    /// will be drawn in, and painted under the world.
+    atmosphere: Atmosphere,
+    /// What the terminal can show, so the air is generated in the right colours.
+    support: ColorSupport,
+    /// The viewport the air was resolved for.
+    area: Rect,
+    /// The place whose air is loaded, when the place has one of its own.
+    air_area: Option<crate::game::AreaId>,
+}
+
+/// The air of a place, if the place has one.
+///
+/// Only the ruined chapel so far, and deliberately so: this is the one place the
+/// technique has been proved on. Every other place keeps its material backdrop.
+fn air_of(area: crate::game::AreaId) -> Option<Sky> {
+    if area == areas::CHAPEL {
+        Some(Sky::cloister())
+    } else {
+        None
+    }
 }
 
 impl ExplorationScreen {
@@ -108,6 +131,10 @@ impl ExplorationScreen {
             tick: AMBIENT_PERIOD,
             phase: 0.0,
             discovery: None,
+            atmosphere: Atmosphere::new(Sky::cloister(), ColorSupport::Ansi16),
+            support: ColorSupport::Ansi16,
+            area: Rect::new(0, 0, 0, 0),
+            air_area: None,
         }
     }
 
@@ -254,11 +281,22 @@ impl ExplorationScreen {
         self.discovery = Some((discovery, Duration::ZERO));
     }
 
+    /// Whether the place the player is standing in has an air of its own.
+    fn aired(&self) -> bool {
+        self.air_area.is_some()
+    }
+
     /// Draws the world across the whole viewport.
     fn compose_world(&self, frame: &mut Frame, palette: &Palette) {
         let bounds = frame.bounds();
         if bounds.is_empty() {
             return;
+        }
+        // The air goes down first and owns every cell's background; the tiles and
+        // the figures then draw their glyphs over it. Nothing above sets a
+        // background, which is the whole of the seam between the two.
+        if self.aired() && self.atmosphere.area() == bounds {
+            self.atmosphere.paint(frame);
         }
         let player = self.performance.pose(
             self.world.facing(),
@@ -273,6 +311,11 @@ impl ExplorationScreen {
             player,
             step: self.performance.steps(),
             effects: &self.effects,
+            backdrop: if self.aired() {
+                Backdrop::Atmosphere
+            } else {
+                Backdrop::Material
+            },
         }
         .draw(&mut view);
     }
@@ -407,6 +450,45 @@ impl Screen for ExplorationScreen {
             let age = age.saturating_add(delta);
             self.discovery = (age < DISCOVERY_MOMENT).then_some((discovery, age));
         }
+
+        // Load the air of wherever the player now is, and let it drift. A place
+        // without one is never resolved at all, so it costs nothing.
+        let here = self.world.area_id();
+        if self.air_area != Some(here) {
+            self.air_area = None;
+            // A place's air is a *gradient*, and a gradient needs somewhere to
+            // live. Sixteen colours cannot hold one: every dark stop snaps to the
+            // same black and the field becomes two flat tones with an edge, which
+            // looks worse than the material backdrop it replaced. So the small
+            // palette keeps the stone it had.
+            if self.support.has_extended_palette() && air_of(here).is_some() {
+                self.air_area = Some(here);
+                self.atmosphere = Atmosphere::new(Sky::cloister(), self.support);
+                self.atmosphere.resolve(self.area);
+            }
+        }
+        if self.aired() {
+            self.atmosphere.advance(delta);
+            self.atmosphere.resolve(self.area);
+        }
+    }
+
+    fn on_capabilities(&mut self, capabilities: Capabilities) {
+        if capabilities.colors == self.support {
+            return;
+        }
+        self.support = capabilities.colors;
+        if self.aired() {
+            self.atmosphere = Atmosphere::new(Sky::cloister(), self.support);
+            self.atmosphere.resolve(self.area);
+        }
+    }
+
+    fn on_resize(&mut self, area: Rect) {
+        self.area = area;
+        if self.aired() {
+            self.atmosphere.resolve(area);
+        }
     }
 
     fn compose(&self, frame: &mut Frame, context: &FrameContext) {
@@ -434,10 +516,13 @@ impl Screen for ExplorationScreen {
 
     fn next_frame(&self) -> Option<Duration> {
         if self.is_animating() {
-            Some(Duration::ZERO)
-        } else {
-            Some(self.tick)
+            return Some(Duration::ZERO);
         }
+        // The place's air has its own, slower clock; whichever comes first wins.
+        Some(match self.atmosphere.next_update() {
+            Some(air) if self.aired() => air.min(self.tick),
+            _ => self.tick,
+        })
     }
 
     fn receive(&mut self, message: Message) -> Command {
@@ -594,8 +679,8 @@ mod tests {
     use super::ExplorationScreen;
     use crate::game::{Direction, Position, World, areas};
     use crate::input::{Key, KeyCode, KeyKind};
-    use crate::render::{Canvas, Frame, ImagePlacement};
-    use crate::terminal::{Capabilities, GraphicsSupport, PresentStats};
+    use crate::render::{Canvas, Frame, ImagePlacement, Rect};
+    use crate::terminal::{Capabilities, ColorSupport, GraphicsSupport, PresentStats};
     use crate::ui::art::Art;
     use crate::ui::effects::Pulse;
     use crate::ui::screen::{Command, Screen};
@@ -688,6 +773,46 @@ mod tests {
             screen.update(Duration::from_millis(120));
         }
         assert!(screen.discovery.is_none(), "it folds away");
+    }
+
+    #[test]
+    fn the_chapel_is_lit_by_its_own_air() {
+        // The integration's claim: the field goes down first and the tiles draw
+        // over it, so a tile's background is the place's air and not the theme's
+        // flat dark.
+        let mut screen = screen();
+        screen.on_capabilities(Capabilities {
+            colors: ColorSupport::TrueColor,
+        });
+        let area = Rect::from_size(120, 40);
+        screen.on_resize(area);
+        screen.update(Duration::from_millis(20));
+        assert!(screen.aired(), "the chapel has no air loaded");
+        assert_eq!(
+            area,
+            screen.atmosphere.area(),
+            "the air was not resolved for the frame"
+        );
+
+        let mut canvas = Canvas::new(120, 40);
+        canvas.clear_with(Palette::EXTENDED.backdrop());
+        let mut images = Vec::new();
+        {
+            let mut frame = Frame::begin(&mut canvas, &mut images);
+            screen.compose(&mut frame, &context());
+        }
+        let truecolour = (0..40)
+            .flat_map(|y| (0..120).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                canvas
+                    .get(*x, *y)
+                    .is_some_and(|cell| matches!(cell.style.bg, crate::render::Color::Rgb(..)))
+            })
+            .count();
+        assert!(
+            truecolour > 500,
+            "only {truecolour} cells carry the air; the tiles overwrote it"
+        );
     }
 
     #[test]

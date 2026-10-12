@@ -18,7 +18,7 @@ use grimmoire::render::Canvas;
 use grimmoire::ui::Palette;
 use grimmoire::ui::animation::Performance;
 use grimmoire::ui::effects::Effects;
-use grimmoire::ui::scenery::Scenery;
+use grimmoire::ui::scenery::{Backdrop, Scenery};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -156,6 +156,7 @@ fn draw_pose(
             player,
             step: 0,
             effects: &effects,
+            backdrop: Backdrop::Material,
         }
         .draw(&mut view);
     }
@@ -180,6 +181,7 @@ fn draw(world: &World, width: u16, height: u16, phase: f32, stepping: bool) -> C
             player: performance.pose(world.facing(), stepping, false),
             step: 0,
             effects: &effects,
+            backdrop: Backdrop::Material,
         }
         .draw(&mut view);
     }

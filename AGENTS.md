@@ -228,9 +228,13 @@ Respect these; they are the point of the current structure:
   field defeats the presenter's diff, which is what the first prototype did, and
   the drifting band's height is very nearly the whole cost of a living sky.
 - `src/ui/scenery.rs` — the ASCII world renderer. Pure: a world, a palette, a
-  time and a pose in; cells out. It is **not** an atmosphere host yet; the next
-  host is one gameplay place, not all six. Structure comes from a tile's
-  neighbours,
+  time and a pose in; cells out. `Backdrop` is the **only** seam between it and
+  the atmosphere layer: `Material` (every place by default, unchanged) lets each
+  tile paint its own two tones, `Atmosphere` leaves backgrounds alone so a field
+  underneath shows through, and **the ruined chapel is the only place that asks
+  for it**. A tile that takes the atmosphere background still chooses its *ink*
+  from the player's light, and that is deliberate: the ink is what makes a wall
+  face readable. Structure comes from a tile's neighbours,
   variation from a hash of its world position (never of the frame, or the world
   would shimmer), and light from distance. Decor — inlay, candles, motes — is
   drawn only where it cannot cover a character, a prop or a doorway, and the draw
@@ -261,6 +265,12 @@ Additional rules:
   fallback in the same rectangle; the presenter reserves the rectangle and the
   graphics layer decides whether to paint pixels there. Kitty draws an image at
   the cursor, so a placement must move the cursor to the rectangle first.
+- **Every route that adds a screen must tell it what the application knows.**
+  `ScreenStack::install` hands a screen the terminal's capabilities and the
+  current viewport on the way in. The application reports a resize only when the
+  size *changes*, so a screen pushed later would otherwise compose into a size it
+  has never been given — which is exactly how the chapel's air silently did
+  nothing at first.
 - Input goes to the active (top) screen only; composition runs bottom to top.
   This is what stops movement while a dialogue panel is open — do not replace it
   with a mode flag inside the game.
@@ -365,8 +375,10 @@ After substantial changes, update the documentation in the same change:
 - `docs/renderer-investigation.md` — the renderer's structural limits, the VinZ
   investigation, the proposed atmosphere layer, the prototype's measurements,
   stage 1's outcome (the `ui::atmosphere` module, its corrections and its budget),
-  and stage 2's (the title-screen integration, its art-direction findings and its
-  numbers).
+  stage 2's (the title-screen integration, its art-direction findings and its
+  numbers), and stage 3's (the ruined chapel, the `Backdrop` seam, the stack bug
+  it exposed, and the fact that the architecture — not the light — is what the
+  chapel is now short of).
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

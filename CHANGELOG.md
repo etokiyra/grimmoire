@@ -9,6 +9,37 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Changed — the ruined chapel is lit by its own air
+
+The first gameplay location to use the atmosphere layer, and the only one: the
+other five places are untouched.
+
+- **`Backdrop`, the one seam.** `ui::scenery` gave every tile a background of two
+  tones — the light the player carries, and the dark outside it — which is a
+  hard-edged *rectangle* around the player. It now takes a policy: `Material`
+  (what every place does, unchanged) or `Atmosphere`, where the tiles leave their
+  backgrounds alone so a field underneath shows through. The player's light is not
+  lost with the tones; it still chooses a tile's ink.
+- **`Sky::cloister`**, the chapel's air: cold light from the high windows falling
+  away towards the floor, and one warm glow low and off to one side where the
+  candles are. Resolved **once**, because a place does not move, with only the top
+  of it drifting.
+- **Cost: nothing measurable.** Standing idle 3.83% → 3.32% of one core, walking
+  4.26% → 3.93%, at the same byte volume. Walking is *cheaper* than before,
+  because the material pool's boundary used to be repainted on every step. The
+  chapel's own diagnostics read 60 fps with 16 of 3480 cells painted while the
+  ambience is live.
+- **A latent bug fixed**: a screen pushed while the game was running was never
+  told the viewport or the terminal's capabilities, because the application only
+  reports a resize when the size *changes*. `ScreenStack::install` now tells every
+  screen what is already known, whichever route added it.
+- **The 256-colour reduction uses the palette's grey ramp**, not only the 6×6×6
+  cube, whose dark end jumps from 0 straight to 95: a dark gradient through it was
+  two flat tones with an edge. The sixteen-colour path keeps the material
+  backdrop, because no gradient survives sixteen colours.
+- **The chapel's glazing pitch is halved**, so its bays read as a lit building.
+
+### Changed — the title screen, rebuilt around the atmosphere layer
 ### Changed — the title screen, rebuilt around the atmosphere layer
 
 The title is the first screen to use `ui::atmosphere`, and it has been recomposed

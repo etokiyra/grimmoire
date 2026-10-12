@@ -142,7 +142,13 @@ impl Rgb {
     }
 }
 
-/// The nearest index of the terminal's 6×6×6 colour cube.
+/// The nearest of the 256-colour palette's entries.
+///
+/// Two families, both real: the 6×6×6 cube from index 16, and a fine grey ramp
+/// from 232 that steps by ten. Considering only the cube is a trap for dark
+/// fields — its dark end jumps straight from 0 to 95, so a night sky or a chapel
+/// interior comes out as two flat tones with an edge between them, which is
+/// exactly what a gradient is not. The greys are what make a dark gradient work.
 fn nearest_256(colour: Rgb) -> u8 {
     const STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
     let nearest = |value: u8| -> u8 {
@@ -158,7 +164,40 @@ fn nearest_256(colour: Rgb) -> u8 {
         best
     };
     let (r, g, b) = (nearest(colour.r), nearest(colour.g), nearest(colour.b));
-    16 + r * 36 + g * 6 + b
+    let cube = 16 + r * 36 + g * 6 + b;
+
+    // The nearest grey, then whichever of the two is actually closer.
+    let level = (u32::from(colour.r) + u32::from(colour.g) + u32::from(colour.b)) / 3;
+    let grey_step = ((level.saturating_sub(8)) / 10).min(23) as u8;
+    let grey = 232 + grey_step;
+    let grey_level = 8 + 10 * grey_step;
+
+    let cube_sample = cube_rgb(cube);
+    let grey_sample = (grey_level, grey_level, grey_level);
+    if distance(colour, grey_sample) < distance(colour, cube_sample) {
+        grey
+    } else {
+        cube
+    }
+}
+
+/// The 24-bit value an entry of the 6×6×6 cube stands for.
+fn cube_rgb(index: u8) -> (u8, u8, u8) {
+    const STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let cube = u32::from(index) - 16;
+    (
+        STEPS[(cube / 36) as usize],
+        STEPS[((cube / 6) % 6) as usize],
+        STEPS[(cube % 6) as usize],
+    )
+}
+
+/// How far apart two colours are, weighted the way an eye weighs them.
+fn distance(colour: Rgb, other: (u8, u8, u8)) -> u32 {
+    let dr = i32::from(colour.r) - i32::from(other.0);
+    let dg = i32::from(colour.g) - i32::from(other.1);
+    let db = i32::from(colour.b) - i32::from(other.2);
+    (3 * dr * dr + 6 * dg * dg + 2 * db * db) as u32
 }
 
 /// An ordered colour ramp, sampled by position.
@@ -421,6 +460,48 @@ impl Sky {
         sky.aurora = None;
         sky.stars = 1.6;
         sky
+    }
+
+    /// The air of a ruined chapel: cold moonlight falling in from the high
+    /// windows, and the last of the candles burning down at the altar.
+    ///
+    /// Not a sky, and deliberately so. There are no stars indoors and no moon:
+    /// the light has a *source*, so the ramp is brightest at the top where the
+    /// glazing runs and falls away towards the floor, while the one glow is warm
+    /// and low, where the flames are. A place lit by the same gradient as a
+    /// hillside is a hillside.
+    #[must_use]
+    pub fn cloister() -> Self {
+        Sky {
+            ramp: Ramp::new(vec![
+                Rgb::new(58, 70, 108), // the cold light of the high windows
+                Rgb::new(44, 52, 86),
+                Rgb::new(33, 38, 66),
+                Rgb::new(24, 27, 50),
+                Rgb::new(17, 18, 38),
+                Rgb::new(11, 11, 26), // the dark underfoot
+            ]),
+            horizon: 0.66,
+            glow: Rgb::new(255, 186, 110), // candle and lamp, not moonlight
+            // Off to one side and softly spread. A glow the width of the frame is
+            // a band however smooth it is, and one centred on the player reads as
+            // a light the player is carrying, which is the opposite of the point.
+            glow_u: 0.34,
+            glow_row: 0.80,
+            glow_width: 0.22,
+            glow_span: 0.34,
+            glow_strength: 0.30,
+            moon: None,
+            stars: 0.0,
+            aurora: None,
+            // The place does not move, so the field is drawn once and kept. Only
+            // the top of it drifts, where the light comes in.
+            drift: Drift::Band {
+                top: 0.0,
+                bottom: 0.14,
+            },
+            tick_rate: 3.0,
+        }
     }
 
     /// The same sky, held still.
@@ -1392,6 +1473,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_dark_colour_reduces_to_the_grey_ramp_rather_than_a_step_of_the_cube() {
+        // The cube's dark end goes from 0 straight to 95, so a dark gradient
+        // through it is two flat tones. The palette's greys are ten apart.
+        let dark = super::nearest_256(Rgb::new(30, 38, 68));
+        assert!(dark >= 232, "a dark colour landed on the cube: {dark}");
+        // And a genuinely blue colour still prefers the cube.
+        assert_eq!(21, super::nearest_256(Rgb::new(0, 0, 255)));
     }
 
     #[test]
