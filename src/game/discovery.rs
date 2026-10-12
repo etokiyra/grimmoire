@@ -35,6 +35,14 @@ pub enum Discovery {
     MoonwellAnswered,
     /// The bone scribe's tomb in the catacombs.
     CatacombScribe,
+    /// The sigil worn into the chapel floor, and what it is a tally of.
+    ChapelSigil,
+    /// The wall of names in the catacombs: everyone the water was given.
+    CatacombNames,
+    /// The door under the shrine, sealed from this side with lead.
+    ShrineSeal,
+    /// A twelfth lantern in the wood, unlit, with a name inside the shutter.
+    TwelfthLantern,
 }
 
 impl Discovery {
@@ -42,7 +50,7 @@ impl Discovery {
     ///
     /// A save naming anything outside this list is treated as unknown and
     /// dropped, so an old or hand-edited file can never invent progress.
-    pub const ALL: [Discovery; 7] = [
+    pub const ALL: [Discovery; 11] = [
         Discovery::ChapelBasin,
         Discovery::WoodsGlade,
         Discovery::VillageWell,
@@ -50,6 +58,10 @@ impl Discovery {
         Discovery::MoonwellDial,
         Discovery::MoonwellAnswered,
         Discovery::CatacombScribe,
+        Discovery::ChapelSigil,
+        Discovery::CatacombNames,
+        Discovery::ShrineSeal,
+        Discovery::TwelfthLantern,
     ];
 
     /// The stable slug written to save data.
@@ -66,6 +78,10 @@ impl Discovery {
             Discovery::MoonwellDial => "moonwell-dial",
             Discovery::MoonwellAnswered => "moonwell-answered",
             Discovery::CatacombScribe => "catacomb-scribe",
+            Discovery::ChapelSigil => "chapel-sigil",
+            Discovery::CatacombNames => "catacomb-names",
+            Discovery::ShrineSeal => "shrine-seal",
+            Discovery::TwelfthLantern => "twelfth-lantern",
         }
     }
 
@@ -86,6 +102,10 @@ impl Discovery {
             Discovery::MoonwellDial => "The Moon Dial",
             Discovery::MoonwellAnswered => "The Moon Answered",
             Discovery::CatacombScribe => "The Bone Scribe",
+            Discovery::ChapelSigil => "The Worn Sigil",
+            Discovery::CatacombNames => "The Wall of Names",
+            Discovery::ShrineSeal => "The Sealed Door",
+            Discovery::TwelfthLantern => "The Twelfth Lantern",
         }
     }
 
@@ -125,6 +145,26 @@ impl Discovery {
                 "A scribe was buried here with her hands full of wax and her \
                  stylus still sharp. The wall beside her is covered in names — \
                  all of them the same name."
+            }
+            Discovery::ChapelSigil => {
+                "The same sigil is cut into the chapel floor and into the cellar \
+                 stone, worn smooth in both. Not a prayer: a tally kept in one \
+                 place and copied in another, and the hand that kept it stopped."
+            }
+            Discovery::CatacombNames => {
+                "A wall of names cut small and close, hundreds of them, in one \
+                 careful hand and then in a worse one. The last is still sharp. \
+                 Nobody scratches a name into a wall for someone who died in bed."
+            }
+            Discovery::ShrineSeal => {
+                "A door with no handle, and lead poured into the seam from this \
+                 side. It was not sealed to keep something in. It was sealed by \
+                 people standing where I am standing, who did not want to go on."
+            }
+            Discovery::TwelfthLantern => {
+                "A twelfth lantern, unlit, hung higher than the others on a branch \
+                 that has grown around it. Inside the shutter, scratched where only \
+                 the person lighting it would look: a name, and a small cross."
             }
         }
     }

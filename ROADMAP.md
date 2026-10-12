@@ -389,7 +389,25 @@ Delivered:
 - Still weak: the opening is one scene with no story, the wizard cannot be scaled,
   and the sky's rise is three steps rather than a blend.
 
-## Phase 17 — Story
+## Phase 17 — The story, and the prologue (done, and continuing)
+
+`docs/story.md` is the bible. The prologue is five scenes and four characters
+carry the spine; the rest is honestly listed as not implemented.
+
+Delivered:
+
+- **The story**: a village that survived a drought by agreeing together to feed
+  the water; an institution built to keep the agreement and to make sure nobody
+  finishes the one sentence that would end it; one keeper who said the words over
+  her own sister, and cannot tell duty from refusing to let go.
+- **A five-scene prologue** with its own compositions, skies and captions.
+- **Four new landmarks and eleven journal entries.**
+- **Ysolde, Ioreth, Vesper, Maren, Cassen and Rin** given their threads, and the
+  dead flags wired so an earlier conversation changes a later one.
+- Next: Tamsin, Nim and Wren stop short of the spine; the wizard has no history;
+  nothing yet changes a location. The moon's name stays unwritten on purpose.
+
+## Phase 18 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

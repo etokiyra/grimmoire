@@ -292,7 +292,7 @@ mod tests {
         assert!(text.contains("journal"), "the panel has no title:\n{text}");
         assert!(text.contains("nothing yet"));
         assert!(
-            text.contains("0/7 discovered"),
+            text.contains(&format!("0/{} discovered", Discovery::ALL.len())),
             "the count is wrong:\n{text}"
         );
     }
@@ -305,7 +305,10 @@ mod tests {
             text.contains("The Cracked Basin"),
             "missing a title:\n{text}"
         );
-        assert!(text.contains("3/7 discovered"));
+        assert!(
+            text.contains(&format!("3/{} discovered", Discovery::ALL.len())),
+            "{text}"
+        );
         assert!(
             text.contains("Still water, cold and dark"),
             "the selected entry is not open:\n{text}"

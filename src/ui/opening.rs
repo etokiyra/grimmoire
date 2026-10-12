@@ -66,7 +66,37 @@ use crate::render::{CanvasView, Frame, Rect, Style, glyph};
 use crate::terminal::{Capabilities, ColorSupport};
 
 /// How long the whole sequence takes, if nobody skips it.
-const OPENING: Duration = Duration::from_millis(6600);
+const OPENING: Duration = PROLOGUE_HOLD;
+
+/// The prologue, scene by scene: what it shows and how long it holds.
+///
+/// A table rather than a script, because that is all this is. A future opening
+/// with more scenes adds rows here and a `compose` arm for each; nothing about
+/// skipping, resizing, handing over or the sky depends on how many there are.
+///
+/// The first four are the story: the village and its water, the shrine deciding,
+/// the walk down to the water, and what was left afterwards. The fifth is the
+/// chapter card, which is the scene the previous phase built.
+static SCENES: [Scene; 5] = [
+    Scene::Village,
+    Scene::Rite,
+    Scene::Going,
+    Scene::After,
+    Scene::Chapter,
+];
+
+/// How long each scene holds, in order.
+static SCENE_HOLD: [Duration; 5] = [
+    Duration::from_millis(2300),
+    Duration::from_millis(2300),
+    Duration::from_millis(2300),
+    Duration::from_millis(2300),
+    Duration::from_millis(4600),
+];
+
+/// The whole prologue.
+const PROLOGUE_HOLD: Duration = Duration::from_millis(2300 * 4 + 4600);
+
 /// How long the ground takes to rise over it at the end.
 const AWAY: Duration = Duration::from_millis(420);
 /// How many steps the sky comes up in. A field is a cached picture and cannot
@@ -83,6 +113,21 @@ const STONE: cathedral::Inks = cathedral::Inks {
     door: Rgb::new(220, 164, 92),
     dark_window: Rgb::new(10, 10, 20),
 };
+
+/// One scene of the prologue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scene {
+    /// The village below the wood, and a well with no water in it.
+    Village,
+    /// The shrine's hall: three cold braziers and a decision being made.
+    Rite,
+    /// The walk down to the water, and a hand letting go.
+    Going,
+    /// What was left: the chapel, and one figure in the doorway.
+    After,
+    /// The chapter card.
+    Chapter,
+}
 
 /// A smooth 0-to-1 ramp between two points of the sequence.
 fn ease(progress: f32, from: f32, to: f32) -> f32 {
@@ -136,6 +181,47 @@ fn opening_sky(brightness: f32) -> Sky {
     sky
 }
 
+/// The sky for a scene.
+///
+/// The chapter card keeps the night the previous phase composed. The four story
+/// scenes are the same night seen at different hours: a dusk with the village
+/// lights coming on, a cold blue hour at the shrine, the last dark before
+/// morning at the water, and almost nothing at all afterwards.
+fn scene_sky(scene: Scene, brightness: f32) -> Sky {
+    let mut sky = opening_sky(brightness);
+    match scene {
+        Scene::Village => {
+            sky.glow = Rgb::new(255, 158, 96);
+            sky.glow_row = 0.72;
+            sky.glow_width = 0.30;
+            sky.glow_span = 0.9;
+            sky.glow_strength = 0.34;
+        }
+        Scene::Rite => {
+            sky.glow = Rgb::new(120, 150, 226);
+            sky.glow_row = 0.24;
+            sky.glow_strength = 0.20;
+            sky.stars = 1.2;
+        }
+        Scene::Going => {
+            sky.glow = Rgb::new(86, 108, 178);
+            sky.glow_row = 0.62;
+            sky.glow_width = 0.14;
+            sky.glow_strength = 0.14;
+            sky.stars = 0.7;
+        }
+        Scene::After => {
+            sky.glow = Rgb::new(72, 84, 132);
+            sky.glow_strength = 0.08;
+            sky.aurora = None;
+            sky.stars = 0.5;
+            sky.moon = None;
+        }
+        Scene::Chapter => {}
+    }
+    sky
+}
+
 /// The opening screen.
 #[derive(Debug)]
 pub struct OpeningScreen {
@@ -147,6 +233,8 @@ pub struct OpeningScreen {
     atmosphere: Atmosphere,
     /// Which step of the sky's rise is loaded, so it is rebuilt only on a change.
     step: u32,
+    /// Which scene the sky was built for.
+    scene: Scene,
     /// What the terminal can show.
     support: ColorSupport,
     /// The viewport the sky was resolved for.
@@ -164,6 +252,7 @@ impl OpeningScreen {
             leaving: None,
             atmosphere: Atmosphere::new(opening_sky(0.0), ColorSupport::Ansi16),
             step: 0,
+            scene: Scene::Village,
             support: ColorSupport::Ansi16,
             area: Rect::new(0, 0, 0, 0),
             // The chapter names itself out of the model rather than out of this
@@ -172,14 +261,35 @@ impl OpeningScreen {
         }
     }
 
-    /// How far the sequence has come, 0 to 1.
+    /// Where the sequence is: which scene, and how far through it, 0 to 1.
+    fn where_we_are(&self) -> (Scene, f32) {
+        let mut left = self.age;
+        for (index, hold) in SCENE_HOLD.iter().enumerate() {
+            if left < *hold {
+                let progress = left.as_secs_f32() / hold.as_secs_f32();
+                return (SCENES[index], progress.clamp(0.0, 1.0));
+            }
+            left = left.saturating_sub(*hold);
+        }
+        (Scene::Chapter, 1.0)
+    }
+
+    /// How far the whole sequence has come, 0 to 1.
     fn progress(&self) -> f32 {
         (self.age.as_secs_f32() / OPENING.as_secs_f32()).clamp(0.0, 1.0)
     }
 
     /// How bright the sky should be by now, 0 to 1.
+    ///
+    /// Only the first scene arrives out of the dark. The rest cut, because a cut
+    /// between two held images is what a sequence of scenes *is*.
     fn brightness(&self) -> f32 {
-        ease(self.progress(), 0.0, 0.20)
+        let (scene, progress) = self.where_we_are();
+        if scene == Scene::Village {
+            ease(progress, 0.0, 0.30)
+        } else {
+            1.0
+        }
     }
 
     /// The step of the rise that brightness falls in.
@@ -196,9 +306,16 @@ impl OpeningScreen {
 
     /// Rebuilds the sky for the step the rise has reached.
     fn load_sky(&mut self) {
+        self.scene = self.where_we_are().0;
         self.step = self.rise_step();
-        let brightness = self.step as f32 / (RISE_STEPS - 1) as f32;
-        self.atmosphere = Atmosphere::new(opening_sky(brightness), self.support);
+        // Only the first scene arrives out of the dark; the rest cut, because a
+        // cut between two held images is what a sequence of scenes is.
+        let brightness = if self.scene == Scene::Village {
+            self.step as f32 / (RISE_STEPS - 1) as f32
+        } else {
+            1.0
+        };
+        self.atmosphere = Atmosphere::new(scene_sky(self.scene, brightness), self.support);
         self.atmosphere.resolve(self.area);
     }
 
@@ -250,6 +367,390 @@ impl OpeningScreen {
                 Style::new().with_fg(ink.to_color(support)),
             );
         }
+    }
+
+    /// A caption, low in the frame, fading in and out with its scene.
+    fn caption(&self, view: &mut CanvasView, area: Rect, lines: &[&str], progress: f32) {
+        // In quickly, held, out quickly: a caption that lingers past its scene
+        // reads as part of the next one.
+        let shown = ease(progress, 0.10, 0.26) * (1.0 - ease(progress, 0.86, 1.0));
+        if shown <= 0.02 {
+            return;
+        }
+        let ink = Rgb::new(216, 212, 228).mix(Rgb::new(18, 18, 28), 1.0 - shown);
+        // High in the sky, well clear of the horizon: a caption laid across a
+        // figure is a caption nobody reads, and every one of these scenes has
+        // somebody standing at the bottom of it.
+        let row = self
+            .horizon(area)
+            .saturating_sub(11 + lines.len() as u16 * 2);
+        for (offset, line) in lines.iter().enumerate() {
+            let width = glyph::display_width(line);
+            if width > area.width {
+                continue;
+            }
+            view.put_str(
+                area.centered_x(width),
+                row.saturating_add(offset as u16 * 2),
+                line,
+                Style::new().with_fg(ink.to_color(self.support)),
+            );
+        }
+    }
+
+    /// A distant silhouette: supplied art, dimmed to a shape.
+    fn silhouette(level: u8, eye: u8, support: ColorSupport) -> ArtInks {
+        let dim = |value: u8| Rgb::new(value / 3, value / 3, value).to_color(support);
+        ArtInks {
+            outline: dim(level),
+            body: dim(level / 2),
+            shade: dim(level / 3),
+            light: dim(level),
+            highlight: dim(level / 3),
+            metal: dim(level / 2),
+            eye: dim(eye),
+            accent: dim(level / 3),
+        }
+    }
+
+    /// The village below the wood, and one light going out.
+    fn compose_village(&self, frame: &mut Frame, area: Rect, progress: f32) {
+        let horizon = self.horizon(area);
+        let support = self.support;
+        let mut view = frame.view(area);
+        let stone = Rgb::new(22, 20, 34);
+        let roof = Rgb::new(40, 35, 54);
+        let lit = Rgb::new(255, 176, 96);
+
+        // Stepped roofs along the horizon, so it reads as a place and not a
+        // fence. The lamps go out one by one: the village stopping for the
+        // night, which is when it decided.
+        let out = (progress * 7.0) as usize;
+        for (index, offset) in [-0.36f32, -0.24, -0.08, 0.02, 0.18, 0.34]
+            .iter()
+            .enumerate()
+        {
+            let left = (f32::from(area.width) * (0.5 + offset)) as i32;
+            let span = (f32::from(area.width) * 0.09).round().max(4.0) as i32;
+            let height = 3 + (index % 3) as i32;
+            for dy in 0..height {
+                let y = horizon.saturating_sub(dy as u16);
+                for dx in 0..span {
+                    let x = left + dx;
+                    if x < 0 || x >= i32::from(area.width) || y >= area.height {
+                        continue;
+                    }
+                    let ink = if dy == height - 1 { roof } else { stone };
+                    view.put_char(
+                        x as u16,
+                        y,
+                        '█',
+                        Style::new().with_fg(ink.to_color(support)),
+                    );
+                }
+            }
+            if index >= out {
+                for (dx, dy) in [(span / 3, 1), (span / 3 + 2, 2)] {
+                    let x = left + dx;
+                    let y = horizon.saturating_sub(dy as u16);
+                    if x >= 0 && x < i32::from(area.width) && y < area.height {
+                        view.put_char(
+                            x as u16,
+                            y,
+                            '▖',
+                            Style::new().with_fg(lit.to_color(support)).bold(),
+                        );
+                    }
+                }
+            }
+        }
+
+        // The well, with its rope still over the bar.
+        let well_x = area.centered_x(9).saturating_sub(area.width / 6);
+        for (offset, line) in ["  ___  ", " |   | ", " |___| "].iter().enumerate() {
+            for (column, ch) in line.chars().enumerate() {
+                if ch == ' ' {
+                    continue;
+                }
+                let x = well_x.saturating_add(column as u16);
+                let y = horizon.saturating_sub(2).saturating_add(offset as u16);
+                if x < area.width && y < area.height {
+                    view.put_char(
+                        x,
+                        y,
+                        ch,
+                        Style::new().with_fg(Rgb::new(126, 110, 88).to_color(support)),
+                    );
+                }
+            }
+        }
+
+        // One figure walking back towards the houses, away from the well.
+        let walker = sprite::for_figure(Figure::Veiled);
+        let travelled = (ease(progress, 0.20, 0.80) * 7.0) as u16;
+        let x = well_x
+            .saturating_sub(12)
+            .saturating_add(travelled)
+            .min(area.width.saturating_sub(walker.width));
+        let y = horizon.saturating_sub(walker.height.saturating_sub(1));
+        if y + walker.height <= area.height {
+            sprite::draw(
+                &mut view,
+                x,
+                y,
+                walker,
+                sprite::Pose::standing(),
+                Self::silhouette(120, 200, support),
+                false,
+            );
+        }
+
+        self.caption(
+            &mut view,
+            area,
+            &[
+                "The water had failed before.",
+                "They knew what it cost, and they paid it.",
+            ],
+            progress,
+        );
+    }
+
+    /// The shrine's hall: three cold braziers, a dial, and a decision.
+    fn compose_rite(&self, frame: &mut Frame, area: Rect, progress: f32) {
+        let horizon = self.horizon(area);
+        let support = self.support;
+        let mut view = frame.view(area);
+        let pillar = Rgb::new(66, 64, 96);
+        let dial = Rgb::new(158, 178, 228);
+
+        // A colonnade, so the room reads as a room rather than as a night.
+        let columns = (area.width / 14).clamp(3, 8);
+        for index in 0..columns {
+            let x = (f32::from(area.width) * (index as f32 + 0.7) / columns as f32) as u16;
+            for dy in 0..7u16 {
+                let y = horizon.saturating_sub(dy);
+                view.put_char(
+                    x,
+                    y,
+                    if dy == 6 { '▄' } else { '║' },
+                    Style::new().with_fg(pillar.to_color(support)),
+                );
+            }
+        }
+        for x in 0..area.width {
+            view.put_char(
+                x,
+                horizon,
+                ornament::RULE_LIGHT,
+                Style::new().with_fg(Rgb::new(30, 30, 48).to_color(support)),
+            );
+        }
+
+        // The dial, read left to right: waning, full, waxing.
+        let dial_x = area.centered_x(9);
+        let row = horizon.saturating_sub(3);
+        let shown = ease(progress, 0.05, 0.45);
+        for (index, mark) in ['◜', '◯', '◝'].iter().enumerate() {
+            if (index as f32 + 0.5) / 3.0 > shown {
+                continue;
+            }
+            view.put_char(
+                dial_x.saturating_add(index as u16 * 3),
+                row,
+                *mark,
+                Style::new().with_fg(dial.to_color(support)).bold(),
+            );
+        }
+
+        // Three braziers, and nobody lights them. The refusal is the scene.
+        for index in 0..3u16 {
+            view.put_char(
+                dial_x.saturating_add(index * 3),
+                row.saturating_sub(2),
+                '▄',
+                Style::new().with_fg(Rgb::new(52, 50, 74).to_color(support)),
+            );
+        }
+
+        // The priestess at the dial, and the lantern keeper at the far end.
+        let priest = sprite::for_figure(Figure::Priestess);
+        let x = area.centered_x(priest.width);
+        let y = horizon.saturating_sub(priest.height.saturating_sub(1));
+        if y + priest.height <= area.height {
+            sprite::draw(
+                &mut view,
+                x,
+                y,
+                priest,
+                sprite::Pose::standing(),
+                priest.inks,
+                false,
+            );
+        }
+        let watcher = sprite::for_figure(Figure::Lantern);
+        let wx = area.width.saturating_sub(watcher.width + 6);
+        if y + watcher.height <= area.height {
+            sprite::draw(
+                &mut view,
+                wx,
+                y,
+                watcher,
+                sprite::Pose::standing(),
+                Self::silhouette(110, 190, support),
+                true,
+            );
+        }
+
+        self.caption(
+            &mut view,
+            area,
+            &[
+                "This time the well was dry and the wood was dying.",
+                "Somebody had to be given, or everybody would be.",
+            ],
+            progress,
+        );
+    }
+
+    /// The water, and two figures at its edge.
+    fn compose_going(&self, frame: &mut Frame, area: Rect, progress: f32) {
+        let horizon = self.horizon(area);
+        let support = self.support;
+        let mut view = frame.view(area);
+        let glint = Rgb::new(152, 178, 234);
+
+        // Still water below the horizon, brightest where the moon is, so the
+        // eye has somewhere to go.
+        for y in horizon..area.height {
+            let depth = f32::from(y - horizon) / f32::from(area.height - horizon).max(1.0);
+            let ink = Rgb::new(28, 40, 74).mix(Rgb::new(8, 9, 18), depth * 0.7);
+            view.fill_style(
+                Rect::new(0, y, area.width, 1),
+                Style::new().with_bg(ink.to_color(support)),
+            );
+            for x in 0..area.width {
+                let centre = 1.0 - ((f32::from(x) / f32::from(area.width)) - 0.5).abs() * 2.0;
+                if centre > 0.5 && (usize::from(x) + usize::from(y)) % 7 == 0 {
+                    view.put_char(x, y, '·', Style::new().with_fg(glint.to_color(support)));
+                }
+            }
+        }
+        for x in 0..area.width {
+            view.put_char(
+                x,
+                horizon,
+                ornament::RULE_LIGHT,
+                Style::new().with_fg(Rgb::new(46, 46, 68).to_color(support)),
+            );
+        }
+
+        // Two figures on the lip. The one on the right walks in as the scene
+        // runs; the one on the left does not move at all, which is the beat.
+        let near = sprite::for_figure(Figure::Mage);
+        let far = sprite::for_figure(Figure::Veiled);
+        let left_x = area.centered_x(near.width).saturating_sub(area.width / 6);
+        let y = horizon.saturating_sub(near.height.saturating_sub(1));
+        if y + near.height <= area.height {
+            sprite::draw(
+                &mut view,
+                left_x,
+                y,
+                near,
+                sprite::Pose::standing(),
+                near.inks,
+                false,
+            );
+        }
+        let gone = (ease(progress, 0.20, 0.92) * 6.0) as u16;
+        let right_x = area
+            .centered_x(far.width)
+            .saturating_add(area.width / 6)
+            .saturating_add(gone);
+        if y + far.height <= area.height && right_x + far.width <= area.width {
+            sprite::draw(
+                &mut view,
+                right_x,
+                y,
+                far,
+                sprite::Pose::standing(),
+                Self::silhouette(130, 220, support),
+                true,
+            );
+        }
+
+        self.caption(
+            &mut view,
+            area,
+            &[
+                "She said she would go down herself.",
+                "I have told the moon, she wrote. I did not answer.",
+            ],
+            progress,
+        );
+    }
+
+    /// What was left: the chapel, with nothing lit in it.
+    fn compose_after(&self, frame: &mut Frame, area: Rect, progress: f32) {
+        let horizon = self.horizon(area);
+        let support = self.support;
+        let mut view = frame.view(area);
+        let space = horizon
+            .saturating_sub(area.y)
+            .saturating_sub(area.height / 8);
+        if space >= 10 {
+            cathedral::draw(
+                &mut view,
+                horizon,
+                area.width,
+                space,
+                &cathedral::Look {
+                    inks: cathedral::Inks {
+                        stone: Rgb::new(12, 12, 22),
+                        stone_high: Rgb::new(20, 20, 34),
+                        edge: Rgb::new(62, 72, 106),
+                        glass: Rgb::new(120, 130, 160),
+                        door: Rgb::new(96, 84, 78),
+                        dark_window: Rgb::new(8, 9, 16),
+                    },
+                    support,
+                    risen: 1.0,
+                    // Nothing is lit. The windows are glass and nothing else.
+                    lit: 0.0,
+                },
+            );
+        }
+        for x in 0..area.width {
+            view.put_char(
+                x,
+                horizon,
+                ornament::RULE_LIGHT,
+                Style::new().with_fg(Rgb::new(46, 46, 68).to_color(support)),
+            );
+        }
+
+        // One figure in the doorway, not moving.
+        let holder = sprite::for_figure(Figure::Veiled);
+        let x = area.centered_x(holder.width);
+        let y = horizon.saturating_sub(holder.height.saturating_sub(1));
+        if ease(progress, 0.10, 0.55) > 0.2 && y + holder.height <= area.height {
+            sprite::draw(
+                &mut view,
+                x,
+                y,
+                holder,
+                sprite::Pose::standing(),
+                Self::silhouette(140, 210, support),
+                false,
+            );
+        }
+
+        self.caption(
+            &mut view,
+            area,
+            &["The water never came back.", "She did."],
+            progress,
+        );
     }
 
     /// The magic circle: an outer ring, an inner ring of runes, and four spokes.
@@ -579,8 +1080,9 @@ impl Screen for OpeningScreen {
             self.leaving = Some(age);
             return;
         }
-        // The sky comes up in steps, and then drifts on its own clock.
-        if self.rise_step() != self.step {
+        // The sky comes up in steps and changes with the scene, and then drifts
+        // on its own clock.
+        if self.rise_step() != self.step || self.where_we_are().0 != self.scene {
             self.load_sky();
         }
         self.atmosphere.advance(delta);
@@ -622,9 +1124,19 @@ impl Screen for OpeningScreen {
             );
             return;
         }
-        self.compose_scene(frame, area, self.support);
-        self.compose_actors(frame, area, self.support);
-        self.compose_words(frame, area, self.support);
+        // Five scenes, each composed as a whole image, then the chapter card.
+        let (scene, progress) = self.where_we_are();
+        match scene {
+            Scene::Village => self.compose_village(frame, area, progress),
+            Scene::Rite => self.compose_rite(frame, area, progress),
+            Scene::Going => self.compose_going(frame, area, progress),
+            Scene::After => self.compose_after(frame, area, progress),
+            Scene::Chapter => {
+                self.compose_scene(frame, area, self.support);
+                self.compose_actors(frame, area, self.support);
+                self.compose_words(frame, area, self.support);
+            }
+        }
         if let Some(age) = self.leaving {
             self.compose_away(frame, area, age, context);
         }
@@ -741,7 +1253,7 @@ mod tests {
             row_letters(&screen, 3),
             "the name was there before it was written"
         );
-        for _ in 0..80 {
+        for _ in 0..130 {
             screen.update(Duration::from_millis(100));
         }
         assert_eq!("GRIMMOIRE", row_letters(&screen, 3), "the name is wrong");
@@ -800,7 +1312,7 @@ mod tests {
     fn it_finishes_on_its_own_and_hands_the_screen_back() {
         let mut screen = ready();
         let mut command = Command::None;
-        for _ in 0..120 {
+        for _ in 0..200 {
             screen.update(Duration::from_millis(100));
             command = screen.after_update();
             if !matches!(command, Command::None) {

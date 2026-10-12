@@ -67,11 +67,15 @@ pub enum Flag {
     TamsinGivenTheName,
     /// Ysolde was told that the moon was answered.
     YsoldeToldOfTheMoonwell,
+    /// Ysolde was told that it is over, and let herself be told.
+    YsoldeReleased,
+    /// Vesper was told to come in out of the draught.
+    VesperTold,
 }
 
 impl Flag {
     /// Every flag the game can set.
-    pub const ALL: [Flag; 8] = [
+    pub const ALL: [Flag; 10] = [
         Flag::CassenAccused,
         Flag::CassenBefriended,
         Flag::LettersPromised,
@@ -80,6 +84,8 @@ impl Flag {
         Flag::WrenToldOfRin,
         Flag::TamsinGivenTheName,
         Flag::YsoldeToldOfTheMoonwell,
+        Flag::YsoldeReleased,
+        Flag::VesperTold,
     ];
 
     /// The stable slug written to save data.
@@ -94,6 +100,8 @@ impl Flag {
             Flag::WrenToldOfRin => "wren-told",
             Flag::TamsinGivenTheName => "tamsin-given-name",
             Flag::YsoldeToldOfTheMoonwell => "ysolde-told",
+            Flag::YsoldeReleased => "ysolde-released",
+            Flag::VesperTold => "vesper-told",
         }
     }
 

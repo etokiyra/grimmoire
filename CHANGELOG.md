@@ -9,6 +9,35 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — the beginnings of the story
+
+Grimmoire has a plot now, told through the world rather than at the player.
+`docs/story.md` is the narrative bible: what happened, who is in it, what the
+player learns in what order, and what is deliberately left unanswered.
+
+- **A five-scene prologue** replaces the single-scene opening. The village below
+  the wood and one lamp going out; the shrine deciding, with three braziers
+  nobody lights; the walk down to the water and a hand letting go; and the
+  chapel afterwards with nothing lit in it. Then the chapter card. Each scene is
+  its own composition, sky and caption; the whole thing is a table of scenes, not
+  a scripting engine.
+- **Four landmarks with something to learn**: the worn sigil in the chapel floor
+  (a tally, kept in two places, by a hand that stopped), the wall of names in the
+  catacombs, the door sealed with lead from this side, and the twelfth lantern in
+  the wood.
+- **Eleven journal entries**, up from seven, in the same voice.
+- **Ysolde's story**: the rite, her sister, the unfinished word, and one act of
+  mercy — telling her the water never came back — that changes what she says from
+  then on.
+- **Ioreth, Vesper, Maren, Cassen and Rin** each gained the thread that ties them
+  to it: the office nobody asked for, the lid closed while somebody was still
+  writing, the rope cut to stop a choosing, and the lantern that is not for
+  anybody walking.
+- **Two new story facts** (`ysolde-released`, `vesper-told`) and two that were
+  written but never read are now read: Maren's confession changes what Cassen
+  says, and being left alone changes him too.
+
+### Changed — the prologue is five scenes, not one
 ### Fixed — New Game started someone else's journey
 
 The title pushed the same screen for **New Game** and **Continue**, so choosing

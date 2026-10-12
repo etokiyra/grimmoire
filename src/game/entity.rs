@@ -86,11 +86,17 @@ pub enum Prop {
     Dial,
     /// A stone coffin.
     Sarcophagus,
+    /// A wall of names, cut small and close.
+    Names,
+    /// A door sealed into its own frame.
+    SealedDoor,
+    /// A lantern on a wire.
+    Lantern,
 }
 
 impl Prop {
     /// Every prop the world can place.
-    pub const ALL: [Prop; 8] = [
+    pub const ALL: [Prop; 11] = [
         Prop::Basin,
         Prop::Sigil,
         Prop::Well,
@@ -99,6 +105,9 @@ impl Prop {
         Prop::StandingStone,
         Prop::Dial,
         Prop::Sarcophagus,
+        Prop::Names,
+        Prop::SealedDoor,
+        Prop::Lantern,
     ];
 }
 

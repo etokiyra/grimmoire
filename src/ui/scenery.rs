@@ -141,6 +141,12 @@ mod art {
     pub const DIAL: [&str; 3] = [" ___ ", "(o o)", "\\_=_/"];
     /// A stone coffin with its lid still on.
     pub const SARCOPHAGUS: [&str; 3] = [" _____ ", "|=|=|=|", "|_____|"];
+    /// A wall of names, cut small and close.
+    pub const NAMES: [&str; 3] = [";;;:;;;", ":;::;;:", ";;:;;;:"];
+    /// A door sealed into its own frame.
+    pub const SEALED_DOOR: [&str; 3] = [".---.", "| X |", "|_|_|"];
+    /// A lantern hanging on a wire.
+    pub const LANTERN: [&str; 3] = ["  |  ", " ( ) ", " '-' "];
     /// A bronze brazier, empty.
     pub const BRAZIER: [&str; 3] = [" ___ ", "|___|", "  |  "];
     /// A brazier's flame, drawn above the bowl once it is lit.
@@ -1166,6 +1172,9 @@ fn prop_art(phase: f32, prop: Prop, palette: &Palette) -> (&'static [&'static st
         Prop::StandingStone => (&art::STANDING_STONE[..], palette.relic, 2),
         Prop::Dial => (&art::DIAL[..], palette.relic, 2),
         Prop::Sarcophagus => (&art::SARCOPHAGUS[..], palette.border, 2),
+        Prop::Names => (&art::NAMES[..], palette.relic, 2),
+        Prop::SealedDoor => (&art::SEALED_DOOR[..], palette.warning, 2),
+        Prop::Lantern => (&art::LANTERN[..], palette.interactive, 2),
     }
 }
 

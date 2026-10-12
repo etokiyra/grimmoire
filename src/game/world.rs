@@ -791,10 +791,46 @@ mod tests {
 
     #[test]
     fn an_item_that_teaches_nothing_stays_a_plain_examination() {
-        let mut world = region();
-        stand_facing(&mut world, Position::new(60, 43), Direction::South);
-        assert_eq!(Interaction::Message, world.interact());
-        assert!(world.journal().is_empty());
+        // Every prop that grants no discovery, approached from whichever side is
+        // open floor: examining it says its piece and records nothing. Positions
+        // and areas come from the model, so a map edit cannot quietly hollow this
+        // out, and the areas are reached the way a save reaches them.
+        let mut examined = 0;
+        for area in crate::game::areas::all() {
+            for entity in area.entities() {
+                let EntityKind::Object { discovery, .. } = &entity.kind else {
+                    continue;
+                };
+                if discovery.is_some() {
+                    continue;
+                }
+                for (dx, dy, facing) in [
+                    (-1i32, 0i32, Direction::East),
+                    (1, 0, Direction::West),
+                    (0, -1, Direction::South),
+                    (0, 1, Direction::North),
+                ] {
+                    let at = Position::new(
+                        (i32::from(entity.position.x) + dx) as u16,
+                        (i32::from(entity.position.y) + dy) as u16,
+                    );
+                    let mut world = region();
+                    let data = crate::save::SaveData::new(area.id().as_str(), at.x, at.y, vec![]);
+                    world.restore(&data);
+                    world.move_player(facing);
+                    if matches!(world.interact(), Interaction::Message) {
+                        assert!(
+                            world.journal().is_empty(),
+                            "{} taught something without a discovery",
+                            entity.name
+                        );
+                        examined += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(examined > 0, "no plain prop could be examined at all");
     }
 
     #[test]

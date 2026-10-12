@@ -225,22 +225,64 @@ mod ysolde {
     ];
 
     pub const RETURNED: NodeId = NodeId::new("returned");
+    pub const SISTER: NodeId = NodeId::new("sister");
+    pub const RITE: NodeId = NodeId::new("rite");
+    pub const CHOSEN: NodeId = NodeId::new("chosen");
+    pub const RELEASED: NodeId = NodeId::new("released");
+    pub const HELD: NodeId = NodeId::new("held");
+    pub const NAME: NodeId = NodeId::new("name");
+    pub const UNFINISHED: NodeId = NodeId::new("unfinished");
+    pub const YOURS: NodeId = NodeId::new("yours");
+
+    /// What she will say when she has been let off the hook she made for herself.
+    pub static HELD_CHOICES: [Choice; 5] = [
+        Choice::to("Ask about the letters.", LETTERS)
+            .when(Condition::Knows(super::Discovery::VillageLetters)),
+        Choice::to("Ask about the chapel.", CHAPEL),
+        Choice::to("Ask about the village.", VILLAGE),
+        Choice::to("Ask what she is.", HERSELF),
+        Choice::end("Say nothing."),
+    ];
+
+    pub static LETTERS_CHOICES: [Choice; 3] = [
+        Choice::to("Ask who she was.", SISTER),
+        Choice::to("Say nothing.", GREETING),
+        Choice::end("Leave her to it."),
+    ];
+
+    pub static RITE_CHOICES: [Choice; 3] = [
+        Choice::to("Ask who it was.", CHOSEN),
+        Choice::to("Tell her the water never came back.", RELEASED)
+            .doing(super::Effect::Set(super::Flag::YsoldeReleased)),
+        Choice::end("Say nothing."),
+    ];
+
+    pub static NAME_CHOICES: [Choice; 2] = [
+        Choice::to("Ask whether she finished it.", UNFINISHED),
+        Choice::end("Say nothing."),
+    ];
+
+    pub static MOON_CHOICES: [Choice; 2] = [
+        Choice::to("Tell her the answer was yours.", YOURS)
+            .doing(super::Effect::Set(super::Flag::YsoldeToldOfTheMoonwell)),
+        Choice::end("Say nothing."),
+    ];
 }
 
 /// Ysolde: patient, older than the building, and never quite answering.
 static YSOLDE: Conversation = Conversation {
     nodes: &[
-        Node::saying(
+        Node::asking(
             ysolde::MOON,
             "Ysolde",
             &[
                 "You answered the moon. Nobody has done that since the village was alive.",
                 "The door under the shrine remembers you now. It will let you both ways.",
             ],
+            &ysolde::MOON_CHOICES,
         )
         .titled("the veiled one")
-        .in_mood(Mood::Warm)
-        .then(ysolde::GREETING),
+        .in_mood(Mood::Warm),
         Node::saying(
             ysolde::BASIN,
             "Ysolde",
@@ -304,17 +346,6 @@ static YSOLDE: Conversation = Conversation {
         .in_mood(Mood::Veiled)
         .then(ysolde::GREETING),
         Node::saying(
-            ysolde::LETTERS,
-            "Ysolde",
-            &[
-                "Letters for the chapel. Yes. I know the hand.",
-                "She wrote to me every season and never sent them.",
-                "I think she liked having somewhere to send them to.",
-            ],
-        )
-        .in_mood(Mood::Sorry)
-        .then(ysolde::GREETING),
-        Node::saying(
             ysolde::HERSELF,
             "Ysolde",
             &[
@@ -324,8 +355,114 @@ static YSOLDE: Conversation = Conversation {
         )
         .in_mood(Mood::Wry)
         .then(ysolde::GREETING),
+        Node::asking(
+            ysolde::RITE,
+            "Ysolde",
+            &[
+                "You have been down to the wall. You know what the names are; I will not call them prayers.",
+                "When the water went bad, the village did what it always does. It chose. It is good at choosing.",
+                "It fell to me to say the words over her. I said them well. That is the part I cannot get past.",
+            ],
+            &ysolde::RITE_CHOICES,
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Sorry),
+        Node::asking(
+            ysolde::CHOSEN,
+            "Ysolde",
+            &[
+                "My sister. She is on the wall with the rest of them now, and she asked me to put her there.",
+                "It was the only thing she asked for, and she had to ask me: I was holding the lantern.",
+            ],
+            &ysolde::RITE_CHOICES,
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Sorry),
+        Node::saying(
+            ysolde::RELEASED,
+            "Ysolde",
+            &[
+                "Over. Yes.",
+                "You are being kind, and I am going to let you. I have not let anyone do that in nine years.",
+                "I will keep the basin full. That is not the same as waiting. I have been told that it is not.",
+            ],
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Veiled)
+        .then(ysolde::HELD),
+        Node::asking(
+            ysolde::HELD,
+            "Ysolde",
+            &[
+                "You walk where the stones still remember.",
+                "I have been thinking about keeping a thing, and keeping it alive. Thank you for the difference.",
+            ],
+            &ysolde::HELD_CHOICES,
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Warm),
+        Node::asking(
+            ysolde::LETTERS,
+            "Ysolde",
+            &[
+                "Letters for the chapel. Yes. I know the hand.",
+                "She wrote to me every season and never sent them.",
+                "I think she liked having somewhere to send them to.",
+            ],
+            &ysolde::LETTERS_CHOICES,
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Sorry),
+        Node::saying(
+            ysolde::SISTER,
+            "Ysolde",
+            &[
+                "My sister. She wrote to me every season and sent none, and I kept every one I was handed.",
+                "I did not answer the last. There was nothing to answer. She had decided, and was telling me so.",
+            ],
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Sorry)
+        .then(ysolde::GREETING),
+        Node::asking(
+            ysolde::NAME,
+            "Ysolde",
+            &[
+                "You read the lid. Two letters and then nothing, over and over.",
+                "She was not writing a name. She was writing the end of one. There is a word that stops it.",
+                "The shrine has spent four hundred years making sure nobody finishes it. I am part of the shrine.",
+            ],
+            &ysolde::NAME_CHOICES,
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Veiled),
+        Node::saying(
+            ysolde::UNFINISHED,
+            "Ysolde",
+            &[
+                "No. They stopped her at the second letter and buried her hands full, so the work would be known.",
+                "Ioreth's people call it a burial. It was a desk with the lid closed.",
+            ],
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Sorry)
+        .then(ysolde::NAME),
+        Node::saying(
+            ysolde::YOURS,
+            "Ysolde",
+            &[
+                "Yours. Then it was somebody's doing, and not the weather.",
+                "That is the first piece of news I have had in nine years that I did not already suspect.",
+            ],
+        )
+        .titled("the veiled one")
+        .in_mood(Mood::Warm)
+        .then(ysolde::GREETING),
     ],
     entries: &[
+        (Condition::Flag(Flag::YsoldeReleased), ysolde::HELD),
+        (Condition::Knows(Discovery::CatacombScribe), ysolde::NAME),
+        (Condition::Knows(Discovery::CatacombNames), ysolde::RITE),
         (Condition::Knows(Discovery::MoonwellAnswered), ysolde::MOON),
         (Condition::Flag(Flag::LettersPromised), ysolde::RETURNED),
         (Condition::Knows(Discovery::VillageLetters), ysolde::ADDRESSED),
@@ -340,6 +477,7 @@ mod rin {
     use super::{Choice, NodeId};
 
     pub const GLADE: NodeId = NodeId::new("glade");
+    pub const TWELFTH: NodeId = NodeId::new("twelfth");
     pub const GREETING: NodeId = NodeId::new("greeting");
     pub const LANTERNS: NodeId = NodeId::new("lanterns");
     pub const ABOUT_HER: NodeId = NodeId::new("about-her");
@@ -409,8 +547,22 @@ static RIN: Conversation = Conversation {
         )
         .in_mood(Mood::Wry)
         .then(rin::GREETING),
+        Node::asking(
+            rin::TWELFTH,
+            "Rin",
+            &[
+                "You found her lantern. I hoped nobody would. It is very high up, or it was.",
+                "I keep eleven. Those are for people still walking. That one is for nobody walking.",
+            ],
+            &rin::CHOICES,
+        )
+        .titled("lantern keeper")
+        .in_mood(Mood::Sorry),
     ],
-    entries: &[(Condition::Knows(Discovery::WoodsGlade), rin::GLADE)],
+    entries: &[
+        (Condition::Knows(Discovery::TwelfthLantern), rin::TWELFTH),
+        (Condition::Knows(Discovery::WoodsGlade), rin::GLADE),
+    ],
     fallback: rin::GREETING,
 };
 
@@ -427,6 +579,8 @@ mod cassen {
     pub const PROMISE: NodeId = NodeId::new("promise");
     pub const REFUSE: NodeId = NodeId::new("refuse");
     pub const KEEPING: NodeId = NodeId::new("keeping");
+    pub const KNOWS: NodeId = NodeId::new("knows");
+    pub const KEPT: NodeId = NodeId::new("kept");
 
     pub static WELL_CHOICES: [Choice; 3] = [
         Choice::to("Tell him you know he cut the rope.", ACCUSED),
@@ -538,8 +692,32 @@ static CASSEN: Conversation = Conversation {
             &cassen::WELL_CHOICES,
         )
         .titled("of the hollow village"),
+        Node::asking(
+            cassen::KNOWS,
+            "Cassen",
+            &[
+                "So the mage told you. Nine years she carries that, and she picks the week the well runs dry.",
+                "I have known since the second year. She cut it to stop a choosing. It did not stop one.",
+            ],
+            &cassen::AFTER_CHOICES,
+        )
+        .titled("of the hollow village")
+        .in_mood(Mood::Wry),
+        Node::asking(
+            cassen::KEPT,
+            "Cassen",
+            &[
+                "Sit down, then. There is a wall.",
+                "I never told anyone about those letters. Nobody made me, and that is why I might.",
+            ],
+            &cassen::AFTER_CHOICES,
+        )
+        .titled("of the hollow village")
+        .in_mood(Mood::Warm),
     ],
     entries: &[
+        (Condition::Flag(Flag::CassenBefriended), cassen::KEPT),
+        (Condition::Flag(Flag::MarenConfessed), cassen::KNOWS),
         (Condition::Flag(Flag::CassenAccused), cassen::AFTER),
         (Condition::Knows(Discovery::VillageLetters), cassen::LETTERS),
         (Condition::Knows(Discovery::VillageWell), cassen::WELL),
@@ -557,6 +735,15 @@ mod ioreth {
     pub const GREETING: NodeId = NodeId::new("greeting");
     pub const APPRENTICE: NodeId = NodeId::new("apprentice");
     pub const BELOW: NodeId = NodeId::new("below");
+    pub const LEDGER: NodeId = NodeId::new("ledger");
+    pub const OPENED: NodeId = NodeId::new("opened");
+
+    pub static LEDGER_CHOICES: [Choice; 4] = [
+        Choice::to("Ask her to open the door for good.", OPENED),
+        Choice::to("Ask what is below the shrine.", BELOW),
+        Choice::to("Ask about the apprentice.", APPRENTICE),
+        Choice::end("Leave the silence to itself."),
+    ];
 
     pub static CHOICES: [Choice; 3] = [
         Choice::to("Ask about the apprentice.", APPRENTICE),
@@ -622,8 +809,33 @@ static IORETH: Conversation = Conversation {
         )
         .in_mood(Mood::Veiled)
         .then(ioreth::GREETING),
+        Node::asking(
+            ioreth::LEDGER,
+            "Ioreth",
+            &[
+                "You have counted the names on the wall. So have I. I counted them from up here, where it is dry.",
+                "This office was made to keep that list from being read through. I hold it, and I have kept it.",
+                "I have never gone down. That is not ignorance. That is what the office is.",
+            ],
+            &ioreth::LEDGER_CHOICES,
+        )
+        .titled("priestess of the moonwell")
+        .in_mood(Mood::Veiled),
+        Node::saying(
+            ioreth::OPENED,
+            "Ioreth",
+            &[
+                "I could. It would take one person and I am the only one here who knows the way of it.",
+                "And the water stops, and next summer my name goes on that wall, and it is my doing.",
+                "You are asking a tired woman to be brave in the direction she was raised to call wrong.",
+            ],
+        )
+        .titled("priestess of the moonwell")
+        .in_mood(Mood::Sorry)
+        .then(ioreth::GREETING),
     ],
     entries: &[
+        (Condition::Knows(Discovery::CatacombNames), ioreth::LEDGER),
         (Condition::Knows(Discovery::MoonwellAnswered), ioreth::ANSWERED),
         (Condition::Knows(Discovery::MoonwellDial), ioreth::DIAL),
     ],
@@ -726,6 +938,14 @@ mod maren {
     use super::{Choice, NodeId};
 
     pub const CONFESS: NodeId = NodeId::new("confess");
+    pub const CHOOSING: NodeId = NodeId::new("choosing");
+
+    pub static CHOOSING_CHOICES: [Choice; 4] = [
+        Choice::to("Ask whether Cassen knows.", CASSEN),
+        Choice::to("Ask what she is doing here.", NAME),
+        Choice::to("Ask her why she cut it.", WHY),
+        Choice::end("Leave her to her map."),
+    ];
     pub const GREETING: NodeId = NodeId::new("greeting");
     pub const ROPE: NodeId = NodeId::new("rope");
     pub const WHY: NodeId = NodeId::new("why");
@@ -815,8 +1035,22 @@ static MAREN: Conversation = Conversation {
         )
         .in_mood(Mood::Wry)
         .then(maren::GREETING),
+        Node::asking(
+            maren::CHOOSING,
+            "Maren",
+            &[
+                "So you have been under the shrine. Good. Now I can say the thing I have not said in nine years.",
+                "I did not cut that rope because the water was poisoned. I cut it because they were choosing.",
+                "I thought a dry well would stop them. It is a stupid thing to believe at twenty-four.",
+                "It did not stop them. It hurried them. That is the whole confession, and it is the worse half.",
+            ],
+            &maren::CHOOSING_CHOICES,
+        )
+        .titled("wandering mage")
+        .in_mood(Mood::Sorry),
     ],
     entries: &[
+        (Condition::Knows(Discovery::CatacombNames), maren::CHOOSING),
         (Condition::Flag(Flag::CassenAccused), maren::CONFESS),
         (Condition::Knows(Discovery::VillageWell), maren::ROPE),
     ],
@@ -986,6 +1220,16 @@ mod vesper {
     pub const SCRIBE: NodeId = NodeId::new("scribe");
     pub const HERE: NodeId = NodeId::new("here");
     pub const WARDEN: NodeId = NodeId::new("warden");
+    pub const HELD: NodeId = NodeId::new("held");
+    pub const IN: NodeId = NodeId::new("in");
+
+    pub static HELD_CHOICES: [Choice; 4] = [
+        Choice::to("Tell him to come in out of the draught.", IN)
+            .doing(super::Effect::Set(super::Flag::VesperTold)),
+        Choice::to("Ask about the warden.", WARDEN),
+        Choice::to("Ask who is buried here.", HERE),
+        Choice::end("Step back into the gallery."),
+    ];
 
     pub static CHOICES: [Choice; 3] = [
         Choice::to("Ask who is buried here.", HERE),
@@ -1060,11 +1304,34 @@ static VESPER: Conversation = Conversation {
         )
         .in_mood(Mood::Warm)
         .then(vesper::GREETING),
+        Node::asking(
+            vesper::HELD,
+            "Vesper",
+            &[
+                "You have seen the wall. Then you know what I stood in the draught for, and it was not the cold.",
+                "I closed the lid. She was still writing. I was told it was a kindness, and I believed it.",
+            ],
+            &vesper::HELD_CHOICES,
+        )
+        .titled("what the catacombs kept")
+        .in_mood(Mood::Sorry),
+        Node::saying(
+            vesper::IN,
+            "Vesper",
+            &[
+                "Come in. — Yes. All right.",
+                "It is warmer. I have stood there a very long time, and nobody has ever said it that plainly.",
+            ],
+        )
+        .titled("what the catacombs kept")
+        .in_mood(Mood::Warm)
+        .then(vesper::GREETING),
     ],
-    entries: &[(
-        Condition::Knows(Discovery::CatacombScribe),
-        vesper::SCRIBED,
-    )],
+    entries: &[
+        (Condition::Flag(Flag::VesperTold), vesper::IN),
+        (Condition::Knows(Discovery::CatacombNames), vesper::HELD),
+        (Condition::Knows(Discovery::CatacombScribe), vesper::SCRIBED),
+    ],
     fallback: vesper::GREETING,
 };
 
@@ -1139,11 +1406,12 @@ pub fn chapel() -> Area {
                 "Still water, cold and dark; it has not rained in a long while.",
                 Discovery::ChapelBasin,
             ),
-            Entity::object(
+            Entity::relic(
                 Position::new(60, 44),
                 "a worn sigil",
                 Prop::Sigil,
                 "Cut into the flagstones, and worn almost away by feet that are long gone.",
+                Discovery::ChapelSigil,
             ),
         ],
         vec![
@@ -1216,11 +1484,12 @@ pub fn cellar() -> Area {
             "#....................................................................................................................,,,...............#",
             "####################################################################################################################+++++###############",
         ],
-        vec![Entity::object(
+        vec![Entity::relic(
             Position::new(118, 13),
             "a faded sigil",
             Prop::Sigil,
             "The carving is worn smooth, but it hums faintly under your fingers.",
+            Discovery::ChapelSigil,
         )],
         vec![
             Portal::new(
@@ -1307,6 +1576,13 @@ pub fn woods() -> Area {
                 "a waymarker cairn",
                 Prop::Cairn,
                 "Stones stacked by someone with more patience than sense.",
+            ),
+            Entity::relic(
+                Position::new(21, 33),
+                "a twelfth lantern",
+                Prop::Lantern,
+                "Unlit, and hung higher than the others, on a branch that has grown around the wire.",
+                Discovery::TwelfthLantern,
             ),
         ],
         vec![
@@ -1471,6 +1747,13 @@ pub fn shrine() -> Area {
             standing(Position::new(30, 14), &IORETH_MEMBER),
             standing(Position::new(84, 20), &NIM_MEMBER),
             Entity::relic(
+                Position::new(117, 20),
+                "a sealed door",
+                Prop::SealedDoor,
+                "Lead has been poured into the seam. There is no handle on this side either.",
+                Discovery::ShrineSeal,
+            ),
+            Entity::relic(
                 Position::new(40, 20),
                 "the moon dial",
                 Prop::Dial,
@@ -1588,6 +1871,13 @@ pub fn catacombs() -> Area {
                 "a heap of grave goods",
                 Prop::Cairn,
                 "Wax, a stylus, and a bowl. Whoever was buried here meant to keep working.",
+            ),
+            Entity::relic(
+                Position::new(60, 21),
+                "a wall of names",
+                Prop::Names,
+                "Names, cut small and close, in one careful hand and then in a worse one.",
+                Discovery::CatacombNames,
             ),
         ],
         vec![

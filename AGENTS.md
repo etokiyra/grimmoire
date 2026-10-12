@@ -279,6 +279,12 @@ Additional rules:
   are not the same screen with a flag, and pushing `from_save` for a new game is
   how the front door came to lie about what it did — "begin again" that resumed.
   A new game keeps the store, so the journey it begins is the one that is saved.
+- **The story is content, and `docs/story.md` is its bible.** Read it before
+  writing a line. Do not contradict it, do not reveal an unresolved mystery, and
+  do not explain the plot in dialogue: every revelation is somebody's answer to a
+  question the player chose to ask. The moon's name in particular is **never
+  written down** — it is the one word that would end the arrangement, and that is
+  a later story.
 - **A cinematic announces a game; it does not create one.** A screen that ends by
   returning `Message::Finished` leaves the decision to the screen that pushed it.
   Do not build a world, read a save, or duplicate initialisation inside a
@@ -388,6 +394,9 @@ After substantial changes, update the documentation in the same change:
   and where the code lives.
 - `docs/renderer-design.md` — rendering, the ASCII scenery renderer, the movement
   model, the optional pixel interface, measurements, and verification.
+- `docs/story.md` — the narrative bible: the central tragedy, what actually
+  happened, the cast and their contradictions, the order revelations arrive in,
+  the choices and what they change, and the questions that stay open.
 - `docs/map-design.md` — the rules an area must satisfy, above all that every
   passage fits the character, and how the generator and the tests enforce them.
 - `docs/renderer-investigation.md` — the renderer's structural limits, the VinZ
