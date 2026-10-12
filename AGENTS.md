@@ -322,6 +322,8 @@ After substantial changes, update the documentation in the same change:
   model, the optional pixel interface, measurements, and verification.
 - `docs/map-design.md` — the rules an area must satisfy, above all that every
   passage fits the character, and how the generator and the tests enforce them.
+- `docs/renderer-investigation.md` — the renderer's structural limits, the VinZ
+  investigation, the proposed atmosphere layer, and the prototype's measurements.
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

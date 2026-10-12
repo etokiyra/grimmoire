@@ -253,7 +253,34 @@ Delivered:
   walk swings the robe instead of nudging a cell, and the sprint is its own pose.
 - **A rune circle** at the wizard's feet on the title screen.
 
-## Phase 12 — Story
+## Phase 12 — Renderer investigation: a true-colour atmosphere layer (prototype)
+
+The renderer has accumulated features and still looks weak, so this phase
+questioned the model rather than adding to it.
+
+Delivered:
+
+- **An honest statement of the limits**: one glyph, one colour and one flat
+  background per cell means a gradient has nowhere to live; the palette is a
+  table of roles rather than a ramp; a tile is either scenery or nothing; and the
+  output is 256-colour indexed.
+- **A VinZ investigation**, with what is worth taking (the half-block technique,
+  independently implemented), what is not (its loop, cadence and terminal
+  handling), and the licence position — which is straightforward, since
+  Grimmoire is already GPL-3.0-or-later.
+- **`examples/skyline.rs`**, a layered true-colour title-screen prototype built
+  as a `Screen`: a smooth sky, a moon, stars, a glyph cathedral, motes and the
+  supplied wizard, composed over one new atmosphere layer that every existing
+  layer inherits its background from.
+- **Measurements**, including the one that matters: an animated field defeats the
+  presenter's diffing, and the prototype costs 10% of a core against the game's
+  2%. Three fixes are proposed, all cheap.
+- **Recommendation**: adopt the technique, not the program, and migrate in five
+  reversible stages.
+
+No game code changed. The report is `docs/renderer-investigation.md`.
+
+## Phase 13 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

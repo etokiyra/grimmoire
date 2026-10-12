@@ -9,6 +9,25 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Investigated — a true-colour atmosphere layer (prototype only)
+
+- **`docs/renderer-investigation.md`**: why the renderer looks the way it does
+  (one glyph, one colour and one flat background per cell; a palette of roles
+  rather than ramps; no layer under the terrain; 256-colour output), what VinZ
+  actually implements and what of it is worth taking, and a five-stage migration
+  plan with rollback points.
+- **`examples/skyline.rs`**: a feasibility prototype — a smooth true-colour sky,
+  a moon, stars, a glyph cathedral, rising motes and the supplied wizard,
+  composed over one new half-block atmosphere layer that every existing layer
+  inherits its background from. It is a `Screen`, so it runs through the real
+  `App`, `Terminal`, `Presenter` and `Canvas`.
+- **Measured**: the prototype runs at about 35 fps of full-screen true-colour
+  redraws and costs **10% of one core**, against the game's 2% while walking.
+  The animated field changes almost every cell every frame, so the presenter's
+  diffing cannot skip anything — the finding that governs the migration plan.
+- **No game code changed.** The renderer, the world, the saves and the terminal
+  lifecycle are untouched.
+
 ### Changed — every place is built from its own stone, and the light is in the glyphs
 
 - **A material per location** (`theme::Arte`): the lit edge of masonry, its face,
