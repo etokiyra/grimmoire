@@ -9,6 +9,68 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — anime-inspired identity, animation, and game feel
+
+- **Characters with identities, drawn in several inks at once.** A figure is ASCII
+  art plus a *legend*: each character in its rows names an ink, and each cast
+  member carries its own `Inks` value. The mage now has silver hair, a face with
+  two eyes, an indigo robe with a gold clasp and a crystal staff; the other
+  character has a cowl, a trim rim and two violet points of light, and no skin at
+  all. Both are four body rows plus a stride row, so a walk cycle costs two hem
+  rows per direction rather than a second figure, and facing has four variants.
+- **A named character.** The label "the Hooded Figure" is replaced by a name, and
+  a test pins that names live in the model (`Entity::name`, `Dialogue::speaker`)
+  rather than in the renderer.
+- **Life in the world.** Candles gutter along wall faces that open onto floor,
+  motes drift over bare ground, water rolls with two wave trains and occasional
+  crests, and the sigil turns. Each area also carries an inlaid motif — a rose cut
+  around the chapel crossing, rings around the cellar sigil — drawn only on plain,
+  unoccupied floor.
+- **Feedback for what just happened.** A refused step pulses *and underlines* the
+  tile that refused it, an interaction flashes whatever answered, and arriving in
+  an area marks the spot. Pulses are style changes, never glyph changes, so
+  feedback cannot hide a character or an exit.
+- **An animation model** (`ui::animation`). The walk stride advances once per
+  *step*, taken from the movement model, so the legs keep pace with the world at
+  any cadence and stop dead when movement stops; a tap keeps its stride for one
+  cadence rather than snapping back. Sprint is its own stage with a lean and a
+  wake. Idle figures breathe and blink on a slow clock without asking for frames.
+- **A dialogue that opens and closes.** The panel rises from the bottom edge,
+  brightens as it settles, and slides away on dismissal — and finishing its own
+  exit is what motivated `Screen::after_update`, a way for a screen to request a
+  command without waiting for a key that will never come.
+- **A 60 Hz animation loop while anything is moving.** Frames are scheduled from a
+  *deadline* rather than by sleeping a fixed interval after composing, so
+  composition time cannot accumulate into drift, and the wait is clamped to one
+  frame interval so a deadline set while idle cannot be inherited by the first
+  frame of a step.
+- `Screen::curtain`, so a screen that animates itself into place can decline the
+  stack's full-screen curtain.
+- Measured frame rate and cost are reported by `GRIMMOIRE_FRAME_STATS=1`, and the
+  help overlay now shows a live frames-per-second figure.
+
+### Changed
+
+- The HUD gained a hierarchy: a prompt mark on a raised row, the movement state on
+  the right, and the location and controls on the plain row beneath.
+- A fresh game opens with a line of place rather than an empty message row.
+
+### Fixed
+
+- **A frame-loop pacing defect.** The animation deadline could be inherited from
+  an idle wait, so a loop asked for sixty frames a second could quietly deliver
+  thirty. The wait is now clamped to one frame interval.
+- The frame-rate report counted the startup keyboard handshake as idle time, which
+  understated it on terminals that do not answer the query; it now times the loop.
+
+### Notes — measured
+
+- Frame rate in a pseudo-terminal at 200×50: **64 frames/s walking east, 60
+  walking north, 8.7 idle.**
+- CPU: **0.5% of one core idle, about 2% walking.**
+- Composition did not get slower: 0.27 ms a frame at 120×40, with an unchanged
+  frame still costing sixteen bytes.
+
 ### Added — a custom ASCII renderer, and movement paced by screen speed
 
 - **A custom ASCII scenery renderer** (`ui::scenery`). The world is drawn as

@@ -7,11 +7,21 @@
 //!
 //! # When frames happen
 //!
-//! Screens report how soon they want another frame. Continuous motion (a step
-//! being interpolated, a transition) asks for frames at the animation rate; slow
-//! ambient scenery asks for one every few hundred milliseconds; a settled screen
-//! asks for none and the loop blocks on input. An idle game therefore costs
-//! almost nothing while still breathing.
+//! Screens report how soon they want another frame. Continuous motion - a step,
+//! a fading pulse, a transition - asks for frames at the animation rate
+//! ([`FRAME_INTERVAL`], sixty a second); slow ambient scenery asks for one every
+//! few tens of milliseconds; a settled screen asks for none and the loop blocks
+//! on input. An idle game therefore costs almost nothing while still breathing.
+//!
+//! The animation clock is **deadline based**. Each frame is scheduled from the
+//! previous frame's deadline rather than by sleeping a fixed interval after
+//! composing, so composition time does not accumulate into drift: a loop asked
+//! for sixty frames a second delivers sixty a second whether a frame takes 0.3 ms
+//! or 3 ms.
+//!
+//! Sixty updates a second is not the same as sixty *distinct* frames on screen.
+//! A frame is composed and diffed every tick, but only the cells that actually
+//! changed are written, and on a still frame that is nothing at all.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -27,11 +37,19 @@ use crate::ui::transition;
 use crate::ui::{ExplorationScreen, FrameContext, Palette, Screen, ScreenStack, viewport};
 
 /// The interval between frames while something is animating.
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+///
+/// Sixty a second: enough for a fade or a curtain to read as motion, cheap
+/// enough that the compose and diff on a still frame is lost in the noise.
+const FRAME_INTERVAL: Duration = crate::ui::animation::FRAME_INTERVAL;
 /// How long to wait for input while nothing is animating.
 const IDLE_TIMEOUT: Duration = Duration::from_millis(200);
 /// Upper bound on a single time step, so a stall cannot make movement jump.
 const MAX_DELTA: Duration = Duration::from_millis(60);
+/// The shortest an animation frame may be waited for.
+///
+/// Without a floor, a slow compose would leave the deadline permanently in the
+/// past and the loop would spin at full speed instead of pacing itself.
+const MIN_WAIT: Duration = Duration::from_micros(250);
 
 /// Everything the application needs before it starts, resolved by the caller so
 /// that failures are reported before the alternate screen is entered.
@@ -83,6 +101,18 @@ pub struct App {
     frame_images: Vec<ImagePlacement>,
     stats: PresentStats,
     frame_time: Duration,
+    /// Frames presented since the rate was last worked out.
+    frame_count: u32,
+    /// Frames presented since the application started, for the exit report.
+    frames_presented: u64,
+    /// Bytes written to the terminal since the application started.
+    bytes_presented: u64,
+    /// When the application started, for the exit report.
+    started: Instant,
+    /// When the rate was last worked out.
+    frame_window: Instant,
+    /// The most recent measured frame rate.
+    frames_per_second: f32,
     key_releases: bool,
     /// The terminal's cell size in device pixels, when it reports one.
     cell_px: Option<(u16, u16)>,
@@ -128,6 +158,12 @@ impl App {
             frame_images: Vec::new(),
             stats: PresentStats::default(),
             frame_time: Duration::ZERO,
+            frame_count: 0,
+            frames_presented: 0,
+            bytes_presented: 0,
+            started: Instant::now(),
+            frame_window: Instant::now(),
+            frames_per_second: 0.0,
             key_releases: false,
             cell_px: None,
             running: true,
@@ -152,17 +188,33 @@ impl App {
         // holding graphics, even on the error path.
         let _ = self.presenter.clear_graphics(terminal.writer());
         let left = terminal.leave();
+        // After leaving, so the report lands on an ordinary screen instead of
+        // being wiped with the alternate one.
+        self.report_frame_stats();
         result.and(left)
     }
 
     /// The main loop: pump input, advance time, recompose when needed, present.
     fn event_loop(&mut self, terminal: &mut Terminal) -> io::Result<()> {
+        // The clock starts with the loop, not with startup: the keyboard
+        // handshake can block for seconds on a terminal that never answers, and
+        // counting that as idle time would understate the frame rate.
+        self.started = Instant::now();
         let mut last = Instant::now();
         let mut last_frame = Instant::now();
+        let mut deadline = Instant::now();
         while self.running {
-            let continuous = self.is_animating();
-            let timeout = if continuous {
-                FRAME_INTERVAL
+            let animating = self.is_animating();
+            // While animating, wait exactly long enough to hit the next frame;
+            // otherwise wait however long the screens ask for.
+            let timeout = if animating {
+                // Never wait longer than one animation frame: the deadline may
+                // have been set while the game was idle, and inheriting an idle
+                // wait is exactly how a "60 Hz" loop ends up at 30.
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(FRAME_INTERVAL)
+                    .max(MIN_WAIT)
             } else {
                 self.stack
                     .next_frame()
@@ -180,8 +232,9 @@ impl App {
             self.set_size(width, height);
 
             let elapsed = now.saturating_duration_since(last_frame);
+            let animating = self.is_animating();
             let frame_due =
-                continuous || self.stack.next_frame().is_some_and(|wait| wait <= elapsed);
+                animating || self.stack.next_frame().is_some_and(|wait| wait <= elapsed);
 
             if self.dirty || had_event || frame_due {
                 self.compose_frame();
@@ -193,6 +246,23 @@ impl App {
                 )?;
                 self.dirty = false;
                 last_frame = now;
+                self.count_frame(now);
+                // The presenter builds fresh statistics each frame, so the rate it
+                // cannot know is put back in.
+                self.stats.frames_per_second = self.frames_per_second;
+                // Schedule from the deadline, not from now, so composition time
+                // does not push every later frame later still.
+                deadline = if animating {
+                    deadline
+                        .checked_add(FRAME_INTERVAL)
+                        .filter(|next| *next > now)
+                        .unwrap_or_else(|| now + FRAME_INTERVAL)
+                } else {
+                    // Idle frames are paced by the screens, not by this clock, so
+                    // park the deadline one frame out rather than a whole idle
+                    // timeout: that keeps the move into animation smooth.
+                    now + FRAME_INTERVAL
+                };
             }
         }
         Ok(())
@@ -245,16 +315,66 @@ impl App {
         if outcome.quit {
             self.running = false;
         }
-        if outcome.changed {
+        if outcome.changed && self.stack.wants_curtain() {
             self.transition
                 .start(AppAnimation::Transition, transition::animation());
         }
     }
 
-    /// Advances the clock by `delta`.
+    /// Prints what the loop actually achieved when the development flag is set.
+    ///
+    /// The honest answer to "did it hit sixty?" is a measurement, not a claim, and
+    /// this is the only place that can make it: the loop is the only thing that
+    /// knows how often it drew, and how much it wrote.
+    fn report_frame_stats(&self) {
+        let wanted = matches!(
+            std::env::var("GRIMMOIRE_FRAME_STATS").as_deref(),
+            Ok("1") | Ok("true") | Ok("yes")
+        );
+        if !wanted {
+            return;
+        }
+        let elapsed = self.started.elapsed().as_secs_f64().max(1e-6);
+        eprintln!(
+            "grimmoire: {} frames in {:.1}s = {:.1} frames/s, {:.1} KiB/s to the terminal",
+            self.frames_presented,
+            elapsed,
+            self.frames_presented as f64 / elapsed,
+            self.bytes_presented as f64 / elapsed / 1024.0,
+        );
+    }
+
+    /// Records a presented frame and periodically works out the rate.
+    ///
+    /// A half-second window is long enough to be stable and short enough to react
+    /// when the game starts or stops moving.
+    fn count_frame(&mut self, now: Instant) {
+        self.frame_count = self.frame_count.saturating_add(1);
+        self.frames_presented = self.frames_presented.saturating_add(1);
+        self.bytes_presented = self
+            .bytes_presented
+            .saturating_add(u64::from(self.stats.bytes));
+        let elapsed = now.saturating_duration_since(self.frame_window);
+        if elapsed >= Duration::from_millis(500) {
+            self.frames_per_second = self.frame_count as f32 / elapsed.as_secs_f32();
+            self.frame_count = 0;
+            self.frame_window = now;
+        }
+    }
+
+    /// Advances the clock by `delta`, then lets the active screen settle.
     fn advance(&mut self, delta: Duration) {
         self.stack.update(delta);
         self.transition.tick(delta);
+        // A screen may have finished something on its own schedule, such as a
+        // panel whose exit animation has just played out.
+        let outcome = self.stack.settle();
+        if outcome.quit {
+            self.running = false;
+        }
+        if outcome.changed {
+            self.dirty = true;
+        }
     }
 
     /// Re-reads the terminal's cell size, which the pixel scene needs to keep its
@@ -394,7 +514,7 @@ mod tests {
         let app = fixture();
         let text = frame_text(&app);
         assert!(text.contains("Ruined Chapel"), "area name missing");
-        assert!(text.contains("(o)"), "player missing");
+        assert!(text.contains("o::o"), "the mage is missing");
         assert!(text.contains("facing"), "status missing");
     }
 
@@ -473,8 +593,11 @@ mod tests {
             "an idle game should still breathe slowly"
         );
 
+        // A step plays a short stride, so it asks for frames - but only briefly.
         app.handle_key(Key::char('w'));
-        assert!(!app.is_animating(), "a step is instant, not a stream");
+        assert!(app.is_animating(), "the stride needs frames");
+        app.advance(Duration::from_millis(400));
+        assert!(!app.is_animating(), "and then the game settles again");
     }
 
     #[test]

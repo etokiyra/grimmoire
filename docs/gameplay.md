@@ -4,8 +4,8 @@ This document describes the playable exploration slice: its world model, the
 rules that govern it, the controls, and how progress is saved. It documents what
 exists today, which is deliberately small.
 
-> **Placeholder content.** The area names, the Hooded Figure, and every line of
-> dialogue are provisional. The story, setting, and characters have not been
+> **Placeholder content.** The area names, the character called Ysolde, and every
+> line of dialogue are provisional. The story, setting, and characters have not been
 > decided and nothing here is canon.
 
 ## What you can do
@@ -19,7 +19,7 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 | Key | Action |
 | --- | --- |
 | `w` `a` `s` `d` or arrow keys | Move (and face that way). Hold to keep walking. |
-| `Shift` + a direction | Sprint | 
+| `Shift` + a direction | Sprint |
 | `e` | Interact with whatever you are facing, or whatever is adjacent |
 | `h`, `?`, `F1` | Help and renderer diagnostics |
 | `F3` | The presentation study (a rendering prototype) |
@@ -38,9 +38,13 @@ in, your position, the direction you face, and the essential controls.
 
 The world itself is **ASCII art**. Walls are drawn with a lit cap, a shadowed
 base, a side face, or as a pillar depending on what surrounds them; floors, paths,
-rubble and moss vary by position; water ripples. The player and the people you meet
-are small ASCII figures with a facing direction and a walk cycle, not single
-letters.
+rubble and moss vary by position; water rolls; candles gutter along the walls;
+motes drift; and each area carries an inlaid motif cut into its open floors.
+
+The player and the people they meet are small **figures**, not single letters:
+several cells tall, drawn in several colours at once (hair, skin, cloth, trim and
+eyes), with four facing directions, a walk cycle that keeps pace with movement, a
+sprint of their own, and an idle breath that blinks now and then.
 
 Play needs a viewport of at least 80×24. Below that the game suspends to a short
 explanation, ignores input, keeps all of its state, and resumes by itself when the
@@ -90,9 +94,12 @@ an out-of-bounds grid.
   - A doorway moves you to the other area, which is saved immediately.
   - Nothing within reach produces a message saying so. This is not an error.
 - **Dialogue.** The panel is a screen pushed on top of the game, so input goes
-  to it and you cannot walk while talking. It is an overlay: the world stays
+  to it and you cannot walk while talking. Its dismissal plays out on its own
+  before the panel is removed, which is why a screen can finish something without
+  another keypress. It is an overlay: the world stays
   visible around it, and a small ASCII bust of the speaker is drawn beside their
-  words. It closes on `Enter`, `Space`, or
+  words. The panel rises into place when it opens and slides away when it closes.
+  It closes on `Enter`, `Space`, or
   `Esc` — deliberately *not* on `e`, the key that opens it, because a terminal
   that reports auto-repeats as ordinary presses would otherwise close it the
   instant it appeared.
@@ -109,8 +116,13 @@ an out-of-bounds grid.
   step rate. North and south step every ~133 ms, east and west every ~60 ms, and
   the cell size comes from the terminal, so this adapts to the font.
 - **Sprint.** Hold `Shift` while moving (or send an upper-case movement key) and
-  the pace doubles. A sprint is not a different kind of movement: it steps,
-  collides, and stops exactly like a walk.
+  the pace doubles, the pose changes, and a short wake trails behind. A sprint is
+  not a different kind of movement: it steps, collides, and stops exactly like a
+  walk.
+- **Feedback.** A step that is refused pulses and underlines the tile that refused
+  it; an interaction flashes whatever answered; arriving in a new area marks the
+  spot. Nothing changes the glyph under a pulse, so feedback never hides a
+  character or an exit.
 - **Releases.** Grimmoire asks Kitty for the keyboard protocol's event types, so it
   sees press, repeat, and release separately. Releasing a key stops the walk
   immediately. If a release is ever missed, the walk stops anyway once events stop
@@ -159,7 +171,9 @@ need a different design, and inventing one now would be premature.
 | `src/game/areas.rs` | The two prototype areas (temporary content) |
 | `src/save.rs` | The versioned save format and the file store |
 | `src/ui/motion.rs` | The movement model: press, cadence, release, sprint, stall guard |
-| `src/ui/scenery.rs` | The ASCII world renderer: terrain glyphs, props, characters, light |
+| `src/ui/scenery.rs` | The ASCII world renderer: terrain glyphs, inlay, props, ambience, figures |
+| `src/ui/animation.rs` | The character animation model: stride, sprint, idle, blink |
+| `src/ui/effects.rs` | Transient feedback pulses |
 | `src/ui/exploration.rs` | The exploration screen: key mapping, camera, and the HUD overlay |
 | `src/ui/dialogue.rs` | The dialogue overlay and its ASCII portrait |
 

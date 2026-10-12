@@ -13,10 +13,21 @@
 //! The portrait is ASCII by default, like everything else in the game. When the
 //! development flag enables pixel interface art, an image is drawn in the same
 //! rectangle instead; the panel looks right either way.
+//!
+//! # Opening and closing
+//!
+//! The panel slides up from the bottom edge and slides back down to leave, which
+//! is why it animates itself rather than asking the stack for a full-screen
+//! curtain: the world stays visible and still while a conversation comes and
+//! goes. Dismissal returns no command until the exit has played, so the panel
+//! finishes leaving instead of vanishing.
+
+use std::time::Duration;
 
 use super::FrameContext;
 use super::screen::{Command, Screen};
 use super::theme::Palette;
+use crate::anim::Easing;
 use crate::game::Dialogue;
 use crate::input::{Key, KeyCode};
 use crate::render::{AssetId, Frame, Rect, Style, glyph};
@@ -25,6 +36,10 @@ use crate::render::{AssetId, Frame, Rect, Style, glyph};
 const PORTRAIT_WIDTH: u16 = 22;
 /// How tall the panel is, in cells.
 const PANEL_HEIGHT: u16 = 11;
+/// How long the panel takes to rise into place.
+const ENTRANCE: Duration = Duration::from_millis(220);
+/// How long it takes to slide away again.
+const EXIT: Duration = Duration::from_millis(150);
 
 /// The hooded figure's bust, drawn as ASCII when there is no image.
 const PORTRAIT_ASCII: [&str; 7] = [
@@ -42,19 +57,52 @@ const PORTRAIT_ASCII: [&str; 7] = [
 pub struct DialogueScreen {
     dialogue: Dialogue,
     portrait: Option<AssetId>,
+    /// Time since the panel opened.
+    open: Duration,
+    /// Time since dismissal began, once it has.
+    closing: Option<Duration>,
 }
 
 impl DialogueScreen {
     /// Creates a panel for `dialogue`, showing `portrait` when available.
     #[must_use]
     pub const fn new(dialogue: Dialogue, portrait: Option<AssetId>) -> Self {
-        DialogueScreen { dialogue, portrait }
+        DialogueScreen {
+            dialogue,
+            portrait,
+            open: Duration::ZERO,
+            closing: None,
+        }
     }
 
     /// The dialogue being shown.
     #[must_use]
     pub const fn dialogue(&self) -> Dialogue {
         self.dialogue
+    }
+
+    /// Whether the panel is on its way out.
+    #[must_use]
+    pub const fn is_closing(&self) -> bool {
+        self.closing.is_some()
+    }
+
+    /// How far the panel has risen, from 0 (just off the bottom) to 1 (settled).
+    ///
+    /// This is the whole animation: one eased number the geometry and the border
+    /// both read from, so the panel can never be half-drawn.
+    #[must_use]
+    pub fn reveal(&self) -> f32 {
+        match self.closing {
+            Some(age) => {
+                let t = age.as_secs_f32() / EXIT.as_secs_f32();
+                1.0 - Easing::EaseInQuad.apply(t.clamp(0.0, 1.0))
+            }
+            None => {
+                let t = self.open.as_secs_f32() / ENTRANCE.as_secs_f32();
+                Easing::EaseOutCubic.apply(t.clamp(0.0, 1.0))
+            }
+        }
     }
 }
 
@@ -66,12 +114,51 @@ impl Screen for DialogueScreen {
     fn handle_key(&mut self, key: Key) -> Command {
         // Only genuine presses act: a held key must not skip past the panel, and
         // a release must not either.
-        if !key.is_down() || key.is_repeat() {
+        if !key.is_down() || key.is_repeat() || self.is_closing() {
             return Command::None;
         }
         match key.code {
-            KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') => Command::Pop,
+            // Dismissal starts the exit; the pop comes from `after_update` once it
+            // has played out, so the panel leaves rather than vanishing.
+            KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') => {
+                self.closing = Some(Duration::ZERO);
+                Command::None
+            }
             _ => Command::None,
+        }
+    }
+
+    fn update(&mut self, delta: Duration) {
+        self.open = self.open.saturating_add(delta);
+        if let Some(age) = self.closing {
+            self.closing = Some(age.saturating_add(delta));
+        }
+    }
+
+    fn after_update(&mut self) -> Command {
+        match self.closing {
+            Some(age) if age >= EXIT => Command::Pop,
+            _ => Command::None,
+        }
+    }
+
+    fn curtain(&self) -> bool {
+        // The panel brings itself in; a full-screen curtain on top would fight it.
+        false
+    }
+
+    fn is_animating(&self) -> bool {
+        match self.closing {
+            Some(age) => age < EXIT,
+            None => self.open < ENTRANCE,
+        }
+    }
+
+    fn next_frame(&self) -> Option<Duration> {
+        if self.is_animating() {
+            Some(Duration::ZERO)
+        } else {
+            None
         }
     }
 
@@ -84,12 +171,12 @@ impl Screen for DialogueScreen {
 
         let width = area.width.saturating_sub(8).clamp(32, 96);
         let height = PANEL_HEIGHT.min(area.height.saturating_sub(2));
-        let panel = Rect::new(
-            area.centered_x(width),
-            area.bottom().saturating_sub(height).saturating_sub(2),
-            width,
-            height,
-        );
+        let reveal = self.reveal();
+        // Slide the whole panel up from below the bottom edge.
+        let settled = i32::from(area.bottom().saturating_sub(height).saturating_sub(2));
+        let hidden = i32::from(area.height);
+        let top = (hidden as f32 + (settled - hidden) as f32 * reveal).round() as u16;
+        let panel = Rect::new(area.centered_x(width), top, width, height);
 
         // An opaque panel so the world shows around it but not through it.
         {
@@ -100,11 +187,18 @@ impl Screen for DialogueScreen {
                     .with_fg(palette.text)
                     .with_bg(palette.surface_raised),
             );
+            // The frame brightens as the panel settles, so a conversation seems
+            // to come into focus rather than simply appear.
+            let edge = if reveal > 0.98 {
+                Style::new().with_fg(palette.accent).bold()
+            } else {
+                palette.border_style()
+            };
             view.draw_titled_border(
                 view.bounds(),
                 self.dialogue.speaker,
                 palette.border_style(),
-                Style::new().with_fg(palette.accent).bold(),
+                edge,
             );
         }
 
@@ -194,7 +288,7 @@ fn draw_ascii_portrait(frame: &mut Frame, plate: Rect, palette: &Palette) {
 mod tests {
     use std::time::Duration;
 
-    use super::DialogueScreen;
+    use super::{DialogueScreen, ENTRANCE, EXIT};
     use crate::game::Dialogue;
     use crate::input::{Key, KeyCode, KeyKind};
     use crate::render::{AssetId, Canvas, Frame, ImagePlacement};
@@ -204,10 +298,7 @@ mod tests {
     use crate::ui::{FrameContext, Palette};
 
     fn dialogue() -> Dialogue {
-        Dialogue::new(
-            "the Hooded Figure",
-            &["You walk where the stones remember."],
-        )
+        Dialogue::new("Ysolde", &["You walk where the stones remember."])
     }
 
     fn context() -> FrameContext {
@@ -223,11 +314,14 @@ mod tests {
         }
     }
 
-    fn compose_into(
-        screen: &DialogueScreen,
-        width: u16,
-        height: u16,
-    ) -> (Canvas, Vec<ImagePlacement>) {
+    /// A panel that has finished arriving.
+    fn settled() -> DialogueScreen {
+        let mut screen = DialogueScreen::new(dialogue(), None);
+        screen.update(ENTRANCE);
+        screen
+    }
+
+    fn compose(screen: &DialogueScreen, width: u16, height: u16) -> (Canvas, Vec<ImagePlacement>) {
         let mut canvas = Canvas::new(width, height);
         canvas.clear_with(Palette::EXTENDED.backdrop());
         let mut images = Vec::new();
@@ -250,25 +344,81 @@ mod tests {
     }
 
     #[test]
-    fn confirm_keys_dismiss_the_panel() {
+    fn confirm_keys_start_the_dismissal_rather_than_ending_it() {
         for code in [KeyCode::Enter, KeyCode::Esc, KeyCode::Char(' ')] {
-            let mut screen = DialogueScreen::new(dialogue(), None);
+            let mut screen = settled();
             assert!(
-                matches!(screen.handle_key(Key::new(code)), Command::Pop),
-                "{code:?} should close the panel"
+                matches!(screen.handle_key(Key::new(code)), Command::None),
+                "{code:?} should begin the exit, not skip it"
             );
+            assert!(screen.is_closing());
         }
     }
 
     #[test]
-    fn the_opening_key_does_not_dismiss() {
+    fn the_panel_pops_itself_once_the_exit_has_played() {
+        let mut screen = settled();
+        assert!(matches!(
+            screen.handle_key(Key::new(KeyCode::Enter)),
+            Command::None
+        ));
+        assert!(screen.is_animating(), "the exit needs frames");
+        for _ in 0..40 {
+            screen.update(Duration::from_millis(10));
+        }
+        assert!(!screen.is_animating());
+        assert!(matches!(screen.after_update(), Command::Pop));
+    }
+
+    #[test]
+    fn a_second_dismissal_while_closing_does_nothing() {
+        let mut screen = settled();
+        screen.handle_key(Key::new(KeyCode::Enter));
+        screen.update(EXIT / 2);
+        assert!(matches!(
+            screen.handle_key(Key::new(KeyCode::Enter)),
+            Command::None
+        ));
+        assert!(screen.is_closing());
+    }
+
+    #[test]
+    fn the_panel_rises_into_place() {
         let mut screen = DialogueScreen::new(dialogue(), None);
+        assert!(screen.reveal() < 0.01, "it starts off the bottom");
+        assert!(screen.is_animating());
+
+        screen.update(ENTRANCE / 2);
+        let half = screen.reveal();
+        assert!(half > 0.3 && half < 0.99, "halfway is neither end: {half}");
+
+        screen.update(ENTRANCE);
+        assert!(screen.reveal() > 0.999, "and it settles exactly in place");
+        assert!(!screen.is_animating());
+        assert_eq!(None, screen.next_frame(), "a settled panel needs no frames");
+    }
+
+    #[test]
+    fn a_panel_that_has_not_risen_yet_leaves_the_screen_alone() {
+        // At rest the panel sits below the bottom edge, so nothing of it is drawn.
+        let screen = DialogueScreen::new(dialogue(), None);
+        let (canvas, _) = compose(&screen, 100, 30);
+        assert!(
+            !frame_text(&canvas).contains("Ysolde"),
+            "the panel should still be off-screen"
+        );
+    }
+
+    #[test]
+    fn the_opening_key_does_not_dismiss() {
+        let mut screen = settled();
         assert!(matches!(screen.handle_key(Key::char('e')), Command::None));
+        assert!(!screen.is_closing());
     }
 
     #[test]
     fn movement_keys_are_ignored() {
-        let mut screen = DialogueScreen::new(dialogue(), None);
+        let mut screen = settled();
         for key in [
             Key::char('w'),
             Key::char('a'),
@@ -281,24 +431,31 @@ mod tests {
                 "{key:?} must not close the panel"
             );
         }
+        assert!(!screen.is_closing());
     }
 
     #[test]
     fn repeats_and_releases_do_not_dismiss() {
-        let mut screen = DialogueScreen::new(dialogue(), None);
+        let mut screen = settled();
         for kind in [KeyKind::Repeat, KeyKind::Release] {
             assert!(matches!(
                 screen.handle_key(Key::new(KeyCode::Enter).with_kind(kind)),
                 Command::None
             ));
         }
+        assert!(!screen.is_closing());
+    }
+
+    #[test]
+    fn the_panel_wants_no_full_screen_curtain() {
+        assert!(!settled().curtain(), "the panel animates itself");
     }
 
     #[test]
     fn compose_shows_the_speaker_the_lines_and_an_ascii_portrait() {
-        let (canvas, images) = compose_into(&DialogueScreen::new(dialogue(), None), 100, 30);
+        let (canvas, images) = compose(&settled(), 100, 30);
         let text = frame_text(&canvas);
-        assert!(text.contains("the Hooded Figure"), "speaker missing");
+        assert!(text.contains("Ysolde"), "speaker missing");
         assert!(text.contains("stones remember"), "line missing");
         assert!(text.contains("[enter] close"), "hint missing");
         assert!(
@@ -313,17 +470,33 @@ mod tests {
 
     #[test]
     fn a_portrait_is_placed_beside_the_text() {
-        let screen = DialogueScreen::new(dialogue(), Some(AssetId::new(2)));
-        let (canvas, images) = compose_into(&screen, 100, 30);
+        let screen = DialogueScreen {
+            portrait: Some(AssetId::new(2)),
+            ..settled()
+        };
+        let (canvas, images) = compose(&screen, 100, 30);
         assert_eq!(1, images.len(), "expected a portrait placement");
-        // The panel is opaque, so no cell inside it is left showing the world.
         assert!(frame_text(&canvas).contains("stones remember"));
     }
 
     #[test]
     fn compose_is_safe_on_small_frames() {
         for (width, height) in [(0, 0), (1, 1), (20, 5), (40, 8), (200, 60)] {
-            let (_, _) = compose_into(&DialogueScreen::new(dialogue(), None), width, height);
+            let _ = compose(&settled(), width, height);
+        }
+    }
+
+    #[test]
+    fn every_composed_cell_owns_its_background() {
+        let (canvas, _) = compose(&settled(), 100, 30);
+        for y in 0..canvas.height() {
+            for x in 0..canvas.width() {
+                assert_ne!(
+                    Some(crate::render::Color::Default),
+                    canvas.get(x, y).map(|cell| cell.style.bg),
+                    "cell ({x}, {y}) would show the terminal background"
+                );
+            }
         }
     }
 }

@@ -23,9 +23,14 @@ pub const CHAPEL: AreaId = AreaId::new("ruined-chapel");
 /// The id of the second area.
 pub const CELLAR: AreaId = AreaId::new("sunken-cellar");
 
-/// Placeholder dialogue for the only NPC in the slice.
-const HOODED_FIGURE: Dialogue = Dialogue::new(
-    "the Hooded Figure",
+/// Placeholder dialogue for the only character in the slice.
+///
+/// Names and lines here are provisional, like everything else in this file. They
+/// live in the model so a later phase can rewrite them without touching the
+/// renderer: the interface reads `Entity::name` and `Dialogue::speaker`, and has
+/// no idea what either says.
+const YSOLDE: Dialogue = Dialogue::new(
+    "Ysolde",
     &[
         "You walk where the stones still remember.",
         "The stair below has not been swept in a long while. Mind the water.",
@@ -93,12 +98,7 @@ pub fn chapel() -> Area {
             "######################################################################+#####################################################################",
         ],
         vec![
-            Entity::npc(
-                Position::new(56, 33),
-                'N',
-                "the Hooded Figure",
-                HOODED_FIGURE,
-            ),
+            Entity::npc(Position::new(56, 33), 'N', "Ysolde", YSOLDE),
             Entity::object(
                 Position::new(76, 6),
                 'o',

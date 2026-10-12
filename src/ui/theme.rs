@@ -12,9 +12,42 @@
 //!
 //! Few tokens, used consistently, is the design rule. Nothing here should be
 //! reached for because a screen wants "a different colour".
+//!
+//! Characters are the one place where a *set* of colours is needed at once - hair,
+//! skin, cloth, trim and eyes all appear in the same few cells - so each cast
+//! member carries an [`Inks`] value rather than reaching into the role table for
+//! eight colours by hand.
 
 use crate::render::{Cell, Color, Style};
 use crate::terminal::ColorSupport;
+
+/// The colours one character is drawn from.
+///
+/// A figure's legend maps a character in its ASCII rows to one of these, so the
+/// art says "this cell is hair" and the palette says what hair is. That keeps the
+/// art legible in the source and lets a character be recoloured without touching
+/// a glyph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Inks {
+    /// Skin, for a face and hands.
+    pub skin: Color,
+    /// Hair, a hat, or a hood.
+    pub hair: Color,
+    /// The main garment.
+    pub cloth: Color,
+    /// The garment in shadow, or its underside.
+    pub cloth_dark: Color,
+    /// Metal, embroidery, and other small bright details.
+    pub trim: Color,
+    /// Eyes, and any small point of light on the figure.
+    pub eye: Color,
+    /// A staff or other wooden haft.
+    pub wood: Color,
+    /// Magic held in a focus.
+    pub magic: Color,
+    /// A void the figure is cut out of, such as a hood's interior.
+    pub shadow: Color,
+}
 
 /// The theme, resolved into concrete colours for the terminal's capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +103,10 @@ pub struct Palette {
     pub shade_near: Color,
     /// Foreground used on top of a bright highlight background.
     pub highlight_fg: Color,
+    /// The player character's colours.
+    pub mage: Inks,
+    /// The veiled figure's colours.
+    pub veiled: Inks,
 }
 
 impl Palette {
@@ -104,6 +141,28 @@ impl Palette {
         shade_mid: Color::Black,
         shade_near: Color::Blue,
         highlight_fg: Color::Black,
+        mage: Inks {
+            skin: Color::LightYellow,
+            hair: Color::White,
+            cloth: Color::Blue,
+            cloth_dark: Color::Black,
+            trim: Color::Yellow,
+            eye: Color::LightCyan,
+            wood: Color::Yellow,
+            magic: Color::LightMagenta,
+            shadow: Color::Black,
+        },
+        veiled: Inks {
+            skin: Color::DarkGrey,
+            hair: Color::DarkGrey,
+            cloth: Color::Black,
+            cloth_dark: Color::Black,
+            trim: Color::Magenta,
+            eye: Color::LightMagenta,
+            wood: Color::Black,
+            magic: Color::LightMagenta,
+            shadow: Color::Black,
+        },
     };
 
     /// The richer 256-colour palette: an inky violet night with warm stone.
@@ -133,6 +192,33 @@ impl Palette {
         shade_mid: Color::Indexed(236),
         shade_near: Color::Indexed(240),
         highlight_fg: Color::Indexed(232),
+        // A pale young mage: silver hair, warm skin, an indigo robe with gold
+        // braid, and a violet focus. The point is contrast against a world that
+        // is almost entirely cold stone.
+        mage: Inks {
+            skin: Color::Indexed(223),
+            hair: Color::Indexed(253),
+            cloth: Color::Indexed(61),
+            cloth_dark: Color::Indexed(60),
+            trim: Color::Indexed(179),
+            eye: Color::Indexed(123),
+            wood: Color::Indexed(137),
+            magic: Color::Indexed(183),
+            shadow: Color::Indexed(234),
+        },
+        // The veiled one: no skin, a deep cowl, and cold violet light where a
+        // face should be.
+        veiled: Inks {
+            skin: Color::Indexed(236),
+            hair: Color::Indexed(236),
+            cloth: Color::Indexed(236),
+            cloth_dark: Color::Indexed(234),
+            trim: Color::Indexed(97),
+            eye: Color::Indexed(141),
+            wood: Color::Indexed(234),
+            magic: Color::Indexed(141),
+            shadow: Color::Indexed(233),
+        },
     };
 
     /// Selects a palette appropriate for the reported colour support.

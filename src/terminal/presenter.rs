@@ -36,7 +36,7 @@ use crate::render::{AssetId, Canvas, Color, ImagePlacement, Rect, Style, glyph};
 use super::graphics::{Graphics, GraphicsSupport};
 
 /// Statistics describing a single presented frame.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PresentStats {
     /// Width of the presented frame in cells.
     pub width: u16,
@@ -56,6 +56,11 @@ pub struct PresentStats {
     pub images_placed: u32,
     /// Placements removed.
     pub images_removed: u32,
+    /// The rate at which frames have actually been presented, smoothed.
+    ///
+    /// Filled in by the application loop, which is the only thing that knows how
+    /// often it has drawn; the presenter itself is not a clock.
+    pub frames_per_second: f32,
 }
 
 impl PresentStats {

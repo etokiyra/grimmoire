@@ -79,10 +79,18 @@ Respect these; they are the point of the current structure:
   the image lifecycle for the optional pixel UI: transmitting an asset once,
   placing it by cell, replacing a placement in place, and deleting images on every
   exit path.
-- `src/ui/scenery.rs` — the ASCII world renderer. Pure: a world and a palette in,
-  cells out. Structure comes from a tile's neighbours, variation from a hash of
-  its world position (never of the frame, or the world would shimmer), and light
-  from distance. Keep it total: it must draw every visible cell without gaps.
+- `src/ui/scenery.rs` — the ASCII world renderer. Pure: a world, a palette, a
+  time and a pose in; cells out. Structure comes from a tile's neighbours,
+  variation from a hash of its world position (never of the frame, or the world
+  would shimmer), and light from distance. Decor — inlay, candles, motes — is
+  drawn only where it cannot cover a character, a prop or a doorway, and the draw
+  order is terrain → inlay → props → ambience → figures. Keep it total: it must
+  draw every visible cell without gaps.
+- `src/ui/animation.rs` — the character animation model. The walk stride advances
+  on *steps*, not on a clock, so it cannot drift away from the movement it is
+  illustrating; idle breathing and blinking run on their own slow clock.
+- `src/ui/effects.rs` — transient feedback pulses. They are pure, self-expiring,
+  capped, and rendered as a *style* change so they can never hide a glyph.
 - `src/pixel/` — software pixel rendering, used **only** by optional interface
   art. It must never be reached from the default rendering path.
 - `src/ui/viewport.rs` — owns the minimum-viewport policy. Screens must not grow
@@ -113,6 +121,14 @@ Additional rules:
   not reintroduce timer-driven stepping: it is what lets a lost release walk the
   player onward. A stall guard may clear the reported held state, but must never
   take a step.
+- **Animation is a function of elapsed time, never of frame count**, and the
+  walk cycle is locked to steps rather than to a free-running clock. Do not
+  animate from a frame counter: a slow machine must not slow the world down.
+- **A frame is composed when something changed, and only changed cells are
+  written.** The animation target is sixty updates a second while something is
+  moving and a slower ambient tick when nothing is; do not make the idle game
+  run at sixty, and do not emit a full redraw to look busy. The loop schedules
+  from a deadline, not by sleeping a fixed interval after composing.
 - **The two axes share a screen speed, not a cadence.** Terminal cells are taller
   than they are wide, so `ui::motion` derives the north/south cadence from the
   cell height and the east/west cadence from the cell width, both from one speed
@@ -121,11 +137,17 @@ Additional rules:
   movement feel twice as fast as horizontal.
 - The text width policy in `render::glyph` is the single source of truth for what
   may be drawn.
-- **Artwork is source text, not files.** The world is glyph tables and neighbour
-  rules in `ui::scenery`; the optional interface art is ASCII sprite tables in
-  `src/pixel/art.rs` rendered to PNG in memory. Nothing is read from disk, so
-  there is no third-party imagery, no provenance to track, and no missing file to
-  break the game.
+- **Artwork is source text, not files.** The world is glyph tables, figure
+  legends and neighbour rules in `ui::scenery`; the optional interface art is
+  ASCII sprite tables in `src/pixel/art.rs` rendered to PNG in memory. Characters
+  are multi-ink: a figure's rows name inks from an `Inks` value carried per cast
+  member, so hair, skin, cloth, trim and eyes are separate colours. Nothing is
+  read from disk, so there is no third-party imagery, no provenance to track, and
+  no missing file to break the game.
+- **Names and display text live in the model.** `Entity::name` and
+  `Dialogue::speaker` are the only places character names appear; the renderer has
+  no idea what any of them say. Keep it that way so the cast can be rewritten
+  without touching drawing code.
 - **Backgrounds are inherited, not defaulted.** A draw that leaves `Style::bg` at
   `Color::Default` keeps whatever background the cell already had. That is what
   makes the viewport opaque. Only paint an explicit background when a component

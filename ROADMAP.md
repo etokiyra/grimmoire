@@ -126,7 +126,36 @@ Delivered:
 - `examples/preview`, which prints a rendered area as text so art can be read and
   diffed without a screenshot.
 
-## Phase 7 — Dialogue and story
+## Phase 7 — Anime-inspired identity, animation, and game feel (done)
+
+This phase made Grimmoire look and behave like a designed game rather than a
+renderer demo. It began with an audit (`docs/phase7-audit.md`) of how frames were
+scheduled, what actually animated, and what the input path guaranteed.
+
+Delivered:
+
+- **Characters with identities.** Figure art plus, for the first time, *inks*: a
+  figure's rows name hair, skin, cloth, trim and eyes, and each cast member
+  carries its own set. The mage has silver hair, a face with two eyes, an indigo
+  robe with a gold clasp and a crystal staff; Ysolde has a cowl, a trim rim, and
+  two violet points of light where a face should be.
+- **Names in the model.** The NPC is a named individual, and `Entity::name` /
+  `Dialogue::speaker` remain the only places character names appear.
+- **Life in the world.** Candles gutter along wall faces, motes drift over bare
+  floor, water rolls with two wave trains, and the sigil turns. Each area also
+  carries an inlaid motif so its wide open floors are not blank paper.
+- **Feedback.** A refused step pulses and underlines the tile that refused it, an
+  interaction flashes what answered, and an arrival marks the spot — as style
+  changes, so nothing is ever hidden.
+- **Animation that keeps pace.** The stride advances per *step*, sprint is its own
+  stage with a lean and a wake, idle figures breathe and blink, and the dialogue
+  panel rises, settles and slides away.
+- **A 60 Hz animation loop while something is moving**, deadline-scheduled so
+  composition time cannot accumulate into drift, dropping to a slow ambient tick
+  when idle. Measured at 60–64 frames a second while walking and 8.7 idle, at
+  about 2% of a core moving and 0.5% idle.
+
+## Phase 8 — Dialogue and story
 
 - A dialogue system with branching choices, built on the overlay that already
   carries an ASCII portrait.
@@ -134,19 +163,19 @@ Delivered:
   authoring-friendly data.
 - Conversation state that persists, and quests built on top.
 
-## Phase 8 — Magic combat
+## Phase 9 — Magic combat
 
 - Turn-based, magic-only combat: spell resolution, resources, and enemy behaviour.
 - Combat presentation built on the animation system, with ASCII effects and enemy
   art.
 
-## Phase 9 — Progression and items
+## Phase 10 — Progression and items
 
 - Hybrid progression: discoveries/story milestones plus gameplay mastery.
 - A skill tree.
 - Items focused on exploration, puzzles, quests, and storytelling.
 
-## Phase 10 — Persistence and release
+## Phase 11 — Persistence and release
 
 - A save format for the rest of the game (inventory, quests, story flags) with
   versioning and migration. The current format deliberately covers exploration

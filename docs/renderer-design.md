@@ -107,9 +107,8 @@ protocol bytes.
 
 ## 5. The ASCII scenery renderer
 
-`ui::scenery` draws the world into a cell view. It is pure: a world and a palette
-in, cells out. Three things make it read as a place rather than as a field of
-symbols.
+`ui::scenery` draws the world into a cell view. It is pure: a world, a palette, a
+time and a pose in; cells out. Five things make it read as a place.
 
 ### Structure, from neighbours
 
@@ -124,8 +123,7 @@ A wall is not `#` repeated. Its glyph is chosen from what surrounds it:
 | Floor on all four sides | `║` | a free-standing pillar |
 
 That single rule is what turns a chapel's colonnade, a crypt's chambers and a
-corridor's edges into architecture. A worked test asserts a cap, a base and a
-pillar are three different glyphs.
+corridor's edges into architecture.
 
 ### Variation, from a hash
 
@@ -135,70 +133,104 @@ same tile therefore looks the same every time it is drawn, so the world never
 shimmers as the camera moves, and neighbouring tiles differ. The variation is
 deliberately restrained — a floor is one surface with grit on it, not static.
 
-### Characters as art
+### Inlay, for the wide open floors
 
-The player and the people they meet are small ASCII figures, three cells square,
-rather than a single coloured letter:
+Several rooms in both areas are large and empty, and left alone they read as
+graph paper. Each area therefore carries a **motif**: the chapel has a rose cut
+around its crossing plus a coarse lattice out to the edges; the cellar has
+concentric rings around its sigil. It is drawn only on plain, walkable floor that
+holds no entity, no doorway and no player — never over something that matters.
+
+### Life, from position and time
+
+- **Candles** gutter along wall faces that open onto floor, in a deterministic
+  scatter, cycling through a small flame glyph set.
+- **Motes** drift over bare floor. They are anchored to the *world*, so they
+  scroll with it and read as dust in a room rather than dirt on the screen, and
+  they are sampled from a slowly shifting lattice — which is how they drift with
+  no per-mote state at all.
+- **Water** carries two wave trains at different speeds plus occasional crests,
+  so the surface rolls instead of repeating one stripe.
+- **The sigil** turns through two phases and pulses in the effect colour.
+
+Every one of these is a function of `(position, time)`. None uses randomness, the
+frame count, or anything from the machine — so the same world and the same time
+always produce the same frame.
+
+### Figures, in several inks
+
+Characters are not single coloured letters. A figure is ASCII art plus a
+**legend**: each character in its rows names an ink, and each cast member carries
+its own [`Inks`] value. That is what lets one small figure have silver hair, warm
+skin, an indigo robe, a gold clasp, cyan eyes and a violet staff crystal at once.
 
 ```
- ^      ^      ^
-(o)    (.)    (o>      and the hooded figure: (oo)
-/|\    /|\    /|\                             |###|
+ ^^^                   ___
+(o::o)   the mage    /++\    Ysolde
+/#++#\   and staff   |@oo@|   (no skin at all:
+|####|                |####|    cold light in a cowl)
 ```
 
-They have a facing direction (four variants, with west mirrored from east), a
-two-frame walk cycle, and a distinct palette role. The staff-bearing wizard and
-the dark, still, two-eyed hooded figure are not confusable at a glance.
+Both are four body rows plus a stride row, so a walk cycle costs two hem rows per
+direction rather than a second full figure. Facing has four variants, the stride
+alternates per *step*, and an idle figure blinks on a slow clock and does not ask
+for a frame while it does so.
 
-### Light, from distance
+### Draw order, and feedback
 
-Every cell is shaded by its distance from the player, using the theme's three-step
-ambient ramp as the background and the `dim` attribute for the far distance. The
-effect is a pool of light around the wizard that falls away into shadow — the
-same trick the cell renderer used before, kept because it is cheap and it works.
+Terrain, then inlay, then props, then ambience, then figures. A **pulse** — the
+transient effects in `ui::effects` — is not a layer: it is a *style* change applied
+wherever it lands, so feedback can never hide a glyph. A blocked step underlines
+the cell that refused it; an interaction flashes what answered; an arrival marks
+where you now stand.
 
-Aerial perspective is not attempted, and neither is field of view. The whole area
-is drawn every frame; only the visible window is composed.
+## 6. Animation and the frame loop
 
-## 6. The input model
+### What animates, and what drives it
 
-Movement is an explicit state machine (`ui::motion`), not a throttle on the raw
-key stream:
+- The **walk stride** advances once per step, taken from the movement model, so
+  the legs keep pace with the world whether a step takes 60 ms or 133, and stop
+  dead when movement stops. A tap keeps its stride for the length of one cadence
+  rather than snapping back to idle.
+- **Sprint** is a separate stage: the same stride at twice the rate, plus a
+  lean and a short wake drawn behind the figure.
+- **Idle** breathes and blinks on its own slow clock.
+- **Ambient detail** (water, motes, flames, the sigil) advances with the world
+  clock.
+- **Overlays** animate themselves: the dialogue panel rises from the bottom edge,
+  brightens as it settles, and slides away again on dismissal.
 
-- a **fresh press** steps immediately, with no gate and no latency;
-- **auto-repeat** steps again only once the cadence has elapsed;
-- a **release** stops the walk at once;
-- **shift** makes the hold a sprint.
+All of it is a function of elapsed time, advanced explicitly. Nothing depends on
+how many frames were drawn, so a slow machine does not slow the animation down
+and a fast one does not speed it up.
 
-The critical decision is that **steps are taken on events, never on a timer**. An
-earlier revision self-drove the cadence while a direction was held; live testing
-showed that a press with no release — exactly what injected or pasted input looks
-like — then walked ~3 steps before a stall guard caught it. Event-driven motion
-makes a tap exactly one step and makes a runaway *impossible by construction*. A
-repeat that does not continue a hold is ignored, and a stall guard clears the
-reported held state after 400 ms of silence without ever taking a step.
+### The loop
 
-### Why the two axes do *not* share a cadence
+The application asks the screens how soon they want another frame. While
+something is animating — a step, a fading pulse, a transition — that is
+`FRAME_INTERVAL`, sixty a second. While the world is merely breathing it is a
+slower ambient tick. When nothing is happening at all, it is input.
 
-This is the fix for "horizontal feels slow, vertical feels fast".
+The animation clock is **deadline based**: each frame is scheduled from the
+previous frame's deadline rather than by sleeping a fixed interval after doing
+the work, so composition time never accumulates into drift. The wait is also
+clamped to one frame interval, because a deadline set while the game was idle must
+never be inherited by the first frame of a step — that is exactly how a "60 Hz"
+loop quietly becomes a 30 Hz one.
 
-A step moves the view exactly one cell. Terminal cells are about twice as tall as
-they are wide — measured here at **9 × 20 pixels**. At one cadence, a step north
-would cross more than twice the screen distance of a step east, so holding a
-direction looked fast vertically and sluggish horizontally.
+**Sixty updates a second is not sixty distinct frames on screen.** A frame is
+composed and diffed every tick, but only the cells that actually changed are
+written. On a still frame that is nothing at all; while walking in a room that
+fits the viewport, it is a handful of cells.
 
-The fix is to move at a constant **screen speed** rather than a constant step
-rate:
+### What the cell grid cannot do
 
-| Direction | Step | Cadence | Screen speed |
-| --- | --- | --- | --- |
-| north / south | 20 px | 133 ms | 150 px/s |
-| east / west | 9 px | 60 ms | 150 px/s |
-
-Both axes are derived from one constant (`WALK_SPEED`, with `SPRINT_SPEED` at
-twice it), and the cell size comes from the terminal, so this adapts to the font
-instead of being tuned for one. A floor of 45 ms per step keeps a very narrow
-terminal from asking for more steps a second than a keyboard can deliver.
+A step moves the camera one whole cell, and a cell is a cell: there is no
+sub-cell offset in a terminal. Camera motion is therefore inherently chunky at
+the tile boundary, and this phase did not pretend otherwise. What was improved is
+everything around it: the stride is locked to steps so the figure never looks
+disconnected from the motion, both axes cross the screen at the same speed, and
+the frame loop now runs fast enough that a transition or a fade is smooth.
 
 ## 7. The optional pixel interface
 
@@ -207,54 +239,58 @@ for **interface pieces only**: the dialogue portrait, and the study's portrait
 panel. It is off by default, the game never depends on it, and the default path
 emits no graphics sequence.
 
-The pixel layer is a flat RGB canvas, sprites authored as ASCII, and a PNG
-encoder (`render::png`) that hands the bytes to Kitty. The PNG container is
-hand-written — signature, `IHDR`, `IDAT`, `IEND`, Paeth filtering, CRC-32 — and
-only DEFLATE comes from a dependency (`fdeflate`, chosen for PNG scanline data).
-Nothing in the project decodes an image: Kitty does that.
-
-This exists so the pixel work is inspectable rather than thrown away, and so a
-future phase can decide to use it deliberately.
+The pixel layer is a flat RGB canvas, sprites authored as ASCII, and a PNG encoder
+(`render::png`) that hands the bytes to Kitty. The PNG container is hand-written —
+signature, `IHDR`, `IDAT`, `IEND`, Paeth filtering, CRC-32 — and only DEFLATE
+comes from a dependency (`fdeflate`, chosen for PNG scanline data). Nothing in the
+project decodes an image: Kitty does that.
 
 ## 8. Verification
 
-**Visually verified in a real Kitty session** (0.49.2, driven through Kitty's own
-remote-control socket and captured with `grim`, then inspected):
+**Visually verified in a real Kitty session** (0.49.2 at font size 15, so about
+150×36 cells, driven through Kitty's own remote-control socket and captured with
+`grim`, then inspected):
 
 | Check | Result |
 | --- | --- |
 | Launches into the playable world | Ruined Chapel, world edge to edge |
 | The world is ASCII | a cathedral: nave, colonnade, side chapels, apse, graveyard |
-| The player is a figure, not a letter | `(o)` with a hood and a walk cycle |
-| The hooded figure is distinct | `(oo)` over a dark cloak, in its own colour |
+| The mage is a figure, not a letter | silver hair, a face with two eyes, an indigo robe with a gold clasp, and a crystal staff |
+| Ysolde is distinct | a cowl with a trim rim and two violet points of light; no skin at all |
+| Candles and motes | flames gutter along the wall faces; dust drifts over the floor |
+| The inlay reads | the crossing rose and the processional are visible as deliberate marks |
 | One press is exactly one step | `70,44` → `70,43` for one `w` |
-| A burst cannot sprint the player | ten presses inside one cadence moved one tile |
-| Sprint is real | the burst with shift moved one tile; the indicator appears |
+| A burst cannot sprint the player | presses inside one cadence move one tile |
+| Sprint is real | the pose changes, the wake appears, and the HUD says `sprint »` |
+| Blocked movement is visible | the cell that refused the step pulses and underlines |
 | Travel between both areas | chapel → cellar (`20,12`) → chapel |
-| The cellar is a different place | four chambers, one flooded, bridges between |
-| Dialogue is an ASCII overlay | panel, title, ASCII bust, lines, close hint |
-| The interface does not cover the world | the world is visible around the panel |
+| The cellar is a different place | four chambers, one flooded, candle-lit |
+| Dialogue rises and settles | the panel slides in, brightening, and slides away on dismiss |
+| The world stays visible around it | the mage and Ysolde are both legible behind the panel |
 | No graphics are sent by default | asserted by the smoke test |
-| The terminal is restored | alternate screen left, cursor shown, images deleted |
+
+**Frame rate, measured** (a pseudo-terminal at 200×50, with `GRIMMOIRE_FRAME_STATS=1`
+reporting what the loop actually did): **64 frames/s walking east, 60 walking
+north, 8.7 idle.** The idle figure is the ambient tick, deliberately slow.
 
 **Pseudo-terminal smoke test** (`tools/smoke.sh`, 12 checks, all passing): enters
 the alternate screen, hides the cursor, composes the ASCII world, draws the
 player, shows the controls, suspends below the minimum viewport, resumes after the
 resize, shows the cursor, leaves the alternate screen, **sends no graphics by
-default**, cleans up images, and exits 0. It runs the game under a scratch
-`XDG_DATA_HOME`, so it can never read or write a real save.
+default**, cleans up images, and exits 0. It runs under a scratch `XDG_DATA_HOME`,
+so it can never read or write a real save.
 
-**Unit tests:** 333, including the scenery renderer (structure, variation
-stability, water motion, every glyph one column wide, every cell shaded), the
-movement state machine (immediate press, cadence, release, direction change, stray
-repeats, the stall guard, sprint, and equal screen speed on both axes), the
-presenter's diffing, the camera, the minimum viewport, the game's rules, and the
-save format.
+**Unit tests:** 373, including the scenery renderer (structure, variation
+stability, water motion, inlay placement, every glyph one column wide, every cell
+shaded, figures in several inks, a pulse that changes style and never glyphs), the
+animation model (stride per step, settling, blinking, sprint, and identical
+results for the same elapsed time in different increments), the movement state
+machine, the presenter's diffing, the dialogue's rise and self-dismissal, the
+camera, the minimum viewport, the game's rules, and the save format.
 
 **Not verified, and not claimed:** behaviour under tmux/zellij; other Kitty-family
-terminals; macOS or Windows; resizing while a *pixel* interface piece is on
-screen (the pty smoke test covers suspend and resume, and the graphics state is
-unit-tested to be discarded and rebuilt after a clear).
+terminals; macOS or Windows; and the frame rate in a *real* Kitty window under
+sustained load, which was measured only through a pseudo-terminal.
 
 ## 9. Measurements
 
@@ -263,29 +299,28 @@ with the world composed and shown. Every number is measured.
 
 | Operation | Cost |
 | --- | --- |
-| Compose a frame (scenery + interface) | 0.28 ms |
-| Present a full redraw | 0.7 ms, 4800 cells in 40 runs, 37 KiB |
-| Present an unchanged frame | 0.11 ms, **16 bytes** |
-| Present one movement step (camera scrolled) | 1.1 ms, 3207 cells in 913 runs |
-| Idle | no frames at all until the world's own detail ticks, ~4 times a second |
+| Compose a frame (scenery + interface) | 0.27 ms |
+| Present a full redraw | 0.4 ms, 4800 cells in 40 runs, 43 KiB |
+| Present an unchanged frame | 0.05 ms, **16 bytes** |
+| Present one movement step (camera scrolled) | 0.7 ms, 3275 cells in 861 runs |
+| Idle CPU | 0.5% of one core, ~11 KiB/s |
+| Walking CPU | ~2% of one core |
 
-The presenter numbers move by a few hundred microseconds with machine load; the
-composition number does not. For comparison, the reverted pixel path composed a
-frame in **4.7 ms** — around seventeen times the cost — because it had to
-rasterise and PNG-encode forty thousand pixels every frame. ASCII is not a
-compromise here: it is cheaper *and* it is the look the project wants.
+Composition did not get slower despite the figures, the inlay, the candles and the
+motes: all of it is arithmetic on cells that were being written anyway, and the
+draw passes visit only the tiles inside the view.
 
 ## 10. Migration path and non-goals
 
-- **More art** means more glyph tables and more neighbour rules in `ui::scenery`;
-  nothing else changes.
+- **More art** means more glyph tables, more legend characters and more neighbour
+  rules in `ui::scenery`; nothing else changes.
+- **More effects** mean more entries in `ui::effects` and a style rule; the layer
+  is already there.
 - **A tile-drawing DSL** would be the natural next step if the scenery rules grow
   past a handful of matches.
-- **The pixel interface** could be extended to more of the UI, or removed, without
-  touching the game.
 - **Deferred renderer work**: wide/zero-width glyph continuation cells, and
   damage-rectangle tracking instead of per-cell diffing.
 
 Non-goals: no terminal emulator; no widget toolkit, retained scene graph, or ECS;
-no second terminal backend; no GPU window. Gradients and photographic art are not
-attempted, because the identifier is a glyph grid.
+no second terminal backend; no GPU window; no image in the default path. Gradients
+and photographic art are not attempted, because the identifier is a glyph grid.

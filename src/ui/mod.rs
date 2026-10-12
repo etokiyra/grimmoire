@@ -7,8 +7,10 @@
 //! glyph from what surrounds them, vary by world position, and are shaded by
 //! distance from the player's light.
 
+pub mod animation;
 pub mod art;
 pub mod dialogue;
+pub mod effects;
 pub mod exploration;
 pub mod help;
 pub mod layout;

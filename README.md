@@ -39,9 +39,9 @@ kitty --directory "$PWD" cargo run --release
 ```
 
 You start in the **Ruined Chapel**. The stair down to the Sunken Cellar is at the
-south end of the nave; the Hooded Figure and a cracked basin are elsewhere in the
-chapel, and a faded sigil waits at the far side of the cellar. Press `e` when the
-prompt appears.
+south end of the nave; **Ysolde** and a cracked basin are elsewhere in the chapel,
+and a faded sigil waits at the far side of the cellar. Press `e` when the prompt
+appears.
 
 | Key | Action |
 | --- | --- |
@@ -77,6 +77,12 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 - **Event-driven movement**: a press steps at once, holding walks at a steady
   cadence, releasing stops immediately, and `Shift` sprints. A tap is always
   exactly one step, and no lost event can leave you walking on your own.
+- **Visible feedback**: a refused step pulses the tile that refused it, an
+  interaction flashes whatever answered, and arriving somewhere new marks the
+  spot — all without ever hiding a glyph.
+- **Animation that keeps pace**: characters stride once per step (never on a free
+  running clock), sprint with a lean and a wake, breathe and blink when idle, and
+  the dialogue panel rises and settles rather than appearing.
 - **Both axes move at the same screen speed.** Terminal cells are taller than
   they are wide, so the two axes are paced from one speed in pixels per second
   rather than a single step rate — which is what stops vertical movement feeling
@@ -93,10 +99,13 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 - A **custom ASCII scenery renderer**: walls show lit caps, shadowed bases, side
   faces and pillars depending on what surrounds them; floors, paths, water and
-  rubble vary by position without ever shimmering; water moves.
-- **Characters drawn as ASCII figures** three cells square, with four facing
-  directions and a walk cycle — a staff-bearing wizard and a dark, still, two-eyed
-  hooded figure.
+  rubble vary by position without ever shimmering; water rolls; candles gutter
+  along the walls; motes drift; and each area has an inlaid motif cut into its open
+  floors.
+- **Characters drawn as ASCII figures**, several cells tall and several *inks* at
+  once — the mage has silver hair, a face with two eyes, an indigo robe with a gold
+  clasp and a crystal staff; Ysolde is a cowl with a trim rim and two violet points
+  of light. Four facing directions, a stride, a sprint, and an idle breath.
 - A pure, terminal-agnostic cell renderer: `Canvas`, `Cell`, `Style`, `Color`,
   `Rect`, and a clipped local-coordinate `CanvasView`.
 - A **fully opaque, application-owned background**: the theme paints every cell,
@@ -108,6 +117,9 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 - `Frame` composition that separates **cell rendering** from **image placement**.
 - **Diffed presentation**: only changed cells are written. An unchanged frame
   costs sixteen bytes.
+- **A 60 Hz animation loop while anything is moving** (measured at 60–64 frames a
+  second), dropping to a slow ambient tick when the world is merely breathing, so
+  an untouched game costs about half a percent of a core.
 - Time-based animation with an explicitly advanced, testable clock.
 - A screen stack with push/pop, input routed to the active screen, and layered
   composition, plus a curtain transition between screens.
@@ -175,7 +187,7 @@ as text, so art changes can be read and diffed without a screenshot.
 | `terminal` | The **only** module that talks to the terminal: raw mode, alternate screen, the Kitty keyboard and graphics protocols, input, capability detection, and diffed presentation. |
 | `anim` | Time-based animation with an explicitly advanced clock. |
 | `input` | Terminal-independent key and event types, including press/repeat/release. |
-| `ui` | Frame composition: the ASCII scenery renderer, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
+| `ui` | Frame composition: the ASCII scenery renderer, character animation, feedback effects, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
 | `app` | Wires input, update, compose, and present together. |
 | `pixel` | Software pixel rendering, used only by optional interface art. |
 
@@ -206,6 +218,9 @@ Documentation:
   overlay of two rows rather than rows taken from the world.
 - **The viewport owns its background.** Foreground-only draws inherit the surface
   colour, so the terminal's theme can never leak into the game.
+- **Animation is time-based, and the walk cycle is locked to steps.** A slow
+  machine must not slow the world down, and the legs must not drift away from the
+  movement they are illustrating.
 - **A hard minimum viewport (80×24).** Grimmoire is designed for a large terminal
   and suspends safely below it rather than degrading into noise.
 - **No ECS, no scripting engine, no widget toolkit** until a phase needs one.

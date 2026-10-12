@@ -11,10 +11,19 @@
 //! world rather than stealing rows from it, plus whatever screen is pushed on top
 //! (dialogue, help). Screens compose from the bottom up, so an overlay draws over
 //! the world without the world having to know it exists.
+//!
+//! # Frames
+//!
+//! The screen asks for a frame every [`FRAME_INTERVAL`] while anything is
+//! animated - the player moving, a pulse fading, a curtain playing - and for one
+//! every [`AMBIENT_PERIOD`] when the world is merely breathing. Nothing else
+//! requests frames, so an untouched game costs almost nothing.
 
 use std::time::Duration;
 
+use super::animation::Performance;
 use super::dialogue::DialogueScreen;
+use super::effects::{Effects, Pulse};
 use super::help::{Binding, HelpOverlay};
 use super::motion::{Motion, Movement};
 use super::scenery::Scenery;
@@ -29,14 +38,14 @@ use crate::render::{AssetId, Frame, Rect, Style, glyph};
 use crate::save::SaveStore;
 
 /// How long the curtain takes to reveal a newly entered area.
-const TRAVEL_DURATION: Duration = Duration::from_millis(260);
+const TRAVEL_DURATION: Duration = Duration::from_millis(300);
 /// Rows the interface occupies at the bottom of the viewport.
 const HUD_ROWS: u16 = 2;
-/// How often the world's ambient detail (water, flames, motes) advances.
+/// How often the world's ambient detail advances while the player is still.
 ///
-/// Slow enough that an idle game is nearly free, fast enough that the world does
-/// not look painted on.
-const AMBIENT_PERIOD: Duration = Duration::from_millis(220);
+/// Slow enough that an untouched game costs almost nothing, fast enough that the
+/// water, the motes and the candles are visibly alive.
+const AMBIENT_PERIOD: Duration = Duration::from_millis(90);
 
 /// Bindings listed by the help overlay while exploring.
 const CONTROLS: [Binding; 8] = [
@@ -58,11 +67,15 @@ pub struct ExplorationScreen {
     /// The dialogue portrait, when optional interface art is in use.
     portrait: Option<AssetId>,
     movement: Movement,
+    /// The player's animation state.
+    performance: Performance,
+    /// Live feedback pulses.
+    effects: Effects,
     /// Remaining travel-curtain time.
     travel: Duration,
-    /// Time until the ambient detail next advances.
-    ambient: Duration,
-    /// Seconds of ambient time elapsed, for water and other motion.
+    /// Countdown to the next ambient frame.
+    tick: Duration,
+    /// Seconds of world time elapsed, for everything that moves.
     phase: f32,
 }
 
@@ -75,8 +88,10 @@ impl ExplorationScreen {
             save,
             portrait,
             movement: Movement::new(false),
+            performance: Performance::new(),
+            effects: Effects::new(),
             travel: Duration::ZERO,
-            ambient: AMBIENT_PERIOD,
+            tick: AMBIENT_PERIOD,
             phase: 0.0,
         }
     }
@@ -88,10 +103,14 @@ impl ExplorationScreen {
     #[must_use]
     pub fn from_save(save: Option<SaveStore>, portrait: Option<AssetId>) -> Self {
         let mut world = World::new(areas::all(), areas::CHAPEL);
-        if let Some(store) = &save {
-            if let Some(data) = store.load() {
-                world.restore(&data);
-            }
+        let restored = save
+            .as_ref()
+            .and_then(|store| store.load())
+            .is_some_and(|data| world.restore(&data));
+        if !restored {
+            // A first line so the opening frame says where you are and what the
+            // place is. Provisional, like everything else here.
+            world.set_message("The Ruined Chapel. Cold air, and the smell of old stone.");
         }
         ExplorationScreen::new(world, save, portrait)
     }
@@ -112,6 +131,18 @@ impl ExplorationScreen {
     #[must_use]
     pub const fn movement(&self) -> &Movement {
         &self.movement
+    }
+
+    /// The animation state, for diagnostics and tests.
+    #[must_use]
+    pub const fn performance(&self) -> &Performance {
+        &self.performance
+    }
+
+    /// The live feedback pulses, for diagnostics and tests.
+    #[must_use]
+    pub const fn effects(&self) -> &Effects {
+        &self.effects
     }
 
     /// Whether the player is sprinting right now.
@@ -139,8 +170,24 @@ impl ExplorationScreen {
     }
 
     /// Applies a movement decision to the world.
+    ///
+    /// A refused step is answered with a pulse on whatever refused it, so a wall
+    /// looks solid rather than the key looking broken.
     fn step(&mut self, direction: Direction) {
-        self.world.move_player(direction);
+        let before = self.world.player();
+        let moved = self.world.move_player(direction);
+        if moved {
+            self.performance.stepped(self.movement.interval(direction));
+            return;
+        }
+        if self.world.player() != before {
+            // Turned without moving: no feedback, the facing was the point.
+            return;
+        }
+        let area = self.world.area();
+        if let Some(target) = before.checked_step(direction, area.width(), area.height()) {
+            self.effects.spawn(target, Pulse::Blocked);
+        }
     }
 
     /// Applies a movement decision.
@@ -152,12 +199,19 @@ impl ExplorationScreen {
 
     /// Interacts with whatever is within reach.
     fn interact(&mut self) -> Command {
+        // Point at what is about to answer, before the world changes underneath.
+        if let Some(target) = self.world.interaction_target() {
+            if let Some(at) = self.world.target_position(target) {
+                self.effects.spawn(at, Pulse::Touched);
+            }
+        }
         match self.world.interact() {
             Interaction::Dialogue(dialogue) => {
                 Command::Push(Box::new(DialogueScreen::new(dialogue, self.portrait)))
             }
             Interaction::Travelled(_) => {
                 self.travel = TRAVEL_DURATION;
+                self.effects.spawn(self.world.player(), Pulse::Arrived);
                 self.persist();
                 Command::None
             }
@@ -171,17 +225,27 @@ impl ExplorationScreen {
         if bounds.is_empty() {
             return;
         }
+        let player = self.performance.pose(
+            self.world.facing(),
+            self.movement.is_held(),
+            self.movement.is_sprinting(),
+        );
         let mut view = frame.view(bounds);
         Scenery {
             world: &self.world,
             palette,
             phase: self.phase,
-            moving: self.movement.is_held(),
+            player,
+            effects: &self.effects,
         }
         .draw(&mut view);
     }
 
     /// Draws the two-row interface bar over the bottom of the screen.
+    ///
+    /// The rows are a hierarchy rather than a block: what just happened sits on a
+    /// raised surface, where you are sits on the plain one, and the controls stay
+    /// out of the way on the right.
     fn compose_hud(&self, frame: &mut Frame, palette: &Palette) {
         let bounds = frame.bounds();
         if bounds.height < HUD_ROWS {
@@ -195,23 +259,25 @@ impl ExplorationScreen {
         );
         let mut view = frame.view(hud);
 
-        // Upper row: what just happened, or what is within reach. Raised, so the
-        // two rows read as a hierarchy rather than as one block.
+        // Upper row: what just happened, or what is within reach.
         view.fill_style(Rect::new(0, 0, view.width(), 1), palette.raised_style());
-        let (line, style) = if !self.world.message().is_empty() {
-            (self.world.message().to_string(), palette.text_style())
+        let (mark, line, style) = if !self.world.message().is_empty() {
+            ('·', self.world.message().to_string(), palette.text_style())
         } else if let Some(prompt) = self.world.prompt() {
             (
+                '»',
                 prompt_line(prompt),
                 Style::new().with_fg(palette.focus).bold(),
             )
         } else {
-            (String::new(), palette.muted_style())
+            (' ', String::new(), palette.muted_style())
         };
-        view.put_str(1, 0, &line, style);
+        view.put_char(1, 0, mark, Style::new().with_fg(palette.accent));
+        view.put_str(3, 0, &line, style);
 
+        // Upper row, right: the movement state, so sprinting is unmistakable.
         if self.movement.is_sprinting() {
-            let label = "sprinting »";
+            let label = "sprint »";
             view.put_str(
                 view.width()
                     .saturating_sub(glyph::display_width(label))
@@ -285,10 +351,12 @@ impl Screen for ExplorationScreen {
     fn update(&mut self, delta: Duration) {
         // Movement is event-driven; time only advances the world's own motion.
         self.movement.update(delta);
+        self.performance.advance(delta);
+        self.effects.advance(delta);
         self.phase += delta.as_secs_f32();
-        self.ambient = self.ambient.saturating_sub(delta);
-        if self.ambient == Duration::ZERO {
-            self.ambient = AMBIENT_PERIOD;
+        self.tick = self.tick.saturating_sub(delta);
+        if self.tick.is_zero() {
+            self.tick = AMBIENT_PERIOD;
         }
         if self.travel > Duration::ZERO {
             self.travel = self.travel.saturating_sub(delta);
@@ -307,16 +375,19 @@ impl Screen for ExplorationScreen {
     }
 
     fn is_animating(&self) -> bool {
-        // Only a transition needs continuous frames; the world's own motion is
-        // slow and is paced by `next_frame`.
+        // Continuous frames only while something is actually moving: a step, a
+        // fading pulse, or an area transition. A merely-idle world is paced by
+        // `next_frame` instead.
         self.travel > Duration::ZERO
+            || self.effects.is_active()
+            || self.performance.is_animated(self.movement.is_held())
     }
 
     fn next_frame(&self) -> Option<Duration> {
         if self.is_animating() {
             Some(Duration::ZERO)
         } else {
-            Some(self.ambient)
+            Some(self.tick)
         }
     }
 
@@ -325,9 +396,7 @@ impl Screen for ExplorationScreen {
         // release information changes.
         let held = self.movement.held();
         let sprinting = self.movement.is_sprinting();
-        let cell_px = self.movement.step_pixels(Direction::North);
         self.movement = Movement::new(releases);
-        let _ = cell_px;
         if let Some(direction) = held {
             let key = match direction {
                 Direction::North => 'w',
@@ -375,11 +444,12 @@ mod tests {
     use std::time::Duration;
 
     use super::ExplorationScreen;
-    use crate::game::{Position, World, areas};
+    use crate::game::{Direction, Position, World, areas};
     use crate::input::{Key, KeyCode, KeyKind};
     use crate::render::{Canvas, Frame, ImagePlacement};
     use crate::terminal::{Capabilities, GraphicsSupport, PresentStats};
     use crate::ui::art::Art;
+    use crate::ui::effects::Pulse;
     use crate::ui::screen::{Command, Screen};
     use crate::ui::{FrameContext, Palette};
 
@@ -438,6 +508,15 @@ mod tests {
     }
 
     #[test]
+    fn a_fresh_game_opens_with_a_line_and_an_old_save_does_not() {
+        let fresh = ExplorationScreen::from_save(None, None);
+        assert!(
+            !fresh.world().message().is_empty(),
+            "the opening frame should say where you are"
+        );
+    }
+
+    #[test]
     fn a_fresh_press_moves_at_once() {
         let mut screen = screen();
         screen.handle_key(Key::char('w'));
@@ -455,7 +534,7 @@ mod tests {
         }
         assert_eq!(Position::new(70, 43), screen.world().player());
 
-        screen.update(screen.movement().interval(crate::game::Direction::North));
+        screen.update(screen.movement().interval(Direction::North));
         screen.handle_key(Key::char('w').with_kind(KeyKind::Repeat));
         assert_eq!(Position::new(70, 42), screen.world().player());
     }
@@ -556,7 +635,6 @@ mod tests {
 
     #[test]
     fn moving_with_shift_covers_more_ground_in_the_same_time() {
-        use crate::game::Direction;
         let mut walking = screen();
         walking.handle_key(Key::char('w'));
         let mut sprinting = screen();
@@ -566,8 +644,6 @@ mod tests {
         assert_eq!(43, walking.world().player().y);
         assert_eq!(43, sprinting.world().player().y);
 
-        // One sprint cadence later the sprinter is ready again; the walker is
-        // still inside its longer cadence.
         let sprint_gap = sprinting.movement().interval(Direction::North);
         walking.update(sprint_gap);
         sprinting.update(sprint_gap);
@@ -591,8 +667,117 @@ mod tests {
         ));
     }
 
+    // --- feedback -----------------------------------------------------------
+
     #[test]
-    fn the_world_fills_the_viewport() {
+    fn a_refused_step_pulses_whatever_refused_it() {
+        let mut screen = screen();
+        // Walk into the south wall until the step is refused.
+        for _ in 0..40 {
+            screen.handle_key(Key::char('s'));
+            screen.update(screen.movement().interval(Direction::South));
+        }
+        let blocked = screen.world().player();
+        let ahead = blocked
+            .checked_step(Direction::South, 140, 52)
+            .expect("a tile to walk into");
+        screen.handle_key(Key::char('s'));
+        assert_eq!(
+            Some(Pulse::Blocked),
+            screen.effects().sample(ahead).map(|(kind, _)| kind),
+            "a blocked step should be visible, not just silent"
+        );
+    }
+
+    #[test]
+    fn a_pulse_keeps_the_frame_loop_alive_then_lets_it_settle() {
+        let mut screen = screen();
+        for _ in 0..40 {
+            screen.handle_key(Key::char('s'));
+            screen.update(screen.movement().interval(Direction::South));
+        }
+        screen.handle_key(Key::char('s'));
+        assert!(screen.is_animating(), "a fade needs frames");
+        screen.update(Duration::from_millis(400));
+        assert!(!screen.is_animating(), "the fade has finished");
+        assert!(!screen.effects().is_active());
+    }
+
+    #[test]
+    fn interacting_pulses_the_thing_that_answered() {
+        let mut screen = screen();
+        screen
+            .world_mut()
+            .set_player_for_test(Position::new(57, 33));
+        let figure = Position::new(56, 33);
+        screen.handle_key(Key::char('e'));
+        assert_eq!(
+            Some(Pulse::Touched),
+            screen.effects().sample(figure).map(|(kind, _)| kind)
+        );
+    }
+
+    #[test]
+    fn travelling_pulses_the_arrival() {
+        let mut screen = screen();
+        screen
+            .world_mut()
+            .set_player_for_test(Position::new(70, 50));
+        screen.handle_key(Key::char('e'));
+        assert!(screen.is_travelling());
+        assert_eq!(
+            Some(Pulse::Arrived),
+            screen
+                .effects()
+                .sample(screen.world().player())
+                .map(|(kind, _)| kind)
+        );
+        assert!(screen.is_animating(), "the curtain needs frames");
+    }
+
+    // --- animation ----------------------------------------------------------
+
+    #[test]
+    fn the_stride_advances_once_per_step_and_stops_with_movement() {
+        let mut screen = screen();
+        let start = screen.performance().frame();
+        screen.handle_key(Key::char('d'));
+        assert_ne!(start, screen.performance().frame(), "the stride advanced");
+
+        // Standing still for a long time must not advance it further.
+        let after = screen.performance().frame();
+        for _ in 0..20 {
+            screen.update(Duration::from_millis(100));
+        }
+        assert_eq!(after, screen.performance().frame());
+    }
+
+    #[test]
+    fn a_step_keeps_asking_for_frames_until_it_has_played_out() {
+        let mut screen = screen();
+        screen.handle_key(Key::char('d'));
+        assert!(screen.is_animating(), "the stride is playing");
+        screen.update(Duration::from_millis(500));
+        assert!(!screen.is_animating(), "and then it settles");
+    }
+
+    #[test]
+    fn sprinting_reaches_the_renderer_as_a_different_stage() {
+        use crate::ui::animation::Stage;
+        let mut screen = screen();
+        screen.handle_key(Key::char('d').with_shift());
+        let pose = screen.performance().pose(
+            screen.world().facing(),
+            screen.movement().is_held(),
+            screen.movement().is_sprinting(),
+        );
+        assert_eq!(Stage::Sprint, pose.stage);
+    }
+
+    // --- composition --------------------------------------------------------
+
+    #[test]
+    fn the_world_fills_the_viewport_and_is_ascii() {
         let screen = screen();
         let (canvas, images) = compose_into(&screen, 120, 40);
         assert!(
@@ -615,8 +800,8 @@ mod tests {
         let screen = screen();
         let (canvas, _) = compose_into(&screen, 120, 40);
         let text = frame_text(&canvas);
-        assert!(text.contains("(o)"), "the player is not drawn as a figure");
-        assert!(text.contains('^'), "the player's hood is missing");
+        assert!(text.contains("o::o"), "the mage's face is missing:\n{text}");
+        assert!(text.contains("~~"), "the mage's hair is missing");
     }
 
     #[test]
@@ -639,8 +824,7 @@ mod tests {
             .world_mut()
             .set_player_for_test(Position::new(57, 33));
         let (canvas, _) = compose_into(&screen, 120, 40);
-        let text = frame_text(&canvas);
-        assert!(text.contains("speak with"), "prompt missing");
+        assert!(frame_text(&canvas).contains("speak with"), "prompt missing");
     }
 
     #[test]
@@ -682,7 +866,8 @@ mod tests {
         let screen = screen();
         assert!(!screen.is_animating(), "idle must not be a 60fps loop");
         let wait = screen.next_frame().expect("ambient frames");
-        assert!(wait > Duration::from_millis(100), "idle must be cheap");
+        assert!(wait > Duration::from_millis(50), "idle must be cheap");
+        assert!(wait <= Duration::from_millis(200), "but still alive");
     }
 
     #[test]
@@ -710,14 +895,8 @@ mod tests {
             ExplorationScreen::new(World::new(areas::all(), areas::CHAPEL), None, None);
         screen.on_terminal_ready(true);
         screen.on_cell_metrics(Some((14, 28)));
-        assert_eq!(
-            14,
-            screen.movement().step_pixels(crate::game::Direction::East)
-        );
-        assert_eq!(
-            28,
-            screen.movement().step_pixels(crate::game::Direction::North)
-        );
+        assert_eq!(14, screen.movement().step_pixels(Direction::East));
+        assert_eq!(28, screen.movement().step_pixels(Direction::North));
     }
 
     #[test]

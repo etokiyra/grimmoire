@@ -224,6 +224,18 @@ impl World {
         }
     }
 
+    /// Where the adjacent interaction target stands, if there is one.
+    ///
+    /// Used by the interface to point at what an interaction affected; the game
+    /// itself has no opinion about that.
+    #[must_use]
+    pub fn target_position(&self, target: Target) -> Option<Position> {
+        match target {
+            Target::Entity(index) => self.area().entity(index).map(|entity| entity.position),
+            Target::Portal(index) => self.area().portal(index).map(|portal| portal.at),
+        }
+    }
+
     /// Interacts with the adjacent target, if there is one.
     ///
     /// Never panics and never leaves the world in an inconsistent state: a

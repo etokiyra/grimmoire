@@ -128,6 +128,10 @@ impl Screen for HelpOverlay {
                 "frame time",
                 format!("{:.1} ms", context.frame_time.as_secs_f64() * 1000.0),
             ),
+            (
+                "frames",
+                format!("{:.0} /s (aiming for 60)", stats.frames_per_second),
+            ),
             ("colour", context.capabilities.colors.label().to_string()),
             (
                 "graphics",

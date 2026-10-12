@@ -69,6 +69,24 @@ pub trait Screen {
         false
     }
 
+    /// Whether the stack should play its full-screen curtain when this screen
+    /// appears or disappears.
+    ///
+    /// Most screens want it; a panel that animates itself into place does not, or
+    /// the two effects fight.
+    fn curtain(&self) -> bool {
+        true
+    }
+
+    /// A command this screen wants applied after an update, with no input.
+    ///
+    /// This is how a screen finishes something it started - a panel closing
+    /// itself once its exit animation has played, for instance - without waiting
+    /// for a key that may never come. Only the active screen is asked.
+    fn after_update(&mut self) -> Command {
+        Command::None
+    }
+
     /// How long until this screen wants to be composed again.
     ///
     /// `Some(ZERO)` means "as soon as possible", for continuous motion;
@@ -205,6 +223,24 @@ impl ScreenStack {
             .min()
     }
 
+    /// Asks the active screen whether it has finished something.
+    ///
+    /// Screens that animate themselves out return their command from here rather
+    /// than from `handle_key`, so an exit can complete on its own schedule.
+    pub fn settle(&mut self) -> Outcome {
+        let command = match self.screens.last_mut() {
+            Some(screen) => screen.after_update(),
+            None => Command::None,
+        };
+        self.apply(command)
+    }
+
+    /// Whether the active screen wants the stack's full-screen curtain.
+    #[must_use]
+    pub fn wants_curtain(&self) -> bool {
+        self.screens.last().is_none_or(|screen| screen.curtain())
+    }
+
     /// Routes `key` to the active screen and applies the returned command.
     pub fn dispatch(&mut self, key: Key) -> Outcome {
         let command = match self.screens.last_mut() {
@@ -217,6 +253,11 @@ impl ScreenStack {
             }
         };
 
+        self.apply(command)
+    }
+
+    /// Applies a screen's command to the stack.
+    fn apply(&mut self, command: Command) -> Outcome {
         match command {
             Command::None => Outcome::default(),
             Command::Quit => Outcome {
