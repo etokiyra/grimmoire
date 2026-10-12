@@ -46,6 +46,33 @@ use crate::render::{CanvasView, Color, Style};
 
 use super::sprite::{ArtInks, Sprite};
 
+/// How far the pool the player carries brightens what it falls on, in tiles.
+const LIGHT_RADIUS: u16 = 7;
+
+/// How often a wall that faces open floor carries an aperture.
+const WINDOW_PITCH: u16 = 13;
+
+/// How far apart the seams between flagstones are.
+const JOINT_PITCH: u16 = 6;
+
+/// The shape an area puts in the walls that face open floor.
+///
+/// A chapel has stained glass, a shrine has a lit rune, a village has a lamp
+/// behind a shutter, a catacomb has a grave-lamp — and a wood and a cellar have
+/// nothing at all, because one is a treeline and the other is underground. A
+/// place with no apertures says so by returning the masonry it would have drawn
+/// anyway, so the wall keeps its own stone.
+fn aperture(area: AreaId) -> (char, char) {
+    use crate::game::areas;
+    match area {
+        areas::CHAPEL => ('▌', '◆'),
+        areas::VILLAGE => ('▌', '◆'),
+        areas::SHRINE => ('│', '◇'),
+        areas::CATACOMBS => ('░', '·'),
+        _ => ('▓', '▒'),
+    }
+}
+
 /// How many rows a figure's hem sits above its own tile.
 ///
 /// A sprite's *last* row is drawn on the tile the character stands on, so a
@@ -406,36 +433,64 @@ impl Scenery<'_> {
         let palette = self.palette;
         match tile {
             Tile::Wall => {
+                let arte = self.palette.arte(self.world.area_id());
+                let lit = self.lit(position);
                 // A standing flame takes the place of the masonry it is fixed to,
                 // so a candle can never hide a floor, an exit or a character.
                 if neighbours.south && self.has_flame(position, neighbours) {
                     let index = (self.phase * 5.0) as usize % art::FLAME.len();
                     return (
                         art::FLAME[index],
-                        Style::new().with_fg(palette.effect).bold(),
+                        Style::new().with_fg(self.palette.effect).bold(),
                     );
                 }
-                // A wall standing alone in open floor is a pillar.
+                // A wall standing alone in open floor is a column, and columns are
+                // the whole of a colonnade.
                 if !neighbours.north && !neighbours.south && !neighbours.east && !neighbours.west {
-                    return ('║', Style::new().with_fg(palette.text_secondary).bold());
+                    return ('║', Style::new().with_fg(arte.cap).bold());
+                }
+                // A wall one cell thick with floor on both sides is a lintel or a
+                // screen: it should read as a span, not as a block.
+                if !neighbours.north && !neighbours.south {
+                    return ('▬', Style::new().with_fg(arte.cap));
+                }
+                // A wall that faces open floor along a run carries the light: the
+                // glazing of a chapel, the runes of a shrine, the grave-lamps of a
+                // catacomb. Placed on a regular beat, so a wall reads as bays
+                // rather than as noise.
+                // Glazing belongs to a *run* of wall, not to every edge: a wall
+                // with stone above and below it is one bay of a long side, and
+                // that is where a window goes. Only one side is glazed, so a
+                // chapel's north and south walls are stone.
+                let facing = !neighbours.east || !neighbours.west;
+                let in_a_run = neighbours.north && neighbours.south;
+                let (pane, mark) = aperture(self.world.area_id());
+                if facing && in_a_run && position.y % WINDOW_PITCH == 0 {
+                    return (pane, Style::new().with_fg(arte.window));
+                }
+                if facing && in_a_run && position.y % WINDOW_PITCH == WINDOW_PITCH / 2 {
+                    return (mark, Style::new().with_fg(arte.window).bold());
                 }
                 // Damage breaks up long runs of masonry.
-                if hash(position.x as i32, position.y as i32, 0x11) % 41 == 0 {
-                    return ('%', Style::new().with_fg(palette.border));
+                let h = hash(position.x as i32, position.y as i32, 0x11);
+                if h % 41 == 0 {
+                    return ('%', Style::new().with_fg(arte.base));
                 }
-                // Walls are a clear step brighter than the floor they stand on, so
-                // the architecture reads before the texture does.
-                let (ch, ink) = if !neighbours.north {
-                    ('▀', palette.text_secondary)
+                // Caps catch the light, bases sit in their own shadow, faces are
+                // the side of the stone, and the mass behind is darkest.
+                let (ch, ink, bold) = if !neighbours.north {
+                    ('▀', arte.cap, true)
                 } else if !neighbours.south {
-                    ('▄', palette.text_muted)
+                    ('▄', arte.base, false)
                 } else if !neighbours.west || !neighbours.east {
-                    ('▓', palette.text_secondary)
+                    ('▓', if lit { arte.cap } else { arte.wall }, false)
+                } else if h % 5 == 0 {
+                    ('▒', arte.wall, false)
                 } else {
-                    ('#', palette.text_muted)
+                    ('▓', arte.mass, false)
                 };
                 let mut style = Style::new().with_fg(ink);
-                if !neighbours.north {
+                if bold {
                     style = style.bold();
                 }
                 (ch, style)
@@ -445,15 +500,22 @@ impl Scenery<'_> {
             Tile::Floor | Tile::Path => {
                 let h = hash(position.x as i32, position.y as i32, 0x21);
                 let trodden = tile == Tile::Path;
+                let arte = self.palette.arte(self.world.area_id());
+                let lit = self.lit(position);
+                // Seams between flagstones, on a regular beat: a floor that is
+                // laid rather than poured.
+                if !trodden && (position.x % JOINT_PITCH == 0 || position.y % JOINT_PITCH == 0) {
+                    return ('.', Style::new().with_fg(arte.grit));
+                }
                 match ground_for(self.world.area_id()) {
                     Ground::Grass => {
                         if h % 43 == 0 {
                             // A stone the roots have shouldered out.
-                            return ('*', Style::new().with_fg(palette.text_muted));
+                            return ('*', Style::new().with_fg(arte.grit));
                         }
                         if h % 6 == 0 {
                             // Blades catch the light; the ground under them does not.
-                            return ('"', Style::new().with_fg(palette.nature));
+                            return ('"', Style::new().with_fg(self.palette.nature));
                         }
                         let glyph = if trodden {
                             art::PATH[(h as usize >> 8) % art::PATH.len()]
@@ -461,80 +523,56 @@ impl Scenery<'_> {
                             art::GRASS[(h as usize >> 16) % art::GRASS.len()]
                         };
                         let ink = if trodden {
-                            palette.text_muted
+                            arte.base
                         } else {
-                            palette.nature_dark
+                            self.palette.nature_dark
                         };
                         (glyph, Style::new().with_fg(ink))
                     }
                     Ground::Ash => {
                         if h % 31 == 0 {
-                            return ('.', Style::new().with_fg(palette.text_muted));
+                            return ('x', Style::new().with_fg(arte.grit));
                         }
                         let glyph = art::ASH[(h as usize >> 16) % art::ASH.len()];
-                        let ink = if trodden {
-                            palette.text_muted
-                        } else {
-                            palette.border
-                        };
+                        let ink = self.floor_ink(arte, lit, trodden);
                         (glyph, Style::new().with_fg(ink))
                     }
                     Ground::Marble => {
                         if h % 47 == 0 {
                             // A polished joint catching the light.
-                            return ('=', Style::new().with_fg(palette.relic));
+                            return ('=', Style::new().with_fg(arte.window));
                         }
                         let glyph = art::MARBLE[(h as usize >> 16) % art::MARBLE.len()];
-                        let ink = if trodden {
-                            palette.relic
-                        } else {
-                            palette.separator
-                        };
+                        let ink = if trodden { arte.grit } else { arte.floor };
                         (glyph, Style::new().with_fg(ink))
                     }
                     Ground::Bone => {
                         if h % 37 == 0 {
-                            return ('x', Style::new().with_fg(palette.text_secondary));
+                            return ('x', Style::new().with_fg(arte.grit));
                         }
                         let glyph = art::BONE[(h as usize >> 16) % art::BONE.len()];
-                        let ink = if trodden {
-                            palette.text_muted
-                        } else {
-                            palette.separator
-                        };
+                        let ink = self.floor_ink(arte, lit, trodden);
                         (glyph, Style::new().with_fg(ink))
                     }
                     Ground::Damp => {
                         if h % 29 == 0 {
-                            return ('"', Style::new().with_fg(palette.accent_alt).dim());
+                            return ('"', Style::new().with_fg(arte.window));
                         }
                         let glyph = art::FLOOR[(h as usize >> 16) % art::FLOOR.len()];
-                        let ink = if trodden {
-                            palette.accent_alt_dim
-                        } else {
-                            palette.separator
-                        };
-                        (glyph, Style::new().with_fg(ink).dim())
+                        let ink = self.floor_ink(arte, lit, trodden);
+                        (glyph, Style::new().with_fg(ink))
                     }
                     Ground::Stone => {
                         if h % 37 == 0 {
                             let glyph = art::RUBBLE[(h as usize >> 8) % art::RUBBLE.len()];
-                            return (glyph, Style::new().with_fg(palette.border));
-                        }
-                        if h % 29 == 0 {
-                            // Moss creeping out of the joints.
-                            return ('"', Style::new().with_fg(palette.nature).dim());
+                            return (glyph, Style::new().with_fg(arte.grit));
                         }
                         let glyph = if trodden {
                             art::PATH[(h as usize >> 8) % art::PATH.len()]
                         } else {
                             art::FLOOR[(h as usize >> 16) % art::FLOOR.len()]
                         };
-                        let ink = if trodden {
-                            palette.text_muted
-                        } else {
-                            palette.separator
-                        };
+                        let ink = self.floor_ink(arte, lit, trodden);
                         (glyph, Style::new().with_fg(ink))
                     }
                 }
@@ -586,6 +624,19 @@ impl Scenery<'_> {
             }
             Tile::Door => ('.', Style::new().with_fg(palette.separator)),
         }
+    }
+
+    /// Whether the player's light falls on this tile.
+    fn lit(&self, position: Position) -> bool {
+        distance(self.world.player(), position) <= LIGHT_RADIUS
+    }
+
+    /// The ink a floor is drawn in: brighter inside the light, stone outside it.
+    fn floor_ink(&self, arte: crate::ui::theme::Arte, lit: bool, trodden: bool) -> Color {
+        if trodden {
+            return arte.wall;
+        }
+        if lit { arte.grit } else { arte.floor }
     }
 
     /// Whether a wall carries a candle.
@@ -802,7 +853,10 @@ impl Scenery<'_> {
         } else if walking {
             SpritePose::Walk { step }
         } else {
-            SpritePose::Idle
+            // A breath every few seconds, not every frame.
+            SpritePose::Idle {
+                breathing: (self.phase * 1.4 + f32::from(at.x)).sin() > 0.55,
+            }
         };
         self.draw_sprite(
             view,
@@ -838,6 +892,19 @@ impl Scenery<'_> {
         let left = i32::from(sx) + dx;
         let top = i32::from(sy) + dy + STANDING_ROWS;
         let width = i32::from(art.width);
+        // A shadow under the feet. A figure is the same value as the stone it
+        // stands on often enough that it needs one, and a single dark row is
+        // enough to lift it off the floor without drawing a box around it.
+        let arte = self.palette.arte(self.world.area_id());
+        for column in 2..width - 2 {
+            let x = left + column;
+            let y = top + i32::from(art.height);
+            if x >= 0 && y >= 0 && x < i32::from(view.width()) && y < i32::from(view.height()) {
+                let (sx, sy) = (x as u16, y as u16);
+                let world = window.at(sx, sy);
+                self.put(view, sx, sy, world, '▄', Style::new().with_fg(arte.dark));
+            }
+        }
         // The supplied art is authored front on, so west-facing is that art
         // reflected rather than redrawn: the staff changes hands and the
         // character visibly turns. The canonical rows are never altered.
@@ -1007,13 +1074,18 @@ impl Scenery<'_> {
     /// divided down here to put the player's pool of light at roughly six tiles, a
     /// middle band out to fourteen, and shadow beyond that.
     fn shaded(&self, style: Style, tiles: u16) -> Style {
-        let palette = self.palette;
-        let squared = (u32::from(tiles) * u32::from(tiles)) / 4;
-        let mut style = style.with_bg(palette.shade_at(squared));
-        if tiles >= 20 {
-            style = style.dim();
-        }
-        style
+        // Two tones, not a grey ramp: the pool the player carries is the colour
+        // of the place they are in, and everything outside it falls into that
+        // place's dark. The `dim` attribute is deliberately not used — a terminal
+        // may ignore it on an indexed colour, which is exactly how the first
+        // attempt at this ended up with no falloff at all.
+        let arte = self.palette.arte(self.world.area_id());
+        let bg = if tiles <= LIGHT_RADIUS {
+            arte.light
+        } else {
+            arte.dark
+        };
+        style.with_bg(bg)
     }
 }
 
@@ -1528,6 +1600,54 @@ mod tests {
             lines[hat + 4].contains("▓▓▓"),
             "the robe should be the last row:\n{text}"
         );
+    }
+
+    #[test]
+    fn the_place_the_player_stands_in_lights_the_floor_around_them() {
+        // The pool is drawn into the *glyphs*, not behind them: the same tile is
+        // a brighter stone inside the light and a duller one outside it. This is
+        // the defect the light was rewritten to fix — a bright background made a
+        // lit rectangle instead of a pool.
+        let world = World::new(areas::all(), areas::CHAPEL);
+        let (canvas, _) = draw(&world, 80, 40, 0.0);
+        let mut inks: Vec<String> = Vec::new();
+        for y in 0..canvas.height() {
+            for x in 0..canvas.width() {
+                if let Some(cell) = canvas.get(x, y) {
+                    if "'.,·".contains(cell.ch) {
+                        inks.push(format!("{:?}", cell.style.fg));
+                    }
+                }
+            }
+        }
+        inks.sort_unstable();
+        inks.dedup();
+        assert!(
+            inks.len() >= 2,
+            "the floor is lit the same everywhere: {inks:?}"
+        );
+    }
+
+    #[test]
+    fn every_place_draws_as_its_own_world() {
+        // Same renderer, same code path, six different places.
+        let mut frames = Vec::new();
+        for place in [
+            areas::CHAPEL,
+            areas::WOODS,
+            areas::VILLAGE,
+            areas::SHRINE,
+            areas::CATACOMBS,
+        ] {
+            let mut world = World::new(areas::all(), place);
+            let _ = world.place_player(world.area().spawn());
+            frames.push((place, draw(&world, 80, 40, 0.0).1));
+        }
+        for (index, (place, frame)) in frames.iter().enumerate() {
+            for (other, other_frame) in &frames[index + 1..] {
+                assert_ne!(frame, other_frame, "{place:?} looks like {other:?}");
+            }
+        }
     }
 
     #[test]

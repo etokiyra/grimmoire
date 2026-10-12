@@ -492,6 +492,40 @@ impl TitleScreen {
             Style::new().with_fg(palette.accent_alt_dim),
         );
 
+        // A rune circle on the ground at the wizard's feet, turning and pulsing:
+        // the magic the game is about, drawn as the one shape a terminal grid
+        // makes well. It sits below the architecture so it never masks it.
+        let circle_x = bounds.right().saturating_sub(30);
+        let circle_y = horizon.saturating_sub(1);
+        let pulse = if motion.animates() {
+            0.5 + 0.5 * (time * 1.1).sin()
+        } else {
+            0.7
+        };
+        let ink = if pulse > 0.62 {
+            palette.accent_alt
+        } else {
+            palette.accent_alt_dim
+        };
+        for step in 0..20 {
+            let angle = step as f32 / 20.0 * std::f32::consts::TAU + time * 0.25;
+            let x = circle_x as f32 + angle.cos() * 7.0;
+            let y = circle_y as f32 + angle.sin() * 1.2;
+            if x < 0.0 || y < 0.0 {
+                continue;
+            }
+            let (x, y) = (x as u16, y as u16);
+            if x >= bounds.width || y >= bounds.height {
+                continue;
+            }
+            let glyph = if step % 4 == 0 {
+                ornament::STAR
+            } else {
+                ornament::DOT
+            };
+            view.put_char(x, y, glyph, Style::new().with_fg(ink));
+        }
+
         // The wizard stands on the horizon, so the first thing the game shows is
         // the character the player is about to be.
         let hero = sprite::for_figure(Figure::Mage);
@@ -499,10 +533,8 @@ impl TitleScreen {
         let hero_y = horizon.saturating_sub(hero.height.saturating_sub(1));
         // It breathes: the wizard's own companion poses, alternately, on the
         // clock — the base art is one of them, never altered.
-        let pose = if motion.animates() && (time * 0.9).sin() > 0.3 {
-            sprite::Pose::Idle
-        } else {
-            sprite::Pose::Walk { step: 0 }
+        let pose = sprite::Pose::Idle {
+            breathing: motion.animates() && (time * 0.9).sin() > 0.3,
         };
         sprite::draw(&mut view, hero_x, hero_y, hero, pose, hero.inks, false);
 

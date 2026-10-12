@@ -9,6 +9,34 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Changed — every place is built from its own stone, and the light is in the glyphs
+
+- **A material per location** (`theme::Arte`): the lit edge of masonry, its face,
+  its shadow, the floor, the grit on it, the glazing light comes through, and the
+  pool the player carries. Six places sharing one grey is what made the world look
+  like a spreadsheet; a chapel of warm stone and gold glass, a shrine of pale
+  marble and lavender, a catacomb of bone and spectral green, a village of timber
+  and lamp-light, a cellar of steel blue and a wood of green now each read as
+  somewhere.
+- **Light is drawn into the glyphs, not behind them.** The same floor tile is
+  bright stone inside the pool the player carries and dull stone outside it, which
+  is a *pool*; the first attempt used a bright background, which is a lit
+  rectangle. A test asserts the pool is dark enough to draw on, and another that
+  the floor is not lit the same everywhere.
+- **Architecture instead of texture**: walls one cell thick with floor on both
+  sides read as lintels, solitary walls as columns, faces catch the light, and a
+  wall in a run carries glazing — stained glass in the chapel, a lit rune in the
+  shrine, a lamp behind a shutter in the village, a grave-lamp in the catacombs,
+  and nothing at all underground or in a treeline.
+- **Still air is the canonical art.** A character at rest now shows its base
+  sprite and breathes a few times a minute, instead of holding its breath pose
+  permanently.
+- **The wizard's walk is visible**: the two step frames swing the robe across the
+  body rather than moving one cell, and the sprint leans with the hem trailing. A
+  test asserts the two steps differ from each other and from the base pose.
+- **A rune circle turns at the wizard's feet** on the title screen, pulsing with
+  the clock and static when motion is off.
+
 ### Added — a sprite library, and characters worth looking at
 
 - **A central character sprite library** (`ui::sprite`). The supplied art — the

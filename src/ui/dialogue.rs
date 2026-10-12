@@ -436,7 +436,7 @@ impl DialogueScreen {
         }
         let left = bounds.centered_x(width);
         let top = bounds.y + 1 + (bounds.height.saturating_sub(height + 2) / 2);
-        let rows = sprite::Pose::Idle.rows_for(art);
+        let rows = sprite::Pose::standing().rows_for(art);
         for (row, line) in rows.iter().enumerate() {
             for (column, ch) in line.chars().enumerate() {
                 if ch == ' ' {

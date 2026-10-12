@@ -236,7 +236,24 @@ Delivered:
 - **The dialogue portrait is the character's sprite**, lit for the mood they are
   speaking in.
 
-## Phase 11 — Story
+## Phase 11 — Light, material, and the world as somewhere (done)
+
+The sprites were in place and the *world* was still grey. This phase fixed the
+world.
+
+Delivered:
+
+- **A material per location** and a rewritten lighting model: the pool the player
+  carries brightens the glyphs it falls on, and everything outside it falls into
+  the place's own dark. No bright rectangles, no `dim` attribute the terminal is
+  free to ignore.
+- **Architecture**: lintels, columns, glazing on long walls, and floors laid with
+  seams, chosen from the tile's neighbours rather than applied as a texture.
+- **Correct animation**: the canonical pose is what an idle character shows, the
+  walk swings the robe instead of nudging a cell, and the sprint is its own pose.
+- **A rune circle** at the wizard's feet on the title screen.
+
+## Phase 12 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

@@ -105,6 +105,22 @@ All current area names, entities, and dialogue lines are placeholders.
 - **Nothing the player must act on may be hidden.** A panel may announce, but it
   must not cover an exit, a landmark, or the player.
 
+## Light and material
+
+- **Every place has a material** (`theme::Arte`): cap, wall, base, mass, floor,
+  grit, glazing, pool and dark. A new area without one is drawn in the fallback
+  stone, which is a bug rather than a default.
+- **Light is a property of the glyphs, not of the background.** The pool the
+  player carries brightens the ink of what it falls on; the background only steps
+  between two dark tones. A bright background is a lit rectangle, not a pool, and
+  a test asserts the pool stays dark enough to draw on.
+- **Do not use `dim` to express distance.** On an indexed colour a terminal is
+  free to ignore it, which is how the first lighting pass ended up with no falloff
+  at all. Step the colour instead.
+- **Architecture comes from neighbours, not from a texture.** A wall with floor
+  above and below is a span; a lone wall is a column; a glazed run is a wall with
+  stone above and below it. Draw the building, not the material.
+
 ## Character art
 
 - **The sprite library is the authority.** `ui::sprite` holds the character art

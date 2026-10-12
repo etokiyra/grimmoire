@@ -49,6 +49,148 @@ pub struct Inks {
     pub shadow: Color,
 }
 
+/// The colours one place is built from.
+///
+/// Architecture, not decoration: a wall's lit cap, its face, the shadow at its
+/// base, the floor it stands on, the glazing light comes through, and the tint of
+/// the pool the player carries. Six places sharing one grey is what made the
+/// world look like a spreadsheet; each having its own stone is what makes it look
+/// like somewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Arte {
+    /// The lit top edge of masonry.
+    pub cap: Color,
+    /// The face of a wall.
+    pub wall: Color,
+    /// The shadowed base of a wall.
+    pub base: Color,
+    /// The interior mass of deep stone.
+    pub mass: Color,
+    /// The open floor.
+    pub floor: Color,
+    /// Grit on the floor: rubble, seams, joints.
+    pub grit: Color,
+    /// Light coming through: glass, runes, apertures.
+    pub window: Color,
+    /// The background of the pool the player carries. Dark and only a step or
+    /// two above the dark: the *light* comes from the glyphs it brightens, not
+    /// from a lit rectangle behind them.
+    pub light: Color,
+    /// The background beyond the pool. Also dark, and the colour of the place's
+    /// darkness rather than a neutral grey.
+    pub dark: Color,
+}
+
+impl Arte {
+    /// The palette a place is built from when the terminal can show it.
+    #[must_use]
+    pub fn rich(area: crate::game::AreaId) -> Arte {
+        use crate::game::areas;
+        match area {
+            // Aged stone, gold glass, and candlelight.
+            areas::CHAPEL => Arte {
+                cap: Color::Indexed(180),
+                wall: Color::Indexed(137),
+                base: Color::Indexed(137),
+                mass: Color::Indexed(233),
+                floor: Color::Indexed(95),
+                grit: Color::Indexed(180),
+                window: Color::Indexed(214),
+                light: Color::Indexed(235),
+                dark: Color::Indexed(233),
+            },
+            // Damp masonry, deep water, and a cold refracted light.
+            areas::CELLAR => Arte {
+                cap: Color::Indexed(66),
+                wall: Color::Indexed(24),
+                base: Color::Indexed(24),
+                mass: Color::Indexed(233),
+                floor: Color::Indexed(60),
+                grit: Color::Indexed(110),
+                window: Color::Indexed(117),
+                light: Color::Indexed(235),
+                dark: Color::Indexed(233),
+            },
+            // Bark and moss, with lantern-amber in the gaps.
+            areas::WOODS => Arte {
+                cap: Color::Indexed(65),
+                wall: Color::Indexed(22),
+                base: Color::Indexed(22),
+                mass: Color::Indexed(233),
+                floor: Color::Indexed(22),
+                grit: Color::Indexed(65),
+                window: Color::Indexed(156),
+                light: Color::Indexed(234),
+                dark: Color::Indexed(233),
+            },
+            // Timber and dust, with a lamp behind every window.
+            areas::VILLAGE => Arte {
+                cap: Color::Indexed(222),
+                wall: Color::Indexed(137),
+                base: Color::Indexed(137),
+                mass: Color::Indexed(234),
+                floor: Color::Indexed(95),
+                grit: Color::Indexed(180),
+                window: Color::Indexed(214),
+                light: Color::Indexed(235),
+                dark: Color::Indexed(234),
+            },
+            // Pale marble, silver, and a light that comes from the water.
+            areas::SHRINE => Arte {
+                cap: Color::Indexed(103),
+                wall: Color::Indexed(60),
+                base: Color::Indexed(60),
+                mass: Color::Indexed(233),
+                floor: Color::Indexed(61),
+                grit: Color::Indexed(110),
+                window: Color::Indexed(195),
+                light: Color::Indexed(234),
+                dark: Color::Indexed(233),
+            },
+            // Bone, cold stone, and one spectral green.
+            areas::CATACOMBS => Arte {
+                cap: Color::Indexed(245),
+                wall: Color::Indexed(180),
+                base: Color::Indexed(180),
+                mass: Color::Indexed(234),
+                floor: Color::Indexed(180),
+                grit: Color::Indexed(245),
+                window: Color::Indexed(155),
+                light: Color::Indexed(236),
+                dark: Color::Indexed(234),
+            },
+            // Worn grey flagstones, for anywhere without a stone of its own.
+            _ => Arte {
+                cap: Color::Indexed(180),
+                wall: Color::Indexed(137),
+                base: Color::Indexed(95),
+                mass: Color::Indexed(233),
+                floor: Color::Indexed(95),
+                grit: Color::Indexed(180),
+                window: Color::Indexed(214),
+                light: Color::Indexed(235),
+                dark: Color::Indexed(233),
+            },
+        }
+    }
+
+    /// The same palette reduced to the sixteen colours a basic terminal has.
+    #[must_use]
+    pub fn reduced(self) -> Arte {
+        Arte {
+            cap: self.cap.nearest_basic(),
+            wall: self.wall.nearest_basic(),
+            base: self.base.nearest_basic(),
+            mass: self.mass.nearest_basic(),
+            floor: self.floor.nearest_basic(),
+            grit: self.grit.nearest_basic(),
+            window: self.window.nearest_basic(),
+            light: self.light.nearest_basic(),
+            dark: self.dark.nearest_basic(),
+        }
+    }
+}
+
 /// The theme, resolved into concrete colours for the terminal's capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
@@ -111,6 +253,9 @@ pub struct Palette {
     pub highlight_fg: Color,
     /// The player character's colours: the mage bunny.
     pub mage: Inks,
+    /// Whether this palette has the colours the art wants. A basic terminal gets
+    /// the same art reduced, never a second hand-written table.
+    pub rich: bool,
     /// The veiled figure's colours.
     pub veiled: Inks,
     /// A small keeper carrying a lantern: warm gold and amber.
@@ -164,6 +309,7 @@ impl Palette {
         shade_mid: Color::Black,
         shade_near: Color::Blue,
         highlight_fg: Color::Black,
+        rich: false,
         mage: Inks {
             skin: Color::LightYellow,
             hair: Color::White,
@@ -304,6 +450,7 @@ impl Palette {
         shade_mid: Color::Indexed(236),
         shade_near: Color::Indexed(240),
         highlight_fg: Color::Indexed(232),
+        rich: true,
         // A kawaii mage bunny: pink ears, pale fur, a violet robe with white
         // lace, and big bright eyes. Deliberately the most saturated thing on
         // screen - the point is that she pops off a world made almost entirely
@@ -438,6 +585,13 @@ impl Palette {
         },
     };
 
+    /// The architecture of a place, in this palette's capability.
+    #[must_use]
+    pub fn arte(&self, area: crate::game::AreaId) -> Arte {
+        let rich = Arte::rich(area);
+        if self.rich { rich } else { rich.reduced() }
+    }
+
     /// Selects a palette appropriate for the reported colour support.
     #[must_use]
     pub const fn for_colors(support: ColorSupport) -> Palette {
@@ -540,7 +694,8 @@ impl Palette {
 
 #[cfg(test)]
 mod tests {
-    use super::Palette;
+    use super::{Arte, Palette};
+    use crate::render::Color;
     use crate::terminal::ColorSupport;
 
     #[test]
@@ -583,6 +738,65 @@ mod tests {
         assert_ne!(theme.background, theme.surface);
         assert_ne!(theme.surface, theme.surface_raised);
         assert_ne!(theme.border, theme.surface);
+    }
+
+    #[test]
+    fn every_place_is_built_from_its_own_stone() {
+        // Six places sharing one grey is exactly what made the world look like a
+        // spreadsheet, so each one must differ from every other.
+        let places = [
+            crate::game::areas::CHAPEL,
+            crate::game::areas::CELLAR,
+            crate::game::areas::WOODS,
+            crate::game::areas::VILLAGE,
+            crate::game::areas::SHRINE,
+            crate::game::areas::CATACOMBS,
+        ];
+        for (index, place) in places.iter().enumerate() {
+            for other in &places[index + 1..] {
+                assert_ne!(
+                    Arte::rich(*place),
+                    Arte::rich(*other),
+                    "{place:?} and {other:?} are built from the same stone"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_palette_hands_out_architecture_and_reduces_it() {
+        let rich = Palette::EXTENDED.arte(crate::game::areas::CHAPEL);
+        assert!(rich.wall != rich.cap, "a wall needs a lit edge");
+        assert!(rich.floor != rich.grit, "a floor needs a light on it");
+        // A basic terminal gets the same building, in the colours it has.
+        let poor = Palette::BASIC.arte(crate::game::areas::CHAPEL);
+        assert_ne!(rich, poor);
+        assert!(matches!(
+            poor.wall,
+            Color::DarkGrey | Color::White | Color::Yellow
+        ));
+    }
+
+    #[test]
+    fn the_pool_of_light_is_dark_enough_to_draw_on() {
+        // The pool is a *background*: a bright one becomes a lit rectangle, which
+        // is the mistake this test exists to catch being made again.
+        for place in [
+            crate::game::areas::CHAPEL,
+            crate::game::areas::CELLAR,
+            crate::game::areas::WOODS,
+            crate::game::areas::VILLAGE,
+            crate::game::areas::SHRINE,
+            crate::game::areas::CATACOMBS,
+        ] {
+            let arte = Arte::rich(place);
+            let (r, g, b) = arte.light.as_rgb().expect("an indexed colour");
+            assert!(
+                r < 150 && g < 150 && b < 150,
+                "{place:?} would draw a bright rectangle behind the player: {r},{g},{b}"
+            );
+            assert_ne!(arte.light, arte.dark, "{place:?} has no pool at all");
+        }
     }
 
     #[test]

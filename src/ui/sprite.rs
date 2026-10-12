@@ -814,7 +814,14 @@ pub const STEP: Duration = Duration::from_millis(120);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pose {
     /// Standing still.
-    Idle,
+    ///
+    /// `breathing` is the top of a breath, which runs on its own slow clock: a
+    /// figure that is not moving should be *standing*, not flickering, so the
+    /// canonical art is what an idle character shows most of the time.
+    Idle {
+        /// Whether the breath is at its top.
+        breathing: bool,
+    },
     /// Mid-step, `step` counting the steps taken so far.
     Walk {
         /// How many steps have been taken, for alternating the pose.
@@ -822,6 +829,14 @@ pub enum Pose {
     },
     /// Running.
     Sprint,
+}
+
+impl Pose {
+    /// Standing, not breathing.
+    #[must_use]
+    pub const fn standing() -> Self {
+        Pose::Idle { breathing: false }
+    }
 }
 
 impl Pose {
@@ -833,7 +848,8 @@ impl Pose {
     #[must_use]
     pub fn rows_for(self, sprite: &Sprite) -> &'static [&'static str] {
         match self {
-            Pose::Idle => sprite.breath.unwrap_or(sprite.rows),
+            Pose::Idle { breathing: false } => sprite.rows,
+            Pose::Idle { breathing: true } => sprite.breath.unwrap_or(sprite.rows),
             Pose::Walk { step } if !sprite.steps.is_empty() => {
                 sprite.steps[step as usize % sprite.steps.len()]
             }
@@ -1110,7 +1126,8 @@ mod tests {
         for sprite in SPRITES {
             let poses = sprite.all_poses();
             for pose in [
-                Pose::Idle,
+                Pose::standing(),
+                Pose::Idle { breathing: true },
                 Pose::Walk { step: 0 },
                 Pose::Walk { step: 7 },
                 Pose::Sprint,
@@ -1137,6 +1154,18 @@ mod tests {
             Pose::Sprint.rows_for(&MC_WIZARD),
             Pose::Walk { step: 0 }.rows_for(&MC_WIZARD)
         );
+        // Standing is the canonical art; breathing is a different frame.
+        assert_eq!(MC_WIZARD.rows, Pose::standing().rows_for(&MC_WIZARD));
+        assert_ne!(
+            Pose::standing().rows_for(&MC_WIZARD),
+            Pose::Idle { breathing: true }.rows_for(&MC_WIZARD)
+        );
+        // Every walk pose is a distinct frame, or the walk reads as a still.
+        let a = Pose::Walk { step: 0 }.rows_for(&MC_WIZARD);
+        let b = Pose::Walk { step: 1 }.rows_for(&MC_WIZARD);
+        assert_ne!(a, b, "the two steps must differ");
+        assert_ne!(a, MC_WIZARD.rows);
+        assert_ne!(b, MC_WIZARD.rows);
     }
 
     #[test]
