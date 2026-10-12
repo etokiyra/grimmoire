@@ -280,7 +280,39 @@ Delivered:
 
 No game code changed. The report is `docs/renderer-investigation.md`.
 
-## Phase 13 — Story
+## Phase 13 — The atmosphere layer, production-ready (done; not yet in the game)
+
+Stage 1 of the migration the investigation proposed. The layer exists and is
+verified; **no screen uses it yet**, so the game's own look has not changed. See
+`docs/renderer-investigation.md` §9.
+
+Delivered:
+
+- **`ui::atmosphere`**: a procedural true-colour field drawn as half blocks. One
+  continuous ramp, a glow that falls off in both axes, an optional moon, stars
+  and an aurora. Deterministic for a given tick, with a `Ramp` and `Drift` a
+  caller shapes rather than a picture baked in.
+- **The composition rules, tested rather than assumed**: an open cell carries two
+  samples, a glyph keeps its ink and the lower sample as its background, a glyph
+  with its own background replaces both, and a space flattens the cell. The
+  layer does not claim two samples under a glyph, because it does not have them.
+- **A budget**: the field is cached, its clock is quantised, and `Drift` bounds
+  which rows may change. The atmosphere adds **0.3–0.6% of one core** in normal
+  idle animation at 150×37 and the game still holds 58 of its 60 frames a second.
+  The worst case is measured separately: 9–12% end to end.
+- **Smoothness as a constraint**: the first capture was banded, by 9–20 units of
+  colour per half-row, because a sky ramp met a ground ramp at the horizon and
+  the glow was a function of the row alone. One continuous ramp and a
+  two-dimensional glow bring the worst step to 5 units, and
+  `a_night_sky_shows_no_bands` holds it there at three sizes.
+- **Degradation**: true colour, the 6×6×6 cube, or the nearest classic colour, and
+  never `Color::Default`, so the field can never let the user's background show.
+- **Resizes** driven through a pty from 150×37 down to 1×1 and back, repainting at
+  each and exiting cleanly.
+
+Next: stage 2 — the **title screen only**, behind `ColorSupport::TrueColor`.
+
+## Phase 14 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

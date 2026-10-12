@@ -311,7 +311,94 @@ everything around it: the stride is locked to steps so the figure never looks
 disconnected from the motion, both axes cross the screen at the same speed, and
 the frame loop now runs fast enough that a transition or a fade is smooth.
 
-## 7. The optional pixel interface
+## 7. The procedural atmosphere layer
+
+`ui::atmosphere` is the one addition the cell grid has had since the first
+renderer: a **background layer** that can hold a gradient. Nothing above it
+changed, and the game itself does not use it yet.
+
+### Why it exists
+
+The grid composes one glyph, one foreground colour and one background colour per
+cell, so a smooth change of colour has nowhere to live. Every "gradient" before
+this was three discrete steps out of the palette, and that is the ceiling the
+VinZ investigation identified: see
+[`renderer-investigation.md`](renderer-investigation.md).
+
+### How one cell carries two colours
+
+The field is written as the upper half block, `▀`, whose **foreground** is the
+colour of the top half of the cell and whose **background** is the colour of the
+bottom half. A field `h` rows tall is therefore sampled `2h` times, which is what
+allows a 29-row terminal to draw a 58-step gradient.
+
+That is a technique, not a dependency: it is around thirty lines against our own
+`Canvas` and it was written from the concept.
+
+### What survives composition, exactly
+
+This is the part that is easy to assume and wrong to assume. The rule the canvas
+already has — a draw that leaves `Style::bg` at [`Color::Default`] inherits the
+background underneath — decides everything:
+
+| What lands on the cell | Glyph | Foreground | Background |
+| --- | --- | --- | --- |
+| nothing (open field) | `▀` | the upper sample | the lower sample |
+| a scenery glyph, sprite glyph or stray text | that glyph | the caller's ink | **the lower sample** |
+| a blank space with a foreground | `' '` | the caller's ink | the lower sample |
+| anything with its own background | its own glyph | its own ink | **its own colour** |
+
+So the field has two samples per cell in the open, **one** sample per cell
+beneath a glyph, and none where a caller paints its own surface. The error under
+a glyph is bounded by half a row of the ramp, because the surviving sample is
+half a row below the cell's centre — which at the sizes in use is under 3 units
+of colour out of 255. `ui::atmosphere`'s tests assert every row of that table
+rather than describing it.
+
+A consequence worth knowing: writing a space *does* displace the half block, so
+text turns the cells it covers into flat cells in the lower sample's colour. That
+is a graceful degradation, not damage, but it is why the field is at its best in
+the empty spaces a screen leaves.
+
+### Cadence: the layer does not run at the frame rate
+
+An animated full-screen true-colour field changes almost every cell every frame,
+which defeats the presenter's diff and is exactly how the first prototype spent a
+tenth of a core drawing one screen. Three rules keep the layer cheap:
+
+1. **It is cached.** The field is resolved only when the clock crosses a tick or
+   the area changes. Between ticks `paint` blits a canvas that is byte-identical,
+   so the diff writes nothing.
+2. **The clock is quantised.** The sample time comes from a whole tick index, never
+   from a continuous elapsed time, so two resolves inside one tick are identical
+   bit for bit and there is nothing to flicker.
+3. **The drift is bounded.** `Drift` names the rows allowed to change, and a tick
+   repaints only those. The default sky drifts in its top quarter four times a
+   second; the rows below it are drawn once and never retransmitted.
+
+A screen hands the loop the layer's cadence through `Screen::next_frame`, using
+`Atmosphere::next_update`, and reports `Drift::Still`'s `None` when the player has
+asked for reduced motion. The atmosphere never makes a screen `is_animating`.
+
+### Degrading
+
+`Rgb::to_color` reduces the field to what the terminal can show: true colour, the
+6×6×6 cube, or the nearest classic colour. The result is never `Color::Default`,
+whatever is asked for, because a cell the field covers must own its colour or the
+user's own background would show through the game.
+
+### Smoothness is a constraint, not a hope
+
+A gradient steeper than roughly six units of colour per vertical sample reads, at
+this resolution, as a stack of horizontal lines. The first attempt at the horizon
+glow changed by twenty and was plainly banded in a real capture. Two things fixed
+it: **one** continuous ramp instead of a sky ramp meeting a ground ramp at the
+horizon, and a glow that falls off in **both** axes — the vertical falloff spread
+over half the height, and a horizontal one so that a light is a light rather than
+a bright slab stretched the full width. `a_night_sky_shows_no_bands` holds the
+shipped sky to seven units per sample at three terminal sizes.
+
+## 8. The optional pixel interface
 
 `--pixel-ui` (or `GRIMMOIRE_PIXEL_UI=1`) enables a small software pixel renderer
 for **interface pieces only**: the dialogue portrait, and the study's portrait
@@ -324,7 +411,7 @@ signature, `IHDR`, `IDAT`, `IEND`, Paeth filtering, CRC-32 — and only DEFLATE
 comes from a dependency (`fdeflate`, chosen for PNG scanline data). Nothing in the
 project decodes an image: Kitty does that.
 
-## 8. Verification
+## 9. Verification
 
 **Visually verified in a real Kitty session** (0.49.2 at font size 15, so about
 150×36 cells, driven through Kitty's own remote-control socket and captured with
@@ -371,7 +458,7 @@ camera, the minimum viewport, the game's rules, and the save format.
 terminals; macOS or Windows; and the frame rate in a *real* Kitty window under
 sustained load, which was measured only through a pseudo-terminal.
 
-## 9. Measurements
+## 10. Measurements
 
 From `cargo run --release --example bench` on this machine, at a 120 × 40 frame
 with the world composed and shown. Every number is measured.
@@ -389,7 +476,7 @@ Composition did not get slower despite the figures, the inlay, the candles and t
 motes: all of it is arithmetic on cells that were being written anyway, and the
 draw passes visit only the tiles inside the view.
 
-## 10. Migration path and non-goals
+## 11. Migration path and non-goals
 
 - **More art** means more glyph tables, more legend characters and more neighbour
   rules in `ui::scenery`; nothing else changes.

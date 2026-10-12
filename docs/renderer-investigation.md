@@ -222,3 +222,156 @@ renderer:
 6. **True colour for the existing art.** The sprite inks are 256-colour
    indices; `ArtInks` could carry RGB and reduce for basic terminals, which
    would let a character be lit by the scene rather than painted with it.
+
+## 9. Stage 1 outcome: the layer, production-ready
+
+Stage 1 of the migration above is done. The layer is `ui::atmosphere`; the game
+does not use it yet. This section reports what was built and what was learned,
+and corrects one number from the investigation.
+
+### What the composition tests proved
+
+**No change to the rendering interface was needed.** The rule the canvas already
+has — a draw that leaves its background at `Color::Default` inherits what is
+underneath — decides the whole thing, and the module's tests assert each case
+rather than assuming it:
+
+- An open cell is a `▀` carrying **two** samples, and they differ.
+- A glyph drawn over the field keeps its own ink and the **lower** sample as its
+  background. The upper sample is gone with the glyph slot.
+- A glyph with its own background replaces both samples.
+- A blank space is drawable, so it displaces the half block and leaves a flat
+  cell in the lower sample's colour. Text therefore flattens the field where it
+  lands; that is documented rather than wished away.
+- A sprite's non-space glyphs all survive with their own ink over the field.
+
+The practical error this leaves is bounded by half a row of the ramp — under
+three units of colour at the sizes in use. The layer does **not** provide two
+independent samples under a glyph, and nothing claims it does.
+
+### The correction: the first measurement was wrong
+
+The investigation reported the prototype at "~35 fps" by dividing bytes by cell
+size. Measured properly, through a pty at 150×37, the old prototype ran at
+**6.6 frames/s**, wrote **1.34 MB/s**, and cost **8.5% of one core**: it
+recomputed and retransmitted the whole true-colour field every frame, so the
+presenter's diff could never skip anything. The bytes estimate was right; the
+frame rate derived from it was not.
+
+### What changed to make it cheap
+
+1. The field is **cached** and resolved only when the clock crosses a tick or the
+   area changes. Between ticks `paint` blits a byte-identical canvas, so a
+   settled field costs **zero bytes** — confirmed in a real Kitty session, where
+   the still mode wrote nothing at all after its first frame.
+2. The clock is **quantised** to a whole tick index, so nothing can flicker
+   inside a tick and two resolves are bit-identical.
+3. `Drift` **bounds** which rows may change. The shipped sky drifts in its top
+   quarter four times a second.
+4. The update cadence is the layer's own: a screen returns
+   `Atmosphere::next_update` from `Screen::next_frame`.
+
+### The correction that mattered visually: banding
+
+The first capture of the shipped sky, sampled down one column, changed by **9 to
+20 units of colour per half-row** in the glow, which reads as a stack of
+horizontal lines; the sky above it changed by 1–2 units and was perfect. Two
+causes, both designed out:
+
+- **A seam at the horizon.** A sky ramp above the horizon meeting a separate
+  ground ramp below it is a hard horizontal edge by construction. The field is now
+  **one** continuous ramp, with the ring of stops around the horizon shaping it.
+- **A glow that was a function of the row alone.** However smooth its falloff,
+  that is a bright slab across the full width. The glow now falls off in `u` as
+  well, so it is a light rather than a band.
+
+Re-measured on the new capture, the worst step down a column is **5 units** (the
+only larger jump in that column is a star, which is a point and is meant to be
+one). `a_night_sky_shows_no_bands` holds the shipped sky to seven units per
+sample at 120×29, 80×22 and 200×50.
+
+### Measurements, after
+
+Two methods, because one number is not enough:
+
+- **Headless** (`cargo run --release --example skyline -- --bench`), which
+  composes, diffs and presents into a `Vec<u8>` with no terminal at all. Bytes and
+  write counts are exactly reproducible; times vary by 20–30% run to run on this
+  machine, so they are reported as a range.
+
+  | Mode | µs/frame | cells written/frame | bytes/frame |
+  | --- | --- | --- | --- |
+  | `bare` (no atmosphere, the same animation) | 86–110 | 15.7 | 543 |
+  | `live` (a drifting band at 4 Hz) | 167–189 | 112.2 | 3 283 |
+  | `walk` (the whole field at 12 Hz) | 450–508 | 344.4 | 9 857 |
+  | `heavy` (the whole field at 30 Hz) | 884–1 011 | 560.8 | 19 039 |
+
+  The atmosphere's own contribution in normal idle animation is `live − bare`:
+  **57–103 µs per frame**, which at 60 frames a second is **0.3–0.6% of one
+  core**. The acceptance target was no more than about 3%.
+
+- **End to end** through a pty at 150×37, one core as the denominator, over
+  ≥10-second windows:
+
+  | Mode | frames/s | KiB/s | CPU, % of one core |
+  | --- | --- | --- | --- |
+  | `still` | — (idles) | 0.0 | 0.0–0.2 |
+  | `slow` (the field alone) | 6.4 | 53 | 1.2–1.3 |
+  | `bare` | 60.2 | 41 | 2.7–4.1 |
+  | `live` | 58.0 | 185 | 4.1–7.8 |
+  | `walk` | 57.9 | 569 | 8.4–10.5 |
+  | `heavy` | 41 | 915 | 9.4–12.2 |
+
+  The `bare` and `live` spreads overlap because CPU is counted in 10 ms ticks, so
+  the percentage is the weaker of the two measurements. What is stable is the byte
+  volume and the frame rate: the game holds **58 of its 60 frames a second** with
+  the atmosphere running.
+
+  **Worst case, not averaged away:** `heavy` — the whole field drifting thirty
+  times a second with 240 motes and a walking figure — costs 9–12% of one core
+  end to end and holds 41 fps under a pty. It is available, it is not the default,
+  and it is not hidden behind an average.
+
+### Resizing and small terminals
+
+Driven through a pty through 150×37 → 80×24 → 40×12 → 20×6 → 200×50 → 1×1 →
+150×37: the process survived every one, repainted at each (a resize is a full
+redraw), and exited cleanly with its frame report. At 101×24 the scene is still
+coherent; below the application's own 80×24 minimum the existing suspend screen
+appears, and the atmosphere is not even resolved.
+
+### Screenshots
+
+Real Kitty captures, fullscreened, `grim`, no palette reduction:
+
+| File | What it shows |
+| --- | --- |
+| `docs/images/atmosphere-field.png` | the field alone, no foreground glyphs |
+| `docs/images/atmosphere-scene.png` | the field beneath scenery and the supplied wizard |
+| `docs/images/atmosphere-overlay.png` | the field around an opaque dialogue plate |
+| `docs/images/atmosphere-small.png` | the same scene at 101×24 |
+| `docs/images/atmosphere-heavy.png` | the heaviest mode, a second animation state |
+
+`docs/images/prototype-skyline.png` from the investigation is kept beside them for
+comparison.
+
+### What is honestly not done
+
+- The layer is **not wired into the game**. No screen composes it, so the game's
+  own look is unchanged, which is what stage 1 asked for.
+- The 256-colour and 16-colour paths are asserted by unit test, not photographed:
+  Kitty was driven in true colour throughout.
+- The moon's disc has a hard edge by design; a shape is allowed one, and the
+  banding test excludes the moon and the stars for that reason.
+- CPU percentages are of **one core**. This machine has more than one, and the
+  numbers were taken while it was otherwise busy, which is where the spread comes
+  from.
+
+### The next safest migration step
+
+The same as the plan's stage 2, and still reversible: apply the layer to the
+**title screen only**, behind `ColorSupport::TrueColor` with the nearest-indexed
+fallback, and re-measure. The title is the right first host because it has a large
+empty sky, no text over the field except its stars, and nothing the player must
+act on. Do **not** move to per-area fields before the title's cost has been
+measured on a real terminal.

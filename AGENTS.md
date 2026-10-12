@@ -117,6 +117,12 @@ All current area names, entities, and dialogue lines are placeholders.
 - **Do not use `dim` to express distance.** On an indexed colour a terminal is
   free to ignore it, which is how the first lighting pass ended up with no falloff
   at all. Step the colour instead.
+- **A gradient steeper than roughly six units of colour per vertical sample
+  bands.** At terminal resolution a steep ramp reads as a stack of horizontal
+  lines, however "correct" the maths is. Spread a ramp over the height, fall a
+  light off in both axes, and keep the whole field one continuous ramp: a sky
+  ramp meeting a ground ramp at the horizon is a hard edge by construction.
+  `a_night_sky_shows_no_bands` is what holds the shipped sky to that.
 - **Architecture comes from neighbours, not from a texture.** A wall with floor
   above and below is a span; a lone wall is a column; a glazed run is a wall with
   stone above and below it. Draw the building, not the material.
@@ -189,6 +195,15 @@ Respect these; they are the point of the current structure:
   the image lifecycle for the optional pixel UI: transmitting an asset once,
   placing it by cell, replacing a placement in place, and deleting images on every
   exit path.
+- `src/ui/atmosphere.rs` — the procedural true-colour background layer. It draws
+  one `▀` per cell, foreground above and background below, which is two vertical
+  samples in a model that has one. It is **not** used by the game yet. A cell it
+  keeps carries two samples; a glyph drawn over it keeps its own ink and the
+  *lower* sample as its background; a glyph with its own background replaces
+  both; a space flattens the cell. Do not claim two samples beneath a glyph — the
+  tests assert the table in `docs/renderer-design.md` instead. Keep it cached,
+  quantise its clock, and bound its drift with `Drift`: an animated full-screen
+  field defeats the presenter's diff, which is what the first prototype did.
 - `src/ui/scenery.rs` — the ASCII world renderer. Pure: a world, a palette, a
   time and a pose in; cells out. Structure comes from a tile's neighbours,
   variation from a hash of its world position (never of the frame, or the world
@@ -323,7 +338,8 @@ After substantial changes, update the documentation in the same change:
 - `docs/map-design.md` — the rules an area must satisfy, above all that every
   passage fits the character, and how the generator and the tests enforce them.
 - `docs/renderer-investigation.md` — the renderer's structural limits, the VinZ
-  investigation, the proposed atmosphere layer, and the prototype's measurements.
+  investigation, the proposed atmosphere layer, the prototype's measurements, and
+  stage 1's outcome (the `ui::atmosphere` module, its corrections and its budget).
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

@@ -9,6 +9,35 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — a production-ready procedural atmosphere layer (not yet used by the game)
+
+- **`ui::atmosphere`**: a procedural true-colour field drawn underneath the
+  glyphs as upper-half-block cells, whose foreground is the colour of the top half
+  of the cell and whose background is the colour of the bottom half. A `Ramp`, a
+  glow that falls off vertically *and* horizontally, an optional moon, stars and
+  an aurora; deterministic for a given tick. Nothing above it changed.
+- **The composition rules are asserted, not assumed.** A cell the field keeps
+  carries two samples; a glyph drawn over it keeps its own ink and the *lower*
+  sample as its background; a glyph with its own background replaces both; a space
+  flattens the cell. The layer does not claim two independent samples beneath a
+  glyph, because it does not have them.
+- **A cost budget of its own**: the field is cached, the clock is quantised to a
+  tick index, and `Drift` bounds which rows may change. Measured headlessly, the
+  atmosphere adds **57–103 µs per frame** — **0.3–0.6% of one core** — during
+  normal idle animation at 150×37, and the game holds 58 of its 60 frames a
+  second end to end. The worst case (the whole field at 30 Hz) is measured and
+  reported separately at 9–12%.
+- **Smoothness enforced by test.** `a_night_sky_shows_no_bands` holds the shipped
+  sky to seven units of colour per vertical sample at three sizes. The first
+  capture was banded by 9–20; a seam at the horizon and a glow that was a
+  function of the row alone were both designed out.
+- **Degradation**: true colour, the 6×6×6 cube, or the nearest classic colour —
+  never `Color::Default`, so a covered cell can never show the user's background.
+- **`examples/skyline.rs`** rewritten around the module, with `--bench` for
+  headless measurement and `GRIMMOIRE_SKY_MODE` for load levels; resizes verified
+  through a pty from 150×37 down to 1×1 and back.
+
+### Investigated — a true-colour atmosphere layer (prototype)
 ### Investigated — a true-colour atmosphere layer (prototype only)
 
 - **`docs/renderer-investigation.md`**: why the renderer looks the way it does
