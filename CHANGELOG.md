@@ -9,7 +9,44 @@ it starts releasing.
 
 ## [Unreleased]
 
-### Added — a production-ready procedural atmosphere layer (not yet used by the game)
+### Changed — the title screen, rebuilt around the atmosphere layer
+
+The title is the first screen to use `ui::atmosphere`, and it has been recomposed
+around it rather than having a gradient put behind the old layout.
+
+- **One layered scene**: the field is composed first and owns every cell's
+  background; a cathedral silhouette, the wizard, rising motes, the wordmark and
+  the menu are drawn above it and inherit the sky. The world, the presenter, the
+  diff, the frame schedule and the terminal lifecycle are untouched.
+- **`ui::cathedral`**: a cathedral drawn from a *plan* rather than a picture —
+  towers with tapering spires, a cornice, a steep gable, a rose window, a rank of
+  nave windows, tower lancets and a lit doorway, all scaled from the space
+  available and symmetric about a spine.
+- **A wordmark that reads.** A terminal cell is about twice as tall as it is
+  wide, so the five-row figlet banner was a smear however it was drawn. The name
+  is now one row, letter-spaced, in a gold-to-ember ramp with a rule beneath it.
+- **A staged opening**, coordinated rather than simultaneous: the sky is there,
+  the cathedral rises and its windows light in order, the name is written
+  left-to-right, then the menu assembles. It settles into a calm idle and never
+  replays, so returning from the journal or Settings costs nothing.
+- **A bottom menu band**, on the dark ground where it can be read, with a
+  highlighted selection and a note line.
+- **The small palettes get their own sky.** A smooth gradient reduced into
+  sixteen colours collapses to one flat rectangle, so `Sky::night_basic` chooses
+  its stops *from* the classic colours. The moon's body is pure white so that it
+  reduces to white rather than to bright yellow.
+- **`Screen::on_capabilities`**, a small addition: a screen that builds something
+  from the terminal's colour support now knows it before the first frame. Every
+  screen is told, including ones pushed later.
+- **Measured**: the atmosphere adds about **1.7 points of one core** during normal
+  idle animation at 150×37 (budget: 3), and the opening holds **60 fps**. The idle
+  runs at 11 fps by design, on the ambient cadence the game already uses.
+- **Fixed**: `tools/smoke.sh`'s "composed the ASCII world" check tested for `#`,
+  which came from the old title's tower rather than the world. It now checks the
+  world's own status line.
+
+### Added — a production-ready procedural atmosphere layer
+### Added — a production-ready procedural atmosphere layer
 
 - **`ui::atmosphere`**: a procedural true-colour field drawn underneath the
   glyphs as upper-half-block cells, whose foreground is the colour of the top half

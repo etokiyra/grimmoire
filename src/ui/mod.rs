@@ -10,6 +10,7 @@
 pub mod animation;
 pub mod art;
 pub mod atmosphere;
+pub mod cathedral;
 pub mod dialogue;
 pub mod effects;
 pub mod exploration;

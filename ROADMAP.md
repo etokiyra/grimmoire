@@ -312,7 +312,35 @@ Delivered:
 
 Next: stage 2 — the **title screen only**, behind `ColorSupport::TrueColor`.
 
-## Phase 14 — Story
+## Phase 14 — The title screen, integrated (done)
+
+The atmosphere layer's first host, and the title rebuilt around it rather than a
+gradient put behind the old layout. `docs/renderer-investigation.md` §10 is the
+full report; `docs/renderer-design.md` §7, §9 and §10 hold the design and the
+numbers.
+
+Delivered:
+
+- **The scene**: a true-colour night with a moon, a cathedral silhouette (towers
+  with spires, a cornice, a steep gable, a rose window, nave windows, lancets, a
+  lit doorway), the wizard standing at the door's jamb, rising motes, a one-row
+  letter-spaced wordmark in a gold-to-ember ramp, and a bottom menu band.
+- **A staged opening**: sky, then the cathedral rises and its windows light in
+  order, then the name is written, then the menu assembles. It settles into a calm
+  idle and never replays.
+- **The grid's own rules, learned and recorded**: a cell is about twice as tall
+  as it is wide, so a multi-row wordmark smears, a wide roof becomes a staircase,
+  and a trigonometric circle becomes a plus sign. The title answers each in the
+  way the grid allows.
+- **A deliberate fallback**: a sixteen-colour terminal gets a poster built *from*
+  the classic palette rather than a collapsed gradient.
+- **Measured**: the atmosphere adds ~1.7 points of one core at idle (budget 3);
+  the opening holds 60 fps; the idle is 11 fps by design.
+- **The world is untouched**, and the smoke test now actually tests it.
+
+Next: one gameplay place, not all six. See the investigation's closing section.
+
+## Phase 15 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

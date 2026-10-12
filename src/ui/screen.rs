@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::input::Key;
 use crate::render::{Frame, Rect};
+use crate::terminal::Capabilities;
 
 use super::FrameContext;
 
@@ -81,6 +82,15 @@ pub trait Screen {
     /// use this rather than reading the environment themselves.
     fn on_terminal_ready(&mut self, _key_releases: bool) {}
 
+    /// Called before the first frame with what the terminal can display.
+    ///
+    /// A screen that *builds* something expensive from the terminal's colour
+    /// support — the title's sky is the first to — has to know it while it is
+    /// building, not only when it hands a composed frame back. Every screen is
+    /// told, including ones pushed later, because the stack knows what the
+    /// terminal reported and a screen does not.
+    fn on_capabilities(&mut self, _capabilities: Capabilities) {}
+
     /// Called when the terminal reports how large one character cell is.
     ///
     /// Screens that pace something in screen terms use this; the renderer itself
@@ -135,6 +145,7 @@ pub struct Outcome {
 #[derive(Default)]
 pub struct ScreenStack {
     screens: Vec<Box<dyn Screen>>,
+    capabilities: Capabilities,
 }
 
 impl ScreenStack {
@@ -147,18 +158,33 @@ impl ScreenStack {
     /// Creates a stack whose root is `root`.
     #[must_use]
     pub fn with_root(root: impl Screen + 'static) -> Self {
-        ScreenStack {
-            screens: vec![Box::new(root)],
+        let mut stack = ScreenStack {
+            screens: Vec::new(),
+            capabilities: Capabilities::conservative(),
+        };
+        stack.push_boxed(Box::new(root));
+        stack
+    }
+
+    /// Records what the terminal can display, and tells every screen.
+    pub fn set_capabilities(&mut self, capabilities: Capabilities) {
+        self.capabilities = capabilities;
+        for screen in &mut self.screens {
+            screen.on_capabilities(capabilities);
         }
     }
 
     /// Pushes `screen` on top of the active screen.
     pub fn push(&mut self, screen: impl Screen + 'static) {
-        self.screens.push(Box::new(screen));
+        self.push_boxed(Box::new(screen));
     }
 
     /// Pushes an already boxed screen.
-    pub fn push_boxed(&mut self, screen: Box<dyn Screen>) {
+    ///
+    /// A screen pushed later is told what the terminal can do on the way in, so
+    /// it does not have to be handed the answer twice.
+    pub fn push_boxed(&mut self, mut screen: Box<dyn Screen>) {
+        screen.on_capabilities(self.capabilities);
         self.screens.push(screen);
     }
 

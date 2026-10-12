@@ -123,6 +123,21 @@ All current area names, entities, and dialogue lines are placeholders.
   light off in both axes, and keep the whole field one continuous ramp: a sky
   ramp meeting a ground ramp at the horizon is a hard edge by construction.
   `a_night_sky_shows_no_bands` is what holds the shipped sky to that.
+- **A terminal cell is about twice as tall as it is wide, and art has to admit
+  it.** Any multi-row letterform is stretched past two to one and smears, so the
+  title's wordmark is one row, wide and letter-spaced, and carries its weight in
+  colour and ornament. Figlet banners are the trap: their horizontal strokes are
+  hairline `_` glyphs that all but vanish. A circle drawn with trigonometry
+  collapses into a plus sign for the same reason; the rose window is an explicit
+  five-by-three ring instead.
+- **A roof cannot be as wide as its building in this grid.** A shallow pitch comes
+  out as a staircase. `ui::cathedral` keeps its gable narrow and steep, which
+  reads as a point, and gives the towers the height instead.
+- **A small palette gets its own art, not reduced art.** A smooth gradient
+  reduced cell by cell into sixteen colours collapses to one flat rectangle, so
+  `Sky::night_basic` chooses its stops *from* the classic colours instead. The
+  same rule made the moon's body pure white: everything near white reduces to
+  bright yellow on a sixteen-colour terminal.
 - **Architecture comes from neighbours, not from a texture.** A wall with floor
   above and below is a span; a lone wall is a column; a glazed run is a wall with
   stone above and below it. Draw the building, not the material.
@@ -195,16 +210,25 @@ Respect these; they are the point of the current structure:
   the image lifecycle for the optional pixel UI: transmitting an asset once,
   placing it by cell, replacing a placement in place, and deleting images on every
   exit path.
+- `src/ui/cathedral.rs` — the title's cathedral silhouette. A *plan*, not a
+  picture: the towers, nave, gable, rose window, lancets and doorway are all
+  derived from the space the caller has, so the building fills a wide terminal and
+  still reads at a narrow one. Drawn from full blocks in the foreground with the
+  atmosphere left as the background, because it is a silhouette against a lit sky
+  and a shaded glyph would let the sky through. Symmetric about its spine, and the
+  masonry is hashed by distance from that spine so the texture mirrors too.
 - `src/ui/atmosphere.rs` — the procedural true-colour background layer. It draws
   one `▀` per cell, foreground above and background below, which is two vertical
-  samples in a model that has one. It is **not** used by the game yet. A cell it
-  keeps carries two samples; a glyph drawn over it keeps its own ink and the
-  *lower* sample as its background; a glyph with its own background replaces
+  samples in a model that has one. **The title screen is its only host so far.**
+  A cell it keeps carries two samples; a glyph drawn over it keeps its own ink and
+  the *lower* sample as its background; a glyph with its own background replaces
   both; a space flattens the cell. Do not claim two samples beneath a glyph — the
   tests assert the table in `docs/renderer-design.md` instead. Keep it cached,
   quantise its clock, and bound its drift with `Drift`: an animated full-screen
-  field defeats the presenter's diff, which is what the first prototype did.
-- `src/ui/scenery.rs` — the ASCII world renderer. Pure: a world, a palette, a
+  field defeats the presenter's diff, which is what the first prototype did, and
+  the drifting band's height is very nearly the whole cost of a living sky.
+- `src/ui/scenery.rs` — the ASCII world renderer. It is **not** an atmosphere
+  host yet; the next host is one gameplay place, not all six. Pure: a world, a palette, a
   time and a pose in; cells out. Structure comes from a tile's neighbours,
   variation from a hash of its world position (never of the frame, or the world
   would shimmer), and light from distance. Decor — inlay, candles, motes — is
@@ -338,8 +362,10 @@ After substantial changes, update the documentation in the same change:
 - `docs/map-design.md` — the rules an area must satisfy, above all that every
   passage fits the character, and how the generator and the tests enforce them.
 - `docs/renderer-investigation.md` — the renderer's structural limits, the VinZ
-  investigation, the proposed atmosphere layer, the prototype's measurements, and
-  stage 1's outcome (the `ui::atmosphere` module, its corrections and its budget).
+  investigation, the proposed atmosphere layer, the prototype's measurements,
+  stage 1's outcome (the `ui::atmosphere` module, its corrections and its budget),
+  and stage 2's (the title-screen integration, its art-direction findings and its
+  numbers).
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

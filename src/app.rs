@@ -150,6 +150,7 @@ impl App {
     #[must_use]
     pub fn with_root(startup: Startup, root: Box<dyn Screen>) -> Self {
         let mut stack = ScreenStack::new();
+        stack.set_capabilities(startup.capabilities);
         stack.push_boxed(root);
         App {
             capabilities: startup.capabilities,

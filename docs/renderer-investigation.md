@@ -375,3 +375,120 @@ fallback, and re-measure. The title is the right first host because it has a lar
 empty sky, no text over the field except its stars, and nothing the player must
 act on. Do **not** move to per-area fields before the title's cost has been
 measured on a real terminal.
+
+## 10. Stage 2 outcome: the title screen, integrated
+
+Stage 2 of the plan is done: the layer is in the game, on the **title screen
+only**, and the title has been recomposed around it. Everything else — the world,
+the presenter, the diff, the schedule, the terminal lifecycle — is unchanged, and
+the world renders exactly as it did before.
+
+### What the integration is
+
+The title composes the field first; every layer above it draws glyphs with
+inherited backgrounds, so the sky is behind them and not merely near them. One
+small API addition was needed: `Screen::on_capabilities`, because a screen that
+*builds* from the terminal's colour support has to know it before it composes,
+and only the stack knows it. It is called for every screen, including ones pushed
+later.
+
+### The art direction finding that mattered most
+
+The name was a five-row figlet banner and it could not be made to read. **A
+terminal cell is about twice as tall as it is wide**, so any letterform designed
+for near-square cells is stretched by more than two to one, and figlet's `_`
+strokes are hairlines that vanish. What survived was a column of vertical bars.
+
+So the wordmark is **one row**, wide and letter-spaced, and carries its weight in
+colour and ornament. That is not a stylistic choice; it is the grid telling the
+art director what it can do. The scene carries the scale instead.
+
+### The three weakest elements, and what was done
+
+Found by looking at captures, in order:
+
+1. **The cathedral read as a wall.** The first version spanned nearly the whole
+   width as a flat dark rectangle with two thin towers, an enormous flat orange
+   doorway and a masonry speckle that looked like damage. The facade was narrowed
+   to three-fifths of the frame, the towers widened and given tapering spires,
+   the doorway cut down and dimmed, the masonry made rare and nearer the stone,
+   and a rosette, a rank of nave windows and tower lancets added.
+2. **The roof was a ziggurat.** A roof as wide as the nave cannot look like a
+   roof in this grid: a shallow pitch comes out as a staircase. The roof became a
+   cornice with a narrow, steep gable — a point rather than a plateau.
+3. **The rose window was a plus sign.** Drawn with trigonometry at radius three,
+   it collapsed into an axis-aligned cross, because the same cell aspect squashes
+   the vertical. It is now an explicit five-by-three ring, which is what a circle
+   looks like on this grid.
+
+Two more were fixed in the same pass: an empty dark band sat on the ground for
+the first second of the opening before any menu item had arrived, and the wizard
+stood in the middle of the west front and covered the rose window above it. It
+now stands at the door's left jamb.
+
+### The small palette
+
+The 256-colour path was exercised and the 16-colour path is a **poster**: the sky
+does not reduce into the small palette, it is built from it (`Sky::night_basic`),
+because a smooth ramp reduced cell by cell collapses to one flat rectangle. The
+moon's body is pure white so that it reduces to white rather than to bright
+yellow. The result is loud and unmistakable, and it is deliberate rather than
+broken — which is the most sixteen colours allow.
+
+An honest note on measurement: the first attempt at the fallback screenshot did
+not exercise anything. Kitty sets `TERM` for its children, so the override never
+reached the application and the "fallback" capture was a true-colour one. The
+override has to go through `env` after `-e`.
+
+### Measurements
+
+| Phase (150×37, pty) | Before | After |
+| --- | --- | --- |
+| Opening | 0.66% of a core, 4–6 KiB/s | 1.33%, 98 KiB/s, **60 fps** |
+| Settled idle | 1.00% | 2.66%, 151 KiB/s, 11 fps |
+| Menu navigation | 1.49% | 2.98% |
+| Resize | 2.31% | 4.78% |
+| 256-colour | 1.33% | 2.00%, 12 KiB/s |
+
+The atmosphere adds about **1.7 points of one core** during normal idle
+animation, against the three-point budget the layer was given. Profiling found the
+band's height was nearly the whole cost — a cell of true colour is about forty
+bytes of escape sequence — so narrowing the drift from the field's top quarter to
+its top fifth took the idle from 4.33 to 2.66 points.
+
+Frame rate: **60 during the opening and any transition**, and 11 at the idle,
+which is the ambient cadence the game already uses for slow detail. The target is
+not missed, it is architected: the loop wakes at the sky's own 4 Hz clock and no
+faster. A title that idled at 60 would be burning frames to redraw the same
+cells.
+
+### Screenshots
+
+Real fullscreened Kitty captures, no palette reduction, in `docs/images/`:
+`title-before.png` (the old title, for comparison), `title-night.png` (the
+integrated title), `title-opening.png`, `title-overlay.png`, `title-small.png`
+(101×24) and `title-basic.png` (the sixteen-colour poster).
+
+### One thing this exposed
+
+`tools/smoke.sh`'s "composed the ASCII world" check tested for `#`, which was
+drawn by the *old title's* tower stencil. It had never tested the world at all,
+and it stopped being true the moment the tower went. It now checks the world's own
+status line.
+
+### Remaining shortcomings
+
+- The cathedral is a **facade**, not a place: it is drawn from a plan, not from
+  the world model, and it is the title's alone.
+- The sixteen-colour title is a poster, and it is much louder than the
+  true-colour one. It is readable and deliberate; it is not beautiful.
+- The wizard is small at 120×29 and proportionally large at 101×24, where it
+  crowds the doorway. The building scales continuously; the sprite cannot.
+- The idle still writes 151 KiB/s, all of it the drifting band.
+
+### The next safest step
+
+The next host is one gameplay place, **not all six**: pick the one with the most
+empty sky or air, and measure the same five phases there before touching another.
+Do not give the cellar, the shrine or the catacombs a field to share; each is
+independent and each is reversible on its own.

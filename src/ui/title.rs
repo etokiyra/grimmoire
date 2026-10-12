@@ -1,16 +1,39 @@
 //! The title screen: the first thing the game says.
 //!
 //! A game should not drop the player into a room as though it were a command that
-//! ran. This is the opening: a night sky over the chapel, the name composed out of
-//! glyphs, and a menu that knows whether there is a journey to continue.
+//! ran. This is the opening: a night sky over a cathedral, the name composed out
+//! of glyphs, and a menu that knows whether there is a journey to continue.
 //!
-//! # What is animated
+//! # How the scene is built
 //!
-//! Everything here is a function of one number — how long the screen has been
-//! open — so nothing drifts, and nothing needs to be stored: stars twinkle on a
-//! hash of their position and the clock, motes rise, the logo reveals left to
-//! right, and the menu items arrive one after another. With motion turned off the
-//! sky is still, the logo is whole, and the menu is simply there.
+//! From the bottom up, and each layer owns less of the cell than the one below:
+//!
+//! 1. [`crate::ui::atmosphere`] paints a procedural true-colour sky — the only
+//!    layer that writes a cell's *background*, and the reason the sky can hold a
+//!    gradient at all. It draws the moon, so there is no moon glyph art here.
+//! 2. [`crate::ui::cathedral`] raises a silhouette on the horizon, then lights its
+//!    windows.
+//! 3. The wizard sprite and the light at its feet, in the doorway.
+//! 4. Rising motes, in the sky's own palette.
+//! 5. The wordmark, the menu, and whatever the menu has open.
+//!
+//! Nothing above the sky sets a background, so every glyph keeps the field behind
+//! it. That is the whole of the integration, and it is why the menu is drawn as a
+//! band along the bottom rather than a panel over the middle: a panel would have
+//! to paint its own surface and would shut the sky out of the frame.
+//!
+//! # How it is animated
+//!
+//! Everything is a function of one number — how long the screen has been open —
+//! so nothing drifts, and nothing needs to be stored. The stages are deliberate
+//! and ordered rather than simultaneous: the sky is there, the cathedral rises and
+//! wakes, the name is written, and the menu assembles. Then it all settles into a
+//! calm idle and never plays again, so returning from Settings or the journal
+//! costs nothing.
+//!
+//! The sky keeps its own, slower cadence: see [`Atmosphere::next_update`]. The
+//! title never asks the loop for sixty frames a second once the opening is over,
+//! because a still frame should cost nothing.
 //!
 //! # Destructive actions
 //!
@@ -20,22 +43,42 @@
 use std::time::Duration;
 
 use super::FrameContext;
-use super::art::{self, Banner};
+use super::atmosphere::{Atmosphere, Rgb, Sky};
+use super::cathedral;
 use super::journal::JournalScreen;
 use super::ornament;
 use super::screen::{Command, Screen};
 use super::settings::{Motion, Shared};
 use super::sprite;
-use super::theme::Palette;
 use crate::game::{Discovery, Figure, Progress};
 use crate::input::{Key, KeyCode};
-use crate::render::{AssetId, CanvasView, Frame, Rect, Style, glyph};
+use crate::render::{CanvasView, Frame, Rect, Style, glyph};
 use crate::save::{SaveData, SaveStore};
+use crate::terminal::{Capabilities, ColorSupport};
 
 /// How long the whole opening takes.
-const OPENING: Duration = Duration::from_millis(1400);
+const OPENING: Duration = Duration::from_millis(1900);
 /// How long the fade into the world takes.
 const DEPARTURE: Duration = Duration::from_millis(420);
+/// How many drifting motes the title carries.
+const MOTES: usize = 26;
+/// The name, letter-spaced. One row, because a terminal cell is about twice as
+/// tall as it is wide: any multi-row letterform is stretched into a smear by the
+/// cell grid, however correct the art is.
+const NAME: &str = "GRIMMOIRE";
+/// Columns between the letters of the name.
+const NAME_GAP: usize = 4;
+
+/// The inks the title's cathedral is painted in: a silhouette against a lit sky,
+/// with warm glass.
+const STONE: cathedral::Inks = cathedral::Inks {
+    stone: Rgb::new(19, 17, 29),
+    stone_high: Rgb::new(26, 23, 37),
+    edge: Rgb::new(74, 68, 98),
+    glass: Rgb::new(255, 186, 92),
+    door: Rgb::new(150, 98, 48),
+    dark_window: Rgb::new(10, 9, 18),
+};
 
 /// What a menu entry does.
 ///
@@ -79,7 +122,7 @@ pub struct TitleScreen {
     save: Option<SaveStore>,
     /// What the save holds, if there is a readable one.
     saved: Option<SaveData>,
-    portrait: Option<AssetId>,
+    portrait: Option<crate::render::AssetId>,
     settings: Shared,
     items: Vec<Item>,
     selected: usize,
@@ -92,12 +135,23 @@ pub struct TitleScreen {
     departure: Option<Action>,
     /// A line of feedback, for a disabled entry the player insisted on.
     note: String,
+    /// The sky, and its cache.
+    atmosphere: Atmosphere,
+    /// What the terminal can show. The field is generated in it, so it has to be
+    /// known before the first resolve rather than at compose time.
+    support: ColorSupport,
+    /// The area the field was resolved for; kept so `compose` can check it.
+    area: Rect,
 }
 
 impl TitleScreen {
     /// Creates the title screen over an optional save.
     #[must_use]
-    pub fn new(save: Option<SaveStore>, portrait: Option<AssetId>, settings: Shared) -> Self {
+    pub fn new(
+        save: Option<SaveStore>,
+        portrait: Option<crate::render::AssetId>,
+        settings: Shared,
+    ) -> Self {
         let saved = save.as_ref().and_then(|store| store.load());
         let has_save = saved.is_some();
         let has_journal = saved.as_ref().is_some_and(|data| !data.journal.is_empty());
@@ -137,6 +191,10 @@ impl TitleScreen {
                 enabled: true,
             },
         ];
+        let motion = settings.get().motion;
+        let support = ColorSupport::Ansi16;
+        let mut atmosphere = Atmosphere::new(title_sky(support), support);
+        atmosphere.set_moving(motion.ambience());
         let mut screen = TitleScreen {
             save,
             saved,
@@ -149,6 +207,9 @@ impl TitleScreen {
             leaving: None,
             departure: None,
             note: String::new(),
+            atmosphere,
+            support,
+            area: Rect::new(0, 0, 0, 0),
         };
         screen.select_first_enabled();
         screen
@@ -273,6 +334,59 @@ impl TitleScreen {
             })
             .unwrap_or_default()
     }
+
+    /// Where the horizon is, given the frame.
+    fn horizon(&self, area: Rect) -> u16 {
+        let ground = (area.height / 5).clamp(3, 6);
+        area.bottom().saturating_sub(ground)
+    }
+
+    /// The rows the wordmark block occupies: the name, its rule, its tagline.
+    fn logo_rows(&self, area: Rect) -> (u16, u16) {
+        let name_row = area.y.saturating_add((area.height / 12).clamp(1, 3));
+        (name_row, name_row.saturating_add(3))
+    }
+}
+
+/// A smooth 0-to-1 ramp, so a stage starts and ends without a jolt.
+fn stage(progress: f32, from: f32, to: f32) -> f32 {
+    if to <= from {
+        return f32::from(progress >= to);
+    }
+    let t = ((progress - from) / (to - from)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The title's own sky: a night with a larger moon and the horizon light swung
+/// left of centre, so the composition is not symmetrical about it.
+///
+/// A terminal that cannot show true colour gets [`Sky::night_basic`] instead,
+/// which is a different sky rather than a reduced one.
+fn title_sky(support: ColorSupport) -> Sky {
+    let mut sky = if support == ColorSupport::Ansi16 {
+        Sky::night_basic()
+    } else {
+        Sky::night()
+    };
+    sky.moon = Some(super::atmosphere::Moon {
+        u: 0.80,
+        v: 0.22,
+        radius: 0.042,
+        // A tight halo on the small palette: a wide one is a grey smear, because
+        // the only colour between white and the sky is not a colour at all.
+        halo: if support == ColorSupport::Ansi16 {
+            0.09
+        } else {
+            0.22
+        },
+    });
+    // A softer aurora than the default: at the top of a title it competes with
+    // the name, and a bright band behind a wordmark costs the wordmark its edge.
+    if support != ColorSupport::Ansi16 {
+        sky.aurora = Some(Rgb::new(84, 100, 176));
+    }
+    sky.glow_u = 0.34;
+    sky
 }
 
 impl Screen for TitleScreen {
@@ -327,12 +441,12 @@ impl Screen for TitleScreen {
         }
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('w') => {
+            KeyCode::Up | KeyCode::Char('w') | KeyCode::Left | KeyCode::Char('a') => {
                 self.move_selection(-1);
                 self.note.clear();
                 Command::None
             }
-            KeyCode::Down | KeyCode::Char('s') => {
+            KeyCode::Down | KeyCode::Char('s') | KeyCode::Right | KeyCode::Char('d') => {
                 self.move_selection(1);
                 self.note.clear();
                 Command::None
@@ -357,6 +471,12 @@ impl Screen for TitleScreen {
         if let Some(age) = self.leaving {
             self.leaving = Some(age.saturating_add(delta));
         }
+        // Reduced motion slows the sky down rather than stopping it; motion off
+        // holds it where it stands, without taking the sky away.
+        let motion = self.settings.get().motion;
+        self.atmosphere.set_moving(motion.ambience());
+        self.atmosphere.advance(delta);
+        self.atmosphere.resolve(self.area);
     }
 
     fn after_update(&mut self) -> Command {
@@ -366,26 +486,50 @@ impl Screen for TitleScreen {
         }
     }
 
+    fn on_resize(&mut self, area: Rect) {
+        self.area = area;
+        self.atmosphere.resolve(area);
+    }
+
+    fn on_capabilities(&mut self, capabilities: Capabilities) {
+        if capabilities.colors == self.support {
+            return;
+        }
+        self.support = capabilities.colors;
+        // A field resolved for the wrong terminal is recoloured everywhere, which
+        // only matters for a terminal that cannot show true colour at all — but
+        // that is exactly the case this exists for.
+        self.atmosphere = Atmosphere::new(title_sky(self.support), self.support);
+        self.atmosphere
+            .set_moving(self.settings.get().motion.ambience());
+        self.atmosphere.resolve(self.area);
+    }
+
     fn curtain(&self) -> bool {
         // The title brings the world in itself; a curtain on top would double it.
         false
     }
 
     fn is_animating(&self) -> bool {
-        // The sky is alive until the player leaves, unless they asked for less.
-        let motion = self.settings.get().motion;
-        self.leaving.is_some() || !self.settled(motion)
+        // The opening is the only thing that needs the animation rate. Once it has
+        // settled the sky drifts on its own slow clock, and the loop is free.
+        self.leaving.is_some() || !self.settled(self.settings.get().motion)
     }
 
     fn next_frame(&self) -> Option<Duration> {
         let motion = self.settings.get().motion;
         if self.leaving.is_some() || !self.settled(motion) {
-            Some(Duration::ZERO)
-        } else if motion.ambient_frames() {
-            Some(super::exploration::ambient_period())
-        } else {
-            None
+            return Some(Duration::ZERO);
         }
+        if !motion.ambience() {
+            return None;
+        }
+        // The sky's cadence and the ambient detail's, whichever comes first.
+        let ambient = super::exploration::ambient_period();
+        Some(match self.atmosphere.next_update() {
+            Some(sky) => sky.min(ambient),
+            None => ambient,
+        })
     }
 
     fn compose(&self, frame: &mut Frame, context: &FrameContext) {
@@ -394,329 +538,327 @@ impl Screen for TitleScreen {
         if area.is_empty() {
             return;
         }
-        self.compose_sky(frame, area, context, motion);
-        self.compose_logo(frame, area, context, motion);
-        self.compose_menu(frame, area, context, motion);
+        // The field owns every cell's background; everything below is drawn on
+        // top of it and inherits it.
+        if self.atmosphere.area() == area {
+            self.atmosphere.paint(frame);
+        }
+        let progress = self.opening(motion);
+        self.compose_scene(frame, area, context, progress);
+        self.compose_logo(frame, area, progress);
+        self.compose_menu(frame, area, context, progress);
         if let Some(overlay) = self.overlay {
             self.compose_overlay(frame, area, context, overlay);
         }
         if let Some(age) = self.leaving {
-            // A closing curtain from the middle outwards, so the world arrives
-            // rather than simply replacing the title.
-            let t = (age.as_secs_f32() / DEPARTURE.as_secs_f32()).clamp(0.0, 1.0);
-            let covered = (f32::from(area.height) * t).round() as u16;
-            if covered > 0 {
-                let mut view = frame.view(area);
-                let band = Rect::new(
-                    area.x,
-                    area.y + (area.height.saturating_sub(covered)) / 2,
-                    area.width,
-                    covered,
-                );
-                view.fill_style(
-                    band,
-                    Style::new()
-                        .with_fg(context.palette.background)
-                        .with_bg(context.palette.background),
-                );
-            }
+            self.compose_departure(frame, area, context, age);
         }
     }
 }
 
 impl TitleScreen {
-    /// The sky: stars, a moon, a horizon, and the chapel on it.
-    fn compose_sky(&self, frame: &mut Frame, area: Rect, context: &FrameContext, motion: Motion) {
-        let palette = &context.palette;
+    /// The real sky plus the horizon: the cathedral, the wizard, the light at its
+    /// feet and the motes rising off the ground.
+    fn compose_scene(&self, frame: &mut Frame, area: Rect, context: &FrameContext, progress: f32) {
+        let support = self.support;
+        let horizon = self.horizon(area);
         let mut view = frame.view(area);
-        let bounds = view.bounds();
-        view.fill_style(
-            bounds,
-            Style::new()
-                .with_fg(palette.accent_alt_dim)
-                .with_bg(palette.background),
-        );
 
-        let time = if motion.animates() {
-            self.age.as_secs_f32()
-        } else {
-            0.0
-        };
-
-        // Stars: one per cell, chosen by a hash of the position, twinkling on the
-        // clock. Deterministic, so the same sky comes back every time.
-        for y in 0..bounds.height {
-            for x in 0..bounds.width {
-                let seed =
-                    u32::from(x).wrapping_mul(73_856_093) ^ u32::from(y).wrapping_mul(19_349_663);
-                if seed % 97 != 0 {
-                    continue;
-                }
-                let twinkle = ((time * 1.6) + (seed % 100) as f32 * 0.13).sin();
-                let (ch, style) = if twinkle > 0.7 {
-                    (ornament::STAR, Style::new().with_fg(palette.focus).bold())
-                } else if twinkle > 0.0 {
-                    (
-                        ornament::STAR_OPEN,
-                        Style::new().with_fg(palette.text_secondary),
-                    )
-                } else {
-                    (ornament::DOT, palette.muted_style())
-                };
-                view.put_char(x, y, ch, style);
-            }
-        }
-
-        // The moon, high and to the far right, clear of the name.
-        let moon_x = bounds.right().saturating_sub(16);
-        let moon_y = bounds.y.saturating_add(1);
-        draw_moon(&mut view, moon_x, moon_y, palette, time);
-
-        // A horizon near the floor, with the chapel standing on it at the edge
-        // of the frame, where it frames the menu instead of competing with it.
-        let horizon = bounds.bottom().saturating_sub(3);
-        for x in 0..bounds.width {
+        // A rule along the horizon, so the ground reads as ground and the building
+        // has something to stand on.
+        for x in 0..area.width {
             view.put_char(
                 x,
                 horizon,
                 ornament::RULE_LIGHT,
-                Style::new().with_fg(palette.accent_alt_dim),
+                Style::new().with_fg(Rgb::new(60, 54, 84).to_color(support)),
             );
         }
-        let tower_left = bounds.right().saturating_sub(38);
-        art::draw_stencil(
-            &mut view,
-            tower_left,
-            horizon.saturating_sub(art::TOWER.len() as u16),
-            &art::TOWER,
-            Style::new().with_fg(palette.accent_alt_dim),
-        );
 
-        // A rune circle on the ground at the wizard's feet, turning and pulsing:
-        // the magic the game is about, drawn as the one shape a terminal grid
-        // makes well. It sits below the architecture so it never masks it.
-        let circle_x = bounds.right().saturating_sub(30);
-        let circle_y = horizon.saturating_sub(1);
-        let pulse = if motion.animates() {
-            0.5 + 0.5 * (time * 1.1).sin()
-        } else {
-            0.7
-        };
-        let ink = if pulse > 0.62 {
-            palette.accent_alt
-        } else {
-            palette.accent_alt_dim
-        };
-        for step in 0..20 {
-            let angle = step as f32 / 20.0 * std::f32::consts::TAU + time * 0.25;
-            let x = circle_x as f32 + angle.cos() * 7.0;
-            let y = circle_y as f32 + angle.sin() * 1.2;
-            if x < 0.0 || y < 0.0 {
-                continue;
-            }
-            let (x, y) = (x as u16, y as u16);
-            if x >= bounds.width || y >= bounds.height {
-                continue;
-            }
-            let glyph = if step % 4 == 0 {
-                ornament::STAR
-            } else {
-                ornament::DOT
-            };
-            view.put_char(x, y, glyph, Style::new().with_fg(ink));
+        // The building rises first and lights second, so the two stages read as
+        // one and not as a switch.
+        let risen = stage(progress, 0.08, 0.46);
+        let lit = stage(progress, 0.26, 0.78);
+        let space = horizon
+            .saturating_sub(area.y)
+            .saturating_sub(self.logo_bottom(area, progress));
+        if space >= 10 {
+            cathedral::draw(
+                &mut view,
+                horizon,
+                area.width,
+                space,
+                &cathedral::Look {
+                    inks: STONE,
+                    support,
+                    risen,
+                    lit,
+                },
+            );
         }
 
-        // The wizard stands on the horizon, so the first thing the game shows is
-        // the character the player is about to be.
+        // The wizard, standing in the doorway. It is drawn after the building so
+        // its silhouette is not eaten by the doorway's light.
         let hero = sprite::for_figure(Figure::Mage);
-        let hero_x = bounds.right().saturating_sub(30);
+        // To the left of the doorway, not in it: a figure standing in the middle of
+        // the west front covers the rose window above it, which is the one thing in
+        // the building worth seeing.
+        let hero_x = area.centered_x(hero.width).saturating_sub(6);
         let hero_y = horizon.saturating_sub(hero.height.saturating_sub(1));
-        // It breathes: the wizard's own companion poses, alternately, on the
-        // clock — the base art is one of them, never altered.
+        let breath = (self.age.as_secs_f32() * 0.9).sin() > 0.3;
         let pose = sprite::Pose::Idle {
-            breathing: motion.animates() && (time * 0.9).sin() > 0.3,
+            breathing: context.motion.ambience() && breath,
         };
+        // A pool of light at the feet, so the figure is standing somewhere.
+        for dx in 0..8u16 {
+            for dy in 0..2u16 {
+                let x = hero_x.saturating_sub(1).saturating_add(dx);
+                let y = hero_y.saturating_add(hero.height).saturating_add(dy);
+                if x < area.width && y < area.height {
+                    let glow =
+                        Rgb::new(255, 236, 190).mix(Rgb::new(10, 9, 18), 0.35 + dy as f32 * 0.3);
+                    view.put_char(x, y, '▁', Style::new().with_fg(glow.to_color(support)));
+                }
+            }
+        }
         sprite::draw(&mut view, hero_x, hero_y, hero, pose, hero.inks, false);
 
-        // Runes rising off the ground, so the sky is not the only thing moving.
-        if motion.animates() {
-            for index in 0..14 {
-                let seed = index as u32;
-                let start_x =
-                    bounds.x + (seed.wrapping_mul(37) % u32::from(bounds.width.max(1))) as u16;
-                let rise = (time * 0.28) + (seed % 7) as f32;
-                let travel = (rise * 3.0) % f32::from(bounds.height.max(1));
-                let y = horizon.saturating_sub(travel as u16);
-                if y <= bounds.y {
-                    continue;
-                }
-                view.put_char(
-                    start_x,
-                    y,
-                    ornament::rune(index),
-                    Style::new().with_fg(palette.accent_dim),
-                );
-            }
+        // Motes rising off the ground, warm against the cold sky.
+        if context.motion.ambience() {
+            self.compose_motes(&mut view, area, horizon, support);
         }
     }
 
-    /// The name, in glyphs, with a shadow and a rule beneath it.
-    fn compose_logo(&self, frame: &mut Frame, area: Rect, context: &FrameContext, motion: Motion) {
-        let palette = &context.palette;
-        let banner = art::banner_for_width(area.width.saturating_sub(8));
-        if matches!(banner, Banner::None) {
-            return;
+    /// The lowest row the logo block uses, so the building knows what is above it.
+    fn logo_bottom(&self, area: Rect, progress: f32) -> u16 {
+        let (_, bottom) = self.logo_rows(area);
+        if progress > 0.2 {
+            bottom.saturating_sub(area.y)
+        } else {
+            area.height / 6
         }
-        let progress = self.opening(motion);
-        // The name arrives before the menu does.
-        let reveal = (progress / 0.6).clamp(0.0, 1.0);
-        let row = area.y + area.height / 6;
-        let mut view = frame.view(area);
-        let width = banner.width();
-        let start = area.centered_x(width);
-        let lines = banner.lines();
-        let columns = (reveal * f32::from(width)).round() as usize;
+    }
 
-        // A shadow one row down, so the name sits on the sky rather than in it.
-        if reveal > 0.9 {
-            art::draw_banner(
-                &mut view,
-                banner,
-                row.saturating_add(1),
-                1.0,
-                Style::new().with_fg(palette.background),
-                Style::new().with_fg(palette.background),
-            );
-        }
-        // The name itself, in a warm ramp: gold at the top, ember at the base.
-        for (offset, line) in lines.iter().enumerate() {
-            let ink = if offset * 2 < lines.len() {
-                palette.focus
-            } else {
-                palette.effect
+    /// Motes drifting up from the ground, in true colour.
+    fn compose_motes(
+        &self,
+        view: &mut CanvasView,
+        area: Rect,
+        horizon: u16,
+        support: ColorSupport,
+    ) {
+        let time = self.age.as_secs_f32();
+        for index in 0..MOTES {
+            let seed = index as u32;
+            let rand = |n: u32| {
+                let value = seed
+                    .wrapping_mul(2_654_435_761)
+                    .wrapping_add(n.wrapping_mul(40_503));
+                (value >> 8) as f32 / 16_777_216.0
             };
-            let mut style = Style::new().with_fg(ink).bold();
-            if reveal < 1.0 {
-                // The leading edge of the reveal is the brightest part.
-                let edge = columns.saturating_sub(offset * 3) as u16;
-                if edge <= 2 {
-                    style = Style::new().with_fg(palette.text).bold();
-                }
+            let rise = 0.05 + rand(1) * 0.10;
+            let life = (time * rise + rand(2)).fract();
+            let fade = (life * std::f32::consts::PI).sin().max(0.0);
+            if fade <= 0.05 {
+                continue;
             }
-            let visible: String = line.chars().take(columns).collect();
-            view.put_str(start, row.saturating_add(offset as u16), &visible, style);
+            let drift = (rand(3) - 0.5) * 0.05;
+            let u = (rand(4) + time * drift).rem_euclid(1.0);
+            let x = (u * f32::from(area.width)) as u16;
+            let travel = (life * f32::from(horizon.saturating_sub(area.y) + 3)) as u16;
+            let y = horizon.saturating_sub(travel);
+            if x >= area.width || y >= area.height {
+                continue;
+            }
+            let warm = Rgb::new(255, 214, 150).mix(Rgb::new(120, 90, 160), 1.0 - fade);
+            let ch = if fade > 0.72 {
+                '✧'
+            } else if fade > 0.35 {
+                '·'
+            } else {
+                '.'
+            };
+            view.put_char(x, y, ch, Style::new().with_fg(warm.to_color(support)));
+        }
+    }
+
+    /// The name, its rule and its tagline.
+    fn compose_logo(&self, frame: &mut Frame, area: Rect, progress: f32) {
+        let support = self.support;
+        let (name_row, _) = self.logo_rows(area);
+        let mut view = frame.view(area);
+
+        // The name is written, one column at a time, from the left.
+        let letters: Vec<char> = NAME.chars().collect();
+        let total = letters.len() * (1 + NAME_GAP);
+        let reveal = (stage(progress, 0.32, 0.62) * total as f32).round() as usize;
+        let start = area.centered_x(total as u16);
+        let last = letters.len().saturating_sub(1).max(1) as f32;
+        for (index, letter) in letters.iter().enumerate() {
+            let column = start as usize + index * (1 + NAME_GAP);
+            if column > start as usize + reveal && reveal < total {
+                break;
+            }
+            // Gold at the head of the word, ember at the tail.
+            let t = index as f32 / last;
+            let ink = Rgb::new(255, 240, 196).mix(Rgb::new(236, 116, 96), t);
+            // The leading edge of the reveal is the brightest part of the word.
+            let at_edge = reveal < total && column + 2 >= start as usize + reveal;
+            if at_edge {
+                view.put_char(
+                    column as u16,
+                    name_row,
+                    *letter,
+                    Style::new()
+                        .with_fg(Rgb::new(255, 250, 236).to_color(support))
+                        .bold(),
+                );
+            } else {
+                view.put_str(
+                    column as u16,
+                    name_row,
+                    &letter.to_string(),
+                    Style::new().with_fg(ink.to_color(support)).bold(),
+                );
+            }
         }
 
-        if progress > 0.55 {
-            let rule_row = row.saturating_add(lines.len() as u16).saturating_add(1);
+        // A rule under the name, with a diamond in the middle of it.
+        if progress > 0.50 {
+            let rule_width = area.width.saturating_sub(8).min(46);
+            let rule_row = name_row.saturating_add(1);
             ornament::rule(
                 &mut view,
-                area.centered_x(width),
+                area.centered_x(rule_width),
                 rule_row,
-                width,
-                Style::new().with_fg(palette.accent_dim),
+                rule_width,
+                Style::new().with_fg(Rgb::new(120, 96, 128).to_color(support)),
             );
+            let rule_left = area.centered_x(rule_width);
+            for x in [
+                rule_left,
+                rule_left.saturating_add(rule_width / 2),
+                rule_left.saturating_add(rule_width.saturating_sub(1)),
+            ] {
+                view.put_char(
+                    x,
+                    rule_row,
+                    '◆',
+                    Style::new().with_fg(Rgb::new(206, 154, 122).to_color(support)),
+                );
+            }
+        }
+
+        // The tagline.
+        if progress > 0.62 {
             let tagline = "a dark-fantasy tale, drawn entirely in glyphs";
             view.put_str(
                 area.centered_x(glyph::display_width(tagline)),
-                rule_row.saturating_add(1),
+                name_row.saturating_add(2),
                 tagline,
-                Style::new().with_fg(palette.text_muted),
+                Style::new().with_fg(Rgb::new(186, 176, 210).to_color(support)),
             );
         }
     }
 
-    /// The menu, and what the save holds.
-    fn compose_menu(&self, frame: &mut Frame, area: Rect, context: &FrameContext, motion: Motion) {
+    /// The menu, along the bottom, on the dark ground where it can be read.
+    fn compose_menu(&self, frame: &mut Frame, area: Rect, context: &FrameContext, progress: f32) {
         let palette = &context.palette;
         let mut view = frame.view(area);
-        let progress = self.opening(motion);
-        let banner = art::banner_for_width(area.width.saturating_sub(8));
-        let logo_rows = if matches!(banner, Banner::None) {
-            0
-        } else {
-            banner.height() + 3
-        };
-        let top = area
-            .y
-            .saturating_add(area.height / 6)
-            .saturating_add(logo_rows)
-            .saturating_add(1);
-        let row_width = 44u16.min(area.width);
-        let left = area.centered_x(row_width);
+        let row = area.bottom().saturating_sub(3);
+        if row <= area.y {
+            return;
+        }
 
+        // The labels, laid end to end and centred.
+        let gap = 5u16;
+        let mut labels: Vec<(usize, u16)> = Vec::new();
+        let mut width = 0u16;
         for (index, item) in self.items.iter().enumerate() {
-            // Items arrive one after another, so the menu assembles rather than
-            // appearing.
-            let order = 0.6 + index as f32 * 0.08;
-            let shown = if !motion.animates() {
-                1.0
-            } else {
-                ((progress - order) / 0.12).clamp(0.0, 1.0)
-            };
-            if shown <= 0.01 {
+            let shown = stage(
+                progress,
+                0.58 + index as f32 * 0.05,
+                0.74 + index as f32 * 0.05,
+            );
+            if shown <= 0.0 {
                 continue;
             }
-            let y = top.saturating_add(index as u16 * 2);
-            if y >= area.bottom() {
-                break;
-            }
+            labels.push((index, width));
+            width = width
+                .saturating_add(glyph::display_width(item.label))
+                .saturating_add(gap);
+        }
+        if labels.is_empty() {
+            // Nothing has arrived yet: no band, or the opening shows an empty
+            // dark strip sitting on the ground for no reason.
+            return;
+        }
+        let width = width.saturating_sub(gap);
+        let left = area.centered_x(width);
+
+        // A dark band behind the menu. Over the ground it is almost invisible; it
+        // is here so the labels are readable whatever the sky behind them is doing.
+        view.fill_style(
+            Rect::new(left.saturating_sub(4), row, width.saturating_add(8), 1),
+            Style::new()
+                .with_bg(palette.background)
+                .with_fg(palette.background),
+        );
+
+        for (index, offset) in labels {
+            let item = &self.items[index];
+            let x = left.saturating_add(offset);
             let selected = index == self.selected;
             let available = item.enabled;
-
             if selected {
                 view.fill_style(
-                    Rect::new(left.saturating_sub(2), y, row_width, 1),
+                    Rect::new(
+                        x.saturating_sub(2),
+                        row,
+                        glyph::display_width(item.label) + 4,
+                        1,
+                    ),
                     Style::new().with_bg(palette.surface_raised),
                 );
                 view.put_char(
-                    left.saturating_sub(1),
-                    y,
+                    x.saturating_sub(1),
+                    row,
                     ornament::SELECTOR,
                     Style::new().with_fg(palette.focus).bold(),
                 );
             }
-            let (label_style, note_style) = match (selected, available) {
-                (true, _) => (
-                    Style::new().with_fg(palette.focus).bold(),
-                    Style::new().with_fg(palette.text_secondary),
-                ),
-                (false, true) => (Style::new().with_fg(palette.text), palette.muted_style()),
-                (false, false) => (palette.muted_style(), palette.muted_style()),
+            let style = match (selected, available) {
+                (true, _) => Style::new().with_fg(palette.focus).bold(),
+                (false, true) => Style::new().with_fg(palette.text),
+                (false, false) => palette.muted_style(),
             };
-            view.put_str(left, y, item.label, label_style);
-            let note_x = left
-                .saturating_add(row_width)
-                .saturating_sub(glyph::display_width(item.note) + 2);
-            view.put_str(note_x, y, item.note, note_style);
+            view.put_str(x, row, item.label, style);
         }
 
-        // The bottom of the screen: what is saved, and how to work the menu.
-        let hint_row = area.bottom().saturating_sub(2);
-        let summary = match &self.saved {
-            Some(data) => format!(
-                "saved in {} · {} found · {} places seen",
-                data.area.replace('-', " "),
-                data.journal.len(),
-                data.visited.len()
-            ),
-            None => "no journey saved yet".to_string(),
-        };
-        view.put_str(
-            area.centered_x(glyph::display_width(&summary)),
-            hint_row,
-            &summary,
-            palette.muted_style(),
-        );
-
+        // The bottom line: what is saved, the note, and the keys. It arrives with
+        // the menu, not before it.
+        if progress < 0.74 {
+            return;
+        }
+        let hint_row = area.bottom().saturating_sub(1);
+        let selected_note = self
+            .items
+            .get(self.selected)
+            .filter(|item| item.enabled)
+            .map(|item| item.note)
+            .unwrap_or("");
         let hint = if self.note.is_empty() {
-            "w/s choose · enter select · esc quit".to_string()
+            if selected_note.is_empty() {
+                "w/s choose · enter select · esc quit".to_string()
+            } else {
+                format!("{selected_note}  ·  w/s choose · enter select · esc quit")
+            }
         } else {
             self.note.clone()
         };
         view.put_str(
             area.centered_x(glyph::display_width(&hint)),
-            hint_row.saturating_add(1),
+            hint_row,
             &hint,
             if self.note.is_empty() {
                 palette.muted_style()
@@ -724,6 +866,53 @@ impl TitleScreen {
                 Style::new().with_fg(palette.effect)
             },
         );
+
+        // What is saved, when there is room for it beside the keys rather than
+        // through them.
+        if progress > 0.8 {
+            let summary = match &self.saved {
+                Some(data) => format!(
+                    "saved in {} · {} found · {} places seen",
+                    data.area.replace('-', " "),
+                    data.journal.len(),
+                    data.visited.len()
+                ),
+                None => "no journey yet".to_string(),
+            };
+            let needed = glyph::display_width(&summary) + glyph::display_width(&hint) + 4;
+            if needed <= area.width {
+                view.put_str(2, hint_row, &summary, palette.muted_style());
+            }
+        }
+    }
+
+    /// The fade into the world: the ground rises up the screen with a lit edge.
+    fn compose_departure(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        context: &FrameContext,
+        age: Duration,
+    ) {
+        let t = (age.as_secs_f32() / DEPARTURE.as_secs_f32()).clamp(0.0, 1.0);
+        let covered = (f32::from(area.height) * t).round() as u16;
+        if covered == 0 {
+            return;
+        }
+        let support = self.support;
+        let mut view = frame.view(area);
+        // A thin lit lip, then the dark behind it, so the sweep reads as a wave
+        // rather than as a curtain being pulled down.
+        for step in 0..covered {
+            let y = area.bottom().saturating_sub(1 + step);
+            let lip = Rgb::new(255, 196, 120).mix(Rgb::new(12, 10, 20), step as f32 / 3.0);
+            view.fill_style(
+                Rect::new(area.x, y, area.width, 1),
+                Style::new()
+                    .with_fg(if step < 2 { lip } else { Rgb::new(12, 10, 20) }.to_color(support))
+                    .with_bg(context.palette.background),
+            );
+        }
     }
 
     /// A panel over the menu: a confirmation, or the settings.
@@ -843,38 +1032,6 @@ impl TitleScreen {
     }
 }
 
-/// Draws a moon: a disc with a crescent of shade, and a halo.
-fn draw_moon(view: &mut CanvasView, x: u16, y: u16, palette: &Palette, time: f32) {
-    const MOON: [&str; 5] = [
-        "   ▄██▄  ",
-        "  ██████ ",
-        " ██████▓ ",
-        "  █████▓ ",
-        "   ▀██▀  ",
-    ];
-    let pulse = if (time * 1.3).sin() > 0.6 {
-        Style::new().with_fg(palette.text).bold()
-    } else {
-        Style::new().with_fg(palette.text_secondary).bold()
-    };
-    art::draw_stencil(view, x, y, &MOON, pulse);
-    // A thin halo, drawn only where nothing else is.
-    for (offset, halo) in [(0i32, '·'), (1, '✧')] {
-        view.put_char(
-            x.saturating_sub(1),
-            y.saturating_add(2 + offset as u16),
-            halo,
-            Style::new().with_fg(palette.accent_alt_dim),
-        );
-        view.put_char(
-            x.saturating_add(9),
-            y.saturating_add(2 - offset as u16),
-            halo,
-            Style::new().with_fg(palette.accent_alt_dim),
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -913,7 +1070,11 @@ mod tests {
     }
 
     fn screen(save: Option<SaveStore>) -> TitleScreen {
-        TitleScreen::new(save, None, Shared::new(crate::ui::Settings::new()))
+        let mut screen = TitleScreen::new(save, None, Shared::new(crate::ui::Settings::new()));
+        screen.on_capabilities(Capabilities {
+            colors: crate::terminal::ColorSupport::TrueColor,
+        });
+        screen
     }
 
     fn saved_store(tag: &str) -> (SaveStore, PathBuf) {
@@ -929,7 +1090,10 @@ mod tests {
         (store, directory)
     }
 
-    fn compose(screen: &TitleScreen, width: u16, height: u16, motion: Motion) -> String {
+    /// Composes a screen exactly as the application does: the size is announced
+    /// first, so the field is resolved for the frame it is about to be drawn in.
+    fn compose(screen: &mut TitleScreen, width: u16, height: u16, motion: Motion) -> String {
+        screen.on_resize(crate::render::Rect::from_size(width, height));
         let mut canvas = Canvas::new(width, height);
         canvas.clear_with(Palette::EXTENDED.backdrop());
         let mut images: Vec<ImagePlacement> = Vec::new();
@@ -949,8 +1113,8 @@ mod tests {
 
     #[test]
     fn the_menu_offers_every_entry_and_greys_out_what_cannot_be_taken() {
-        let screen = screen(None);
-        let text = compose(&screen, 100, 34, Motion::Off);
+        let mut screen = screen(None);
+        let text = compose(&mut screen, 100, 34, Motion::Off);
         for label in ["New Game", "Continue", "Journal", "Settings", "Quit"] {
             assert!(text.contains(label), "{label} is missing:\n{text}");
         }
@@ -964,10 +1128,10 @@ mod tests {
     #[test]
     fn a_save_turns_continue_on_and_names_where_it_left_off() {
         let (store, directory) = saved_store("continue");
-        let screen = screen(Some(store));
+        let mut screen = screen(Some(store));
         assert!(screen.is_enabled(Action::Continue));
         assert!(screen.is_enabled(Action::Journal));
-        let text = compose(&screen, 100, 34, Motion::Off);
+        let text = compose(&mut screen, 120, 34, Motion::Off);
         assert!(
             text.contains("hollow village"),
             "the save is not summarised:\n{text}"
@@ -978,11 +1142,10 @@ mod tests {
 
     #[test]
     fn navigation_skips_entries_that_cannot_be_taken() {
-        let screen = screen(None);
+        let mut screen = screen(None);
         // New Game is first. Down must land on Settings, skipping Continue and
         // Journal, because walking onto a dead entry and having it do nothing is
         // worse than not offering it.
-        let mut screen = screen;
         assert_eq!(Some(Action::NewGame), screen.selected_action());
         screen.handle_key(Key::new(KeyCode::Down));
         assert_eq!(Some(Action::Settings), screen.selected_action());
@@ -1003,7 +1166,7 @@ mod tests {
         assert_eq!(Some(Overlay::ConfirmNewGame), screen.overlay());
         assert!(!screen.is_leaving(), "nothing has happened yet");
 
-        let text = compose(&screen, 100, 34, Motion::Off);
+        let text = compose(&mut screen, 100, 34, Motion::Off);
         assert!(text.contains("replace the journey"), "{text}");
         assert!(text.contains("keep what I have"), "{text}");
 
@@ -1071,6 +1234,9 @@ mod tests {
     fn settings_change_how_the_game_moves() {
         let settings = Shared::new(crate::ui::Settings::new());
         let mut screen = TitleScreen::new(None, None, settings.clone());
+        screen.on_capabilities(Capabilities {
+            colors: crate::terminal::ColorSupport::TrueColor,
+        });
         // With nothing saved, Continue and Journal are skipped, so one step down
         // from New Game reaches Settings.
         screen.handle_key(Key::new(KeyCode::Down));
@@ -1080,7 +1246,7 @@ mod tests {
         assert_eq!(Motion::Full, settings.get().motion);
         screen.handle_key(Key::new(KeyCode::Enter));
         assert_eq!(Motion::Reduced, settings.get().motion);
-        let text = compose(&screen, 100, 34, Motion::Reduced);
+        let text = compose(&mut screen, 100, 34, Motion::Reduced);
         assert!(text.contains("reduced"), "{text}");
     }
 
@@ -1111,15 +1277,22 @@ mod tests {
     }
 
     #[test]
-    fn the_opening_settles_and_then_stops_asking_for_frames() {
+    fn the_opening_settles_and_then_stops_asking_for_sixty_frames() {
         let mut screen = screen(None);
         assert!(screen.is_animating(), "the opening is playing");
-        for _ in 0..40 {
+        // The sky keeps its own, slower cadence while the opening plays.
+        assert_eq!(Some(Duration::ZERO), screen.next_frame());
+        for _ in 0..60 {
             screen.update(Duration::from_millis(100));
         }
-        assert!(!screen.is_animating());
-        // With motion on it still breathes, slowly.
-        assert!(screen.next_frame().is_some());
+        assert!(!screen.is_animating(), "the opening is over");
+        // And afterwards it breathes on the sky's clock, not the frame clock.
+        let wait = screen.next_frame().expect("the sky still drifts");
+        assert!(
+            wait > Duration::ZERO,
+            "the idle must not ask for every frame"
+        );
+        assert!(wait <= super::super::exploration::ambient_period());
     }
 
     #[test]
@@ -1131,60 +1304,125 @@ mod tests {
         let settings = Shared::new(crate::ui::Settings {
             motion: Motion::Off,
         });
-        let still = TitleScreen::new(None, None, settings);
+        let mut still = TitleScreen::new(None, None, settings);
         assert!(!still.is_animating(), "motion off means motion off");
         assert_eq!(None, still.next_frame(), "and no ambient frames either");
-        let text = compose(&still, 100, 34, Motion::Off);
+        let text = compose(&mut still, 100, 34, Motion::Off);
         assert!(
             text.contains("New Game"),
             "the menu is still usable:\n{text}"
         );
+        // The sky is drawn once and then held, but it is still *there*: the
+        // field is atmosphere, not an effect that motion switches off.
+        assert!(!still.atmosphere.is_moving());
+        assert!(!still.atmosphere.field().bounds().is_empty());
         let _ = screen.age;
     }
 
     #[test]
     fn composition_is_safe_at_any_size() {
-        let screen = screen(None);
+        let mut screen = screen(None);
         for width in [0, 1, 20, 40, 60, 80, 120, 240] {
             for height in [0, 1, 6, 12, 24, 40, 60] {
-                let _ = compose(&screen, width, height, Motion::Full);
+                let _ = compose(&mut screen, width, height, Motion::Full);
             }
         }
     }
 
     #[test]
     fn every_composed_cell_owns_its_background() {
-        let screen = screen(None);
-        let mut canvas = Canvas::new(100, 34);
-        canvas.clear_with(Palette::EXTENDED.backdrop());
-        let mut images = Vec::new();
-        {
-            let mut frame = Frame::begin(&mut canvas, &mut images);
-            screen.compose(&mut frame, &context(Motion::Full));
-        }
-        for y in 0..canvas.height() {
-            for x in 0..canvas.width() {
-                assert_ne!(
-                    Some(crate::render::Color::Default),
-                    canvas.get(x, y).map(|cell| cell.style.bg),
-                    "cell ({x}, {y}) would show the terminal background"
-                );
+        let mut screen = screen(None);
+        for motion in [Motion::Full, Motion::Off] {
+            screen.on_resize(crate::render::Rect::from_size(100, 34));
+            let mut canvas = Canvas::new(100, 34);
+            canvas.clear_with(Palette::EXTENDED.backdrop());
+            let mut images = Vec::new();
+            {
+                let mut frame = Frame::begin(&mut canvas, &mut images);
+                screen.compose(&mut frame, &context(motion));
+            }
+            for y in 0..canvas.height() {
+                for x in 0..canvas.width() {
+                    assert_ne!(
+                        Some(crate::render::Color::Default),
+                        canvas.get(x, y).map(|cell| cell.style.bg),
+                        "{motion:?}: cell ({x}, {y}) would show the terminal background"
+                    );
+                }
             }
         }
     }
 
     #[test]
     fn the_title_is_composed_of_one_column_glyphs_only() {
-        let screen = screen(None);
-        let text = compose(&screen, 100, 34, Motion::Off);
-        for ch in text.chars() {
-            if ch == '\n' || ch == ' ' {
-                continue;
+        let mut screen = screen(None);
+        for motion in [Motion::Full, Motion::Off] {
+            let text = compose(&mut screen, 120, 34, motion);
+            for ch in text.chars() {
+                if ch == '\n' || ch == ' ' {
+                    continue;
+                }
+                assert!(
+                    crate::render::glyph::is_drawable(ch),
+                    "{ch:?} would desynchronise the frame"
+                );
             }
-            assert!(
-                crate::render::glyph::is_drawable(ch),
-                "{ch:?} would desynchronise the frame"
-            );
         }
+    }
+
+    #[test]
+    fn the_field_survives_beneath_the_scenery() {
+        // The integration's whole claim: a glyph drawn over the sky keeps the sky
+        // as its background, and the sky is not the terminal's own colour.
+        let mut screen = screen(None);
+        screen.on_resize(crate::render::Rect::from_size(120, 34));
+        for _ in 0..40 {
+            screen.update(Duration::from_millis(100));
+        }
+        let mut canvas = Canvas::new(120, 34);
+        canvas.clear_with(Palette::EXTENDED.backdrop());
+        let mut images = Vec::new();
+        {
+            let mut frame = Frame::begin(&mut canvas, &mut images);
+            screen.compose(&mut frame, &context(Motion::Full));
+        }
+        // Somewhere up in the sky there is a cell whose glyph is the half block the
+        // field draws and whose two colours differ.
+        let mut two_sample = 0;
+        for y in 0..canvas.height() {
+            for x in 0..canvas.width() {
+                let cell = canvas.get(x, y).expect("cell");
+                if cell.ch == crate::ui::atmosphere::HALF_BLOCK {
+                    if let (Some(fg), Some(bg)) = (cell.style.fg.as_rgb(), cell.style.bg.as_rgb()) {
+                        if fg != bg {
+                            two_sample += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            two_sample > 20,
+            "the field is not under the title: only {two_sample} two-sample cells"
+        );
+    }
+
+    #[test]
+    fn the_cathedral_is_drawn_and_its_windows_light() {
+        let mut screen = screen(None);
+        // Early in the opening the building has not risen.
+        screen.on_resize(crate::render::Rect::from_size(120, 34));
+        let early = compose(&mut screen, 120, 34, Motion::Full);
+        for _ in 0..40 {
+            screen.update(Duration::from_millis(100));
+        }
+        let settled = compose(&mut screen, 120, 34, Motion::Full);
+        assert!(
+            settled.matches('█').count() > early.matches('█').count(),
+            "the building did not rise: {} then {}",
+            early.matches('█').count(),
+            settled.matches('█').count()
+        );
+        assert!(settled.contains('▲'), "the roof finial is missing");
     }
 }

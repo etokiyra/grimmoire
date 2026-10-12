@@ -105,7 +105,10 @@ out += suspended + resumed + title
 checks = [
     ("entered the alternate screen", b"\x1b[?1049h" in out),
     ("hid the cursor", b"\x1b[?25l" in out),
-    ("composed the ASCII world", b"\xe2\x80\xa2" in out or b"#" in out),
+    # The world's own status line. The previous predicate here was `b"#" in out`,
+    # which the *title's* tower stencil satisfied: it never once tested the world,
+    # and it stopped looking true the day the title stopped drawing that tower.
+    ("composed the ASCII world", b"Ruined Chapel" in out),
     # The title is the first thing the game says, and it says it in glyphs.
     ("composed the title screen", b"New Game" in title),
     # The wizard's outline ink. Nothing else in the game draws in it, and the

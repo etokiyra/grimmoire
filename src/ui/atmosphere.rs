@@ -378,16 +378,49 @@ impl Sky {
             }),
             stars: 1.0,
             aurora: Some(Rgb::new(96, 122, 220)),
-            // Only the top quarter of the field drifts, and only four times a
+            // Only the top fifth of the field drifts, and only four times a
             // second. Both numbers are load-bearing rather than decorative: the
-            // rows outside this band are drawn once and never retransmitted, and
-            // the tick rate is what keeps an animated sky off the frame budget.
+            // rows outside this band are drawn once and never retransmitted, and a
+            // cell of true colour costs about forty bytes of escape sequence, so
+            // the band's height is very nearly the whole cost of a living sky.
             drift: Drift::Band {
                 top: 0.0,
-                bottom: 0.26,
+                bottom: 0.20,
             },
             tick_rate: 4.0,
         }
+    }
+
+    /// A night sky built out of the sixteen classic colours, for a terminal that
+    /// cannot show more.
+    ///
+    /// Reducing a *smooth* ramp a cell at a time collapses it: every dark stop
+    /// snaps to black, and the sky becomes one flat rectangle. So this sky does
+    /// not reduce into the small palette — its stops are **chosen from** it, and
+    /// the grid steps between them. It is a deliberate poster, not a failure.
+    #[must_use]
+    pub fn night_basic() -> Self {
+        let mut sky = Sky::night();
+        sky.ramp = Ramp::new(vec![
+            Rgb::new(0, 0, 0),     // black: the zenith
+            Rgb::new(0, 0, 170),   // blue: the upper sky
+            Rgb::new(85, 85, 255), // bright blue: the middle
+            Rgb::new(170, 0, 170), // magenta: towards the horizon
+            Rgb::new(255, 85, 85), // bright red: the horizon itself
+            Rgb::new(85, 85, 85),  // grey: the first of the ground
+            Rgb::new(0, 0, 0),     // black: the ground
+        ]);
+        // The glow is red, not the true-colour sky's yellow: mixing yellow into
+        // a blue sky produces olive and grey, and every one of those is a band
+        // the small palette would have to spend on nothing.
+        sky.glow = Rgb::new(255, 85, 85);
+        sky.glow_strength = 0.55;
+        sky.glow_width = 0.22;
+        // A second tint has nowhere to go in sixteen colours, and the stars are
+        // the only fine detail the small palette can still carry.
+        sky.aurora = None;
+        sky.stars = 1.6;
+        sky
     }
 
     /// The same sky, held still.
@@ -438,7 +471,10 @@ impl Sky {
         if let Some(moon) = self.moon {
             let light = moon.light(u, v, aspect);
             if light > 0.0 {
-                colour = colour.mix(Rgb::new(252, 248, 236), (light * 0.88).clamp(0.0, 1.0));
+                // Pure white, not a warm off-white: on a sixteen-colour terminal
+                // everything near white reduces to bright yellow, and a yellow
+                // moon is the one thing the smallest palette cannot pass off.
+                colour = colour.mix(Rgb::new(255, 255, 255), (light * 0.90).clamp(0.0, 1.0));
             }
         }
 
@@ -475,6 +511,10 @@ impl Sky {
 pub struct Atmosphere {
     sky: Sky,
     support: ColorSupport,
+    /// Whether the player has allowed motion. When they have not, the field keeps
+    /// whatever it has drawn and simply stops changing; the sky's own `drift` is
+    /// left alone so turning motion back on resumes it.
+    moving: bool,
     elapsed: f32,
     tick: i64,
     cache: Canvas,
@@ -489,6 +529,7 @@ impl Atmosphere {
         Atmosphere {
             sky,
             support,
+            moving: true,
             elapsed: 0.0,
             tick: 0,
             cache: Canvas::new(0, 0),
@@ -507,6 +548,45 @@ impl Atmosphere {
     #[must_use]
     pub const fn support(&self) -> ColorSupport {
         self.support
+    }
+
+    /// Turns the drift on or off without changing the picture.
+    ///
+    /// This is how a screen honours reduced motion: the field is drawn once and
+    /// then held, and the sky's own drift is remembered rather than overwritten,
+    /// so turning motion back on resumes it. Turning it off does not blank the
+    /// field: the atmosphere is atmosphere, not an effect.
+    pub fn set_moving(&mut self, moving: bool) {
+        if self.moving == moving {
+            return;
+        }
+        self.moving = moving;
+        if !moving {
+            // Hold the picture: leave `cache` alone, only stop refreshing it.
+            self.stale = false;
+        }
+        self.tick = self.tick_now();
+    }
+
+    /// Whether the field is allowed to drift.
+    #[must_use]
+    pub const fn is_moving(&self) -> bool {
+        self.moving
+    }
+
+    /// The drift actually in force.
+    #[must_use]
+    const fn drift(&self) -> Drift {
+        if self.moving {
+            self.sky.drift
+        } else {
+            Drift::Still
+        }
+    }
+
+    /// The whole tick index `elapsed` currently falls in.
+    fn tick_now(&self) -> i64 {
+        (self.elapsed * self.sky.tick_rate.max(f32::EPSILON)) as i64
     }
 
     /// The resolved field, for tests and diagnostics.
@@ -535,12 +615,11 @@ impl Atmosphere {
     /// Returns `false` immediately for a still sky, and for every call that does
     /// not reach the next tick.
     pub fn advance(&mut self, delta: Duration) -> bool {
-        if !self.sky.drift.animates() {
+        if !self.drift().animates() {
             return false;
         }
         self.elapsed += delta.as_secs_f32();
-        let rate = self.sky.tick_rate.max(f32::EPSILON);
-        let tick = (self.elapsed * rate) as i64;
+        let tick = self.tick_now();
         if tick <= self.tick {
             return false;
         }
@@ -556,7 +635,7 @@ impl Atmosphere {
     /// to the animation rate.
     #[must_use]
     pub fn next_update(&self) -> Option<Duration> {
-        if !self.sky.drift.animates() {
+        if !self.drift().animates() {
             return None;
         }
         let rate = self.sky.tick_rate.max(f32::EPSILON);
@@ -584,7 +663,7 @@ impl Atmosphere {
             self.resolved = area;
             self.paint_rows(area, 0..area.height);
         } else {
-            self.paint_rows(area, self.sky.drift.rows(area.height));
+            self.paint_rows(area, self.drift().rows(area.height));
         }
         self.stale = false;
     }
@@ -971,6 +1050,34 @@ mod tests {
     }
 
     #[test]
+    fn the_sixteen_colour_sky_keeps_its_stops_apart() {
+        // The failure this guards against: a smooth ramp reduced into sixteen
+        // colours collapses, every dark stop snapping to black, and the sky
+        // becomes one flat rectangle. A deliberate poster sky must not.
+        let mut atmosphere = Atmosphere::new(Sky::night_basic(), ColorSupport::Ansi16);
+        let area = Rect::from_size(60, 24);
+        atmosphere.resolve(area);
+        let mut seen = Vec::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let cell = cell(&atmosphere, x, y);
+                for colour in [cell.style.fg, cell.style.bg] {
+                    if !seen.contains(&colour) {
+                        seen.push(colour);
+                    }
+                }
+            }
+        }
+        assert!(
+            seen.len() >= 5,
+            "the small palette collapsed to {} colours: {seen:?}",
+            seen.len()
+        );
+        // And none of it may be the terminal's own default.
+        assert!(!seen.contains(&Color::Default));
+    }
+
+    #[test]
     fn a_night_sky_shows_no_bands() {
         // The failure this test exists to catch was found by measuring a capture:
         // a glow steep enough to change by twenty units of colour per half-row
@@ -1114,6 +1221,35 @@ mod tests {
         let moved = resolved(Sky::night(), 24, 10);
         let frozen = resolved(stilled, 24, 10);
         assert_eq!(cells(&moved), cells(&frozen));
+    }
+
+    #[test]
+    fn the_drift_can_be_turned_off_and_on_again_without_losing_the_picture() {
+        let mut atmosphere = Atmosphere::new(Sky::night(), ColorSupport::TrueColor);
+        let area = Rect::from_size(30, 12);
+        atmosphere.resolve(area);
+        let painted = cells(&atmosphere);
+
+        atmosphere.set_moving(false);
+        assert!(!atmosphere.is_moving());
+        assert_eq!(
+            None,
+            atmosphere.next_update(),
+            "a held field asks for nothing"
+        );
+        assert!(!atmosphere.advance(Duration::from_secs(5)));
+        atmosphere.resolve(area);
+        assert_eq!(
+            painted,
+            cells(&atmosphere),
+            "holding it changed the picture"
+        );
+
+        // Turning motion back on resumes the sky's own drift, not a blank field.
+        atmosphere.set_moving(true);
+        assert!(atmosphere.is_moving());
+        assert!(atmosphere.next_update().is_some());
+        assert!(atmosphere.advance(Duration::from_secs(5)));
     }
 
     #[test]

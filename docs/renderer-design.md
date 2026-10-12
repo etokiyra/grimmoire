@@ -380,6 +380,56 @@ A screen hands the loop the layer's cadence through `Screen::next_frame`, using
 `Atmosphere::next_update`, and reports `Drift::Still`'s `None` when the player has
 asked for reduced motion. The atmosphere never makes a screen `is_animating`.
 
+### The first host: the title screen
+
+`ui::title` composes the layer first and everything else on top of it. It is the
+only screen that uses the atmosphere so far, and the shape of the integration is
+worth recording because the other screens will follow it:
+
+```text
+  compose the field            owns every cell's background
+  cathedral, wizard, motes     glyphs and glyph inks, backgrounds inherited
+  wordmark, rule, menu         glyphs, backgrounds inherited
+  an open panel                its own surface, on purpose
+```
+
+Nothing above the field sets a background, so every glyph keeps the sky behind
+it. That is the whole of the integration: no second terminal loop, no change to
+the presenter, the diff, the frame schedule or the terminal lifecycle.
+
+One small addition was needed. A screen is handed its `FrameContext` when it
+composes, but the field has to be *built* before that, so a screen that builds
+from the terminal's colour support could not know it. `Screen::on_capabilities`
+is that answer, called for every screen including ones pushed later, because the
+stack is what knows what the terminal reported.
+
+### Why the wordmark is one row
+
+The name was a figlet banner, five rows of block letters. It could not be made to
+read. The reason is the cell grid itself: a terminal cell is about **twice as
+tall as it is wide**, so a letterform designed for near-square cells is stretched
+by more than two to one, and the horizontal strokes of figlet's `standard` font
+are hairline `_` glyphs that all but vanish. What is left is a column of vertical
+bars.
+
+Any multi-row letterform has the same problem, however carefully it is drawn.
+So the name is **one row**, wide and letter-spaced, carrying its weight in
+colour — a gold-to-ember ramp across the letters — and in ornament, rather than
+in height. The scene provides the scale; the wordmark provides the identity.
+
+### The small palettes get their own sky
+
+A smooth ramp reduced a cell at a time into sixteen colours collapses: every dark
+stop snaps to black and the sky becomes one flat rectangle. So the small-palette
+path does not reduce the night sky — it uses [`Sky::night_basic`], whose stops are
+**chosen from** the classic colours so the grid can step between them. The moon's
+body is pure white for the same reason: everything near white reduces to bright
+yellow on a sixteen-colour terminal, and a yellow moon is the one thing the
+smallest palette cannot pass off.
+
+The result is loud, and it is a poster rather than a photograph. It is deliberate
+rather than broken, which is the most the palette allows.
+
 ### Degrading
 
 `Rgb::to_color` reduces the field to what the terminal can show: true colour, the
@@ -435,6 +485,23 @@ project decodes an image: Kitty does that.
 | The world stays visible around it | the mage and Ysolde are both legible behind the panel |
 | No graphics are sent by default | asserted by the smoke test |
 
+**The title screen, integrated** (Kitty 0.49.2, fullscreened, `grim`, no palette
+reduction; 120×29 cells at font size 20):
+
+| Check | Result |
+| --- | --- |
+| The field is under the scene | every open sky cell is a `▀` whose two colours differ; text and glyphs keep the field as their background |
+| The sky is smooth | the worst step down a sampled column is 5 units of colour out of 255; the only larger jumps are wordmark letters and stars |
+| The cathedral is a silhouette | dark stone against the sky, lit lancets, a rose window, a lit doorway, spires, symmetric about its spine |
+| The name is legible | one row, letter-spaced, a gold-to-ember ramp; the rule and tagline beneath it |
+| The menu is legible | a bottom band with a highlighted selection and a note line; nothing overlaps the scene |
+| The opening stages | sky, then the cathedral rises and its windows light, then the name is written, then the menu assembles |
+| The idle is calm | nothing repeats the opening; returns from the journal or Settings cost nothing |
+| Reduced motion | the sky stops where it stands and the scene stays |
+| The fallback is exercised | a 256-colour terminal gets `Sky::night_basic`; a 16-colour terminal gets a poster, and no cell is left transparent |
+| A smaller terminal holds | the same composition at 101×24 |
+| The world is untouched | Ruined Chapel renders exactly as before the change |
+
 **Frame rate, measured** (a pseudo-terminal at 200×50, with `GRIMMOIRE_FRAME_STATS=1`
 reporting what the loop actually did): **64 frames/s walking east, 60 walking
 north, 8.7 idle.** The idle figure is the ambient tick, deliberately slow.
@@ -471,6 +538,30 @@ with the world composed and shown. Every number is measured.
 | Present one movement step (camera scrolled) | 0.7 ms, 3275 cells in 861 runs |
 | Idle CPU | 0.5% of one core, ~11 KiB/s |
 | Walking CPU | ~2% of one core |
+
+**The title screen, measured through a pseudo-terminal at 150×37** (one core as
+the denominator; the title was measured with and without the atmosphere, because
+that difference is the whole question):
+
+| Phase | CPU, % of one core | Output | Frame rate |
+| --- | --- | --- | --- |
+| Title before the atmosphere | 0.66 | 4–6 KiB/s | opening 60, idle 11 |
+| Opening, with the atmosphere | 1.33 | 98 KiB/s | **60** |
+| Settled idle | 2.66 | 151 KiB/s | 11 |
+| Menu navigation | 2.98 | 151 KiB/s | 11 |
+| A resize | 4.78 | 213 KiB/s | full redraws |
+| 256-colour terminal | 2.00 | 12 KiB/s | 11 |
+
+So the atmosphere adds about **1.7 points of a core** during normal idle
+animation, against the 3-point budget the layer was given. The idle is 11 frames a
+second because that is the ambient cadence the game already runs its slow detail
+at — the loop wakes for the sky's own 4 Hz clock in between. Anything that moves
+continuously, the opening included, runs at 60.
+
+Narrowing the drifting band from the top quarter of the field to the top fifth
+took the idle from 4.33 to 2.66 points: a cell of true colour costs about forty
+bytes of escape sequence, so the band's height is very nearly the whole cost of a
+living sky.
 
 Composition did not get slower despite the figures, the inlay, the candles and the
 motes: all of it is arithmetic on cells that were being written anyway, and the
