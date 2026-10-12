@@ -16,7 +16,7 @@
 use grimmoire::game::{Area, AreaId, Direction, Entity, Position, World, areas};
 use grimmoire::render::Canvas;
 use grimmoire::ui::Palette;
-use grimmoire::ui::animation::{Performance, Stage};
+use grimmoire::ui::animation::Performance;
 use grimmoire::ui::effects::Effects;
 use grimmoire::ui::scenery::Scenery;
 
@@ -64,18 +64,53 @@ fn viewpoint(area: AreaId) -> Position {
     }
 }
 
-/// Prints every figure, facing every way, in every stage.
+/// Prints the sprite library: every sprite, and how its glyphs are coloured.
 fn figures() {
-    // A bare stage with the whole cast standing clear of the player and of each
-    // other, so every design can be read without overlap.
-    // The sheet reads the real cast, so art can never drift from the game.
+    use grimmoire::ui::sprite::{SPRITES, part_of};
+
+    println!("=== the sprite library ===");
+    for art in SPRITES {
+        println!(
+            "--- {} ({:?}) {}x{}: {} poses ---",
+            art.id,
+            art.role,
+            art.width,
+            art.height,
+            art.pose_count()
+        );
+        for row in art.rows {
+            println!("|{row}|");
+        }
+        // The inks are chosen by what a glyph *is*, so the mapping is part of
+        // the art direction and worth looking at directly.
+        let mut seen: Vec<String> = Vec::new();
+        for ch in art.rows.iter().flat_map(|row| row.chars()) {
+            if ch == ' ' {
+                continue;
+            }
+            let entry = format!("{ch}={:?}", part_of(ch));
+            if !seen.contains(&entry) {
+                seen.push(entry);
+            }
+        }
+        println!("    inks: {}", seen.join(" "));
+        for (index, pose) in art.all_poses().iter().enumerate().skip(1) {
+            println!("    pose {index}:");
+            for row in *pose {
+                println!("    |{row}|");
+            }
+        }
+        println!();
+    }
+
+    println!("=== the cast, as the world draws them ===");
     let cast = grimmoire::game::areas::roster();
-    let entities = cast
+    let entities: Vec<_> = cast
         .iter()
         .enumerate()
         .map(|(index, member)| {
             Entity::npc(
-                Position::new(3 + index as u16 * 6, 5),
+                Position::new(4 + index as u16 * 8, 6),
                 member.name,
                 member.figure,
                 Direction::South,
@@ -86,100 +121,20 @@ fn figures() {
     let area = Area::new(
         AreaId::new("stage"),
         "Stage",
-        &[
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-            "..............................",
-        ],
+        &["................................."; 12],
         entities,
         Vec::new(),
-        Position::new(5, 5),
+        Position::new(4, 10),
     );
     let mut world = World::new(vec![area], AreaId::new("stage"));
-    let _ = world.place_player(Position::new(13, 10));
-
-    println!("=== the cast, facing south ===");
+    let _ = world.place_player(Position::new(4, 10));
     let all = draw_pose(
         &world,
         grimmoire::ui::animation::Pose::idle(Direction::South),
-        42,
+        78,
         12,
     );
-    print_crop(&all, 6, 3, 34, 4);
-
-    // An NPC's facing is content, not something the viewer can pose: each one is
-    // built standing the way it is asked about, so the sheet shows what the world
-    // would really draw.
-    for member in cast {
-        println!("=== {} ===", member.name);
-        for facing in Direction::ALL {
-            let mut world = single(member, facing);
-            let _ = world.place_player(Position::new(13, 10));
-            let canvas = draw_pose(&world, grimmoire::ui::animation::Pose::idle(facing), 20, 14);
-            println!("--- {}, facing {} ---", member.name, facing.name());
-            print_crop(&canvas, 8, 3, 10, 5);
-        }
-    }
-
-    // And the player, in every stage of the walk.
-    let mut world = single(&MAGE_MEMBER, Direction::South);
-    let _ = world.place_player(Position::new(13, 10));
-
-    for (label, stage) in [
-        ("idle", Stage::Idle),
-        ("walk", Stage::Walk),
-        ("sprint", Stage::Sprint),
-    ] {
-        for facing in Direction::ALL {
-            let mut performance = Performance::new();
-            if stage != Stage::Idle {
-                performance.stepped(std::time::Duration::from_millis(120));
-            }
-            let mut pose = performance.pose(facing, stage != Stage::Idle, stage == Stage::Sprint);
-            pose.stage = stage;
-            pose.blinking = false;
-            let canvas = draw_pose(&world, pose, 20, 14);
-            println!("--- mage {label}, facing {} ---", facing.name());
-            print_crop(&canvas, 8, 3, 10, 5);
-        }
-    }
-}
-
-/// A stand-in cast member for the player, who is not part of the cast.
-static MAGE_MEMBER: grimmoire::game::areas::CastMember = grimmoire::game::areas::CastMember {
-    name: "the mage",
-    figure: grimmoire::game::Figure::Mage,
-    facing: Direction::South,
-    talk: &grimmoire::game::areas::YOADLE_TALK,
-};
-
-/// A stage holding one figure, so it can be read at every facing without its
-/// neighbours in the way.
-fn single(member: &'static grimmoire::game::areas::CastMember, facing: Direction) -> World {
-    let area = Area::new(
-        AreaId::new("stage"),
-        "Stage",
-        &[".............................."; 12],
-        vec![Entity::npc(
-            Position::new(13, 5),
-            member.name,
-            member.figure,
-            facing,
-            member.talk,
-        )],
-        Vec::new(),
-        Position::new(5, 5),
-    );
-    World::new(vec![area], AreaId::new("stage"))
+    print_crop(&all, 0, 0, 78, 9);
 }
 
 /// Draws a world at a fixed size with a given player pose.
@@ -199,6 +154,7 @@ fn draw_pose(
             palette: &Palette::EXTENDED,
             phase: 0.4,
             player,
+            step: 0,
             effects: &effects,
         }
         .draw(&mut view);
@@ -222,6 +178,7 @@ fn draw(world: &World, width: u16, height: u16, phase: f32, stepping: bool) -> C
             palette: &Palette::EXTENDED,
             phase,
             player: performance.pose(world.facing(), stepping, false),
+            step: 0,
             effects: &effects,
         }
         .draw(&mut view);

@@ -95,6 +95,15 @@ impl Performance {
         }
     }
 
+    /// How many steps have been taken, for anything that cuts a pose per step.
+    ///
+    /// The sprite library's walk poses are chosen from this rather than from a
+    /// clock, so a pose can never drift away from the movement it illustrates.
+    #[must_use]
+    pub const fn steps(&self) -> u32 {
+        self.frame as u32
+    }
+
     /// Records that a step was taken, advancing the stride.
     ///
     /// Called once per successful step, so the cycle cannot drift away from the

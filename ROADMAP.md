@@ -216,7 +216,27 @@ Delivered:
 - **Settings**, in their own file: full, reduced, or no motion. Every animation
   can be turned off and the game stays entirely playable.
 
-## Phase 10 — Story
+## Phase 10 — Expressive sprites and living colour (done)
+
+The systems were in place and the presentation was not good enough. This phase
+was about making the game *look* like one.
+
+Delivered:
+
+- **A sprite library.** Eighteen fixed sprites — the wizard, ten enemies and
+  creatures, the Lich King, and five characters authored for the region — stored
+  row for row and drawn exactly as supplied, with a test comparing them against
+  the original art so nothing can quietly drift.
+- **Eight inks per character.** Outline, mass, shade, light, highlight, metal,
+  eye and accent, chosen by what each glyph *is*, so the art never changes to
+  change a colour. Chosen against the floor a character stands on, which is how
+  the first pass was caught making one of them invisible.
+- **Companion poses** for the wizard and three creatures, cut once per step.
+- **The wizard on the title screen**, standing on the horizon.
+- **The dialogue portrait is the character's sprite**, lit for the mood they are
+  speaking in.
+
+## Phase 11 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

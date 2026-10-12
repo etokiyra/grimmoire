@@ -39,13 +39,18 @@
 use crate::game::{Area, AreaId, Direction, EntityKind, Figure, Position, Prop, Tile, World};
 
 use super::animation::{Pose, Stage};
-use super::cast;
 use super::effects::{Effects, Pulse};
-use super::theme::{Inks, Palette};
+use super::sprite::{self, Pose as SpritePose};
+use super::theme::Palette;
 use crate::render::{CanvasView, Color, Style};
 
-/// How many rows a figure takes above its hem: two of head, then a body.
-const HEAD_ROWS: i32 = 3;
+use super::sprite::{ArtInks, Sprite};
+
+/// How many rows a figure's hem sits above its own tile.
+///
+/// A sprite's *last* row is drawn on the tile the character stands on, so a
+/// taller sprite reaches further up rather than sinking into the floor.
+const STANDING_ROWS: i32 = 0;
 
 /// The primary glyph families, grouped so the art can be read at a glance.
 mod art {
@@ -106,6 +111,18 @@ mod art {
     pub const DOOR: [&str; 3] = [".-.", "| |", "|_|"];
     /// A bare, dead tree.
     pub const TREE: [&str; 3] = ["\\|/", " | ", "_|_"];
+}
+
+/// What to draw and how: the art, the pose, the way it is facing, and its inks.
+///
+/// Gathered into one value so a sprite can be handed around without a function
+/// growing an argument per property.
+#[derive(Debug, Clone, Copy)]
+struct Brush {
+    art: &'static Sprite,
+    pose: SpritePose,
+    facing: Direction,
+    inks: ArtInks,
 }
 
 /// A cut into a wide open floor: rings of glyphs around a point.
@@ -272,6 +289,9 @@ fn air_art(air: Air) -> AirArt {
 
 /// The world, a palette, the time, and what the player is doing.
 pub struct Scenery<'a> {
+    /// How many steps the player has taken, so the walk alternates poses on the
+    /// movement rather than on the clock.
+    pub step: u32,
     /// The world to draw.
     pub world: &'a World,
     /// The theme to draw it with.
@@ -733,15 +753,13 @@ impl Scenery<'_> {
             let EntityKind::Npc { figure, facing, .. } = entity.kind else {
                 continue;
             };
-            // Everyone breathes, but not in unison.
-            let sway = (self.phase * 1.1 + f32::from(entity.position.x)).sin() > 0.3;
             self.draw_figure(
                 view,
                 window,
                 entity.position,
                 figure,
                 &Pose::idle(facing),
-                sway,
+                0,
             );
         }
 
@@ -753,7 +771,7 @@ impl Scenery<'_> {
             self.world.player(),
             Figure::Mage,
             &self.player,
-            self.player.frame % 2 == 1,
+            self.step,
         );
         if sprinting {
             self.draw_wake(view, window, self.world.player(), self.player.facing);
@@ -772,67 +790,70 @@ impl Scenery<'_> {
         at: Position,
         figure: Figure,
         pose: &Pose,
-        sway: bool,
+        step: u32,
     ) {
+        let art = sprite::for_figure(figure);
+        let inks = art.inks;
+        // The walk is cut from the sprite's own poses, one per step, so the legs
+        // can never drift away from the movement they illustrate.
+        let walking = matches!(pose.stage, Stage::Walk | Stage::Sprint);
+        let sprite_pose = if matches!(pose.stage, Stage::Sprint) {
+            SpritePose::Sprint
+        } else if walking {
+            SpritePose::Walk { step }
+        } else {
+            SpritePose::Idle
+        };
+        self.draw_sprite(
+            view,
+            window,
+            at,
+            Brush {
+                art,
+                pose: sprite_pose,
+                facing: pose.facing,
+                inks,
+            },
+        );
+    }
+
+    /// Draws one sprite, centred on its column and standing on its row.
+    ///
+    /// Every non-space glyph is coloured by what it *is* — mass, shading, metal,
+    /// an eye — so the art itself is never touched to change how a character
+    /// looks. A two-cell glyph would shear the sprite, which is why the library
+    /// asserts every glyph is one column wide.
+    fn draw_sprite(&self, view: &mut CanvasView, window: Window, at: Position, brush: Brush) {
+        let Brush {
+            art,
+            pose,
+            facing,
+            inks,
+        } = brush;
         let Some((sx, sy)) = window.screen(at, view) else {
             return;
         };
-        let art = cast::art(figure);
-        let inks = cast::inks(self.palette, figure);
-        let head = &art.heads[pose.facing.index()];
-        let body = &art.bodies[usize::from(sway)];
-        let hem = &art.hems[usize::from(sway)];
-        let width = head[0].chars().count() as i32;
-        let left = i32::from(sx) - (width - 1) / 2;
-        let top = i32::from(sy) - HEAD_ROWS;
-
-        for (row, line) in head
-            .iter()
-            .chain(std::iter::once(body))
-            .chain(std::iter::once(hem))
-            .enumerate()
-        {
+        let rows = pose.rows_for(art);
+        let (dx, dy) = art.origin();
+        let left = i32::from(sx) + dx;
+        let top = i32::from(sy) + dy + STANDING_ROWS;
+        let width = i32::from(art.width);
+        // The supplied art is authored front on, so west-facing is that art
+        // reflected rather than redrawn: the staff changes hands and the
+        // character visibly turns. The canonical rows are never altered.
+        let mirrored = matches!(facing, Direction::West);
+        for (row, line) in rows.iter().enumerate() {
             for (column, ch) in line.chars().enumerate() {
                 if ch == ' ' {
                     continue;
                 }
-                let Some(ink) = ink_for(ch, &inks) else {
-                    continue;
-                };
-                let glyph = ink_glyph(ch, pose.blinking);
-                self.draw_cell(
-                    view,
-                    window,
-                    left + column as i32,
-                    top + row as i32,
-                    glyph,
-                    ink,
-                );
-            }
-        }
-
-        if let Some(held) = art.held {
-            // Whatever is carried is held out on the side the figure is not
-            // facing into, so it is never drawn across the face.
-            let held_left = match pose.facing {
-                Direction::East => left + width,
-                Direction::West | Direction::North => left - 1,
-                Direction::South => left + width,
-            };
-            for (row, line) in held.iter().enumerate() {
-                let Some(ch) = line.chars().next() else {
-                    continue;
-                };
-                let Some(ink) = ink_for(ch, &inks) else {
-                    continue;
-                };
-                // A light twinkles rather than sitting still.
-                let glyph = if ch == '*' || ch == '+' {
-                    art::SPARKLE[(self.phase * 6.0) as usize % art::SPARKLE.len()]
+                let column = if mirrored {
+                    width - 1 - column as i32
                 } else {
-                    ch
+                    column as i32
                 };
-                self.draw_cell(view, window, held_left, top + row as i32, glyph, ink);
+                let ink = inks.of(sprite::part_of(ch));
+                self.draw_cell(view, window, left + column, top + row as i32, ch, ink);
             }
         }
     }
@@ -908,6 +929,12 @@ impl Scenery<'_> {
         let (sx, sy) = (x as u16, y as u16);
         let world = window.at(sx, sy);
         self.put(view, sx, sy, world, ch, Style::new().with_fg(ink).bold());
+    }
+
+    /// The sprite of the character being played.
+    #[must_use]
+    pub fn player_sprite(&self) -> &'static Sprite {
+        sprite::for_figure(Figure::Mage)
     }
 
     // -- shared --------------------------------------------------------------
@@ -1045,40 +1072,6 @@ fn inlay_glyph(motif: &Motif, position: Position) -> Option<char> {
     None
 }
 
-/// The glyph a legend character draws when the figure blinks.
-fn ink_glyph(ch: char, blinking: bool) -> char {
-    if blinking && (ch == 'o' || ch == 'v' || ch == '●') {
-        '-'
-    } else {
-        ch
-    }
-}
-
-/// The ink a legend character is drawn in.
-///
-/// Unknown characters are cloth: silhouettes are written with punctuation, and
-/// garment-coloured punctuation is exactly right.
-///
-/// Shared with the dialogue panel, which draws the same busts at a larger size:
-/// the legend is the format, so there is only ever one of these.
-pub(crate) fn ink_for(ch: char, inks: &Inks) -> Option<Color> {
-    Some(match ch {
-        ' ' => return None,
-        'o' | 'v' | '●' => inks.eye,
-        ':' => inks.skin,
-        // The ears are the one loud colour; the head around them is fur.
-        '^' => inks.hair,
-        '(' | ')' => inks.skin,
-        '~' => inks.hair,
-        '%' | '_' => inks.cloth_dark,
-        '+' | '=' => inks.trim,
-        '@' => inks.shadow,
-        '|' => inks.wood,
-        '*' => inks.magic,
-        _ => inks.cloth,
-    })
-}
-
 /// Which neighbours of `position` are solid.
 fn neighbours_of(area: &Area, position: Position) -> Neighbours {
     let solid = |dx: i32, dy: i32| {
@@ -1164,6 +1157,7 @@ mod tests {
             palette: &Palette::EXTENDED,
             phase: 0.0,
             player: pose,
+            step: 0,
             effects,
         }
     }
@@ -1204,7 +1198,7 @@ mod tests {
                 );
             }
         }
-        assert!(text.contains("(o:o)"), "no bunny drawn:\n{text}");
+        assert!(text.contains("▟▖"), "no wizard drawn:\n{text}");
     }
 
     /// The glyph the renderer chooses for a wall with the given neighbours.
@@ -1304,18 +1298,24 @@ mod tests {
     #[test]
     fn the_player_faces_the_direction_they_walk() {
         let mut world = World::new(areas::all(), areas::CHAPEL);
-        // The eye sits toward the direction of travel: that is the whole cue.
+        // The supplied art is authored front on, so west-facing is that art
+        // reflected: the staff changes hands and the character visibly turns,
+        // while the canonical rows are never altered.
         world.move_player(Direction::East);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        assert!(text.contains(":o)"), "expected an east-facing eye:\n{text}");
+        assert!(
+            text.contains("═▓♦▓▘│"),
+            "expected the staff on the right:\n{text}"
+        );
         world.move_player(Direction::West);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        // The space in `(o: )` is transparent, so the terrain shows through it.
-        // What matters is that the eye is on the near side and not the far one.
-        assert!(text.contains("(o:"), "expected a west-facing eye");
         assert!(
-            !text.contains(":o)"),
-            "the west profile should not carry an east-facing eye"
+            text.contains("│▘▓♦▓═"),
+            "expected the art reflected:\n{text}"
+        );
+        assert!(
+            !text.contains("═▓♦▓▘│"),
+            "and not the unreflected art as well"
         );
     }
 
@@ -1346,11 +1346,9 @@ mod tests {
         let mut world = World::new(areas::all(), areas::CHAPEL);
         world.set_player_for_test(Position::new(56, 38));
         let (_, text) = draw(&world, 60, 24, 0.0);
-        // The space in `( @o)` is transparent, so the floor shows through it and
-        // only the drawn glyphs can be matched.
-        assert!(text.contains("@o)"), "Ysolde's profile is missing:\n{text}");
-        assert!(text.contains("___"), "Ysolde's cowl is missing");
-        assert!(text.contains("/###\\"), "Ysolde's robe is missing");
+        // The wraith's hood and the two cold lights in it.
+        assert!(text.contains("▐░▒░▌"), "Ysolde's face is missing:\n{text}");
+        assert!(text.contains("▝▓▒▓▘"), "and her hem is missing");
     }
 
     #[test]
@@ -1510,26 +1508,25 @@ mod tests {
         // or a mote would have put there, the figure's own glyph is on top.
         let world = World::new(areas::all(), areas::CHAPEL);
         let (_, text) = draw(&world, 120, 40, 0.0);
-        assert!(text.contains("(o:o)"), "the face is missing");
-        let ears = text
-            .lines()
-            .filter(|line| line.matches('^').count() >= 2)
-            .count();
-        assert!(ears > 0, "the ears are missing:\n{text}");
-        // And the whole figure is present, in order, on consecutive rows: the
-        // floor and the inlay never punch a hole through it.
+        assert!(text.contains("▟▖"), "the sprite is missing");
+        // The whole sprite is present, in order, on consecutive rows: the floor
+        // and the inlay never punch a hole through it.
         let lines: Vec<&str> = text.lines().collect();
-        let face = lines
+        let hat = lines
             .iter()
-            .position(|line| line.contains("(o:o)"))
-            .expect("the face");
+            .position(|line| line.contains("▟▖"))
+            .expect("the hat");
         assert!(
-            lines[face - 1].matches('^').count() >= 2,
-            "the ears should be above the face"
+            lines[hat + 1].contains("▄▟█▙▄"),
+            "the shoulders should be below the hat:\n{text}"
         );
         assert!(
-            lines[face + 1].contains("/#+#\\"),
-            "the dress should be below"
+            lines[hat + 3].contains("═▓♦▓▘│"),
+            "the staff should be below the shoulders:\n{text}"
+        );
+        assert!(
+            lines[hat + 4].contains("▓▓▓"),
+            "the robe should be the last row:\n{text}"
         );
     }
 
@@ -1551,6 +1548,6 @@ mod tests {
         );
         let world = World::new(vec![area], AreaId::new("stage"));
         let (_, text) = draw(&world, 12, 10, 0.0);
-        assert!(text.contains("(o:o)"), "no figure:\n{text}");
+        assert!(text.contains("▟▖"), "no figure:\n{text}");
     }
 }

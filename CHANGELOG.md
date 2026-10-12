@@ -9,6 +9,49 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — a sprite library, and characters worth looking at
+
+- **A central character sprite library** (`ui::sprite`). The supplied art — the
+  wizard, the necromancer, the hag, the plague doctor, the assassin, the knight,
+  the skeleton, the wraith, the imp, the bat, the ooze, the drake and the Lich
+  King — is stored row for row, spaces and all, and drawn exactly as authored.
+  The source is never trimmed, reflowed or recoloured: colour is chosen by what
+  each *glyph* is, so a character can be re-inked without a cell of art changing.
+- **Five more characters in the same idiom**, for the cast the supplied set had no
+  counterpart for: Rin the lantern keeper, Cassen the scavenger, Ioreth the
+  priestess, Nim the apprentice and Wren the wood spirit.
+- **Companion animation frames** for the wizard (two steps, a breath and a
+  sprint) and for the wraith, the bat and the ooze, chosen **once per step** so a
+  pose can never drift from the movement it illustrates. The canonical base art is
+  never one of its own frames, and a test asserts it.
+- **West-facing is the same art reflected**, so the staff changes hands and the
+  character visibly turns without the source being redrawn.
+
+### Changed — the palette has life in it
+
+- Every character now carries **eight inks** — outline, mass, shade, light,
+  highlight, metal, eye and accent — instead of one silhouette colour. The result
+  is characters with faces, glints and readable shapes rather than coloured blobs.
+- **Colours reduce to the sixteen a basic terminal has** by nearest-match rather
+  than by a second hand-maintained table, so the rich and poor palettes cannot
+  drift apart.
+- Every ink set was chosen against the floor it stands on: the first pass made
+  Ysolde invisible, because a hood drawn in the colour of the stone is not a
+  character.
+
+### Changed — the dialogue portrait is the character's sprite
+
+- The portrait plate shows the character's own sprite on a darker inset with a
+  ring of marks, lit for the mood they are speaking in — the brightest cells
+  warm, cool or go out. The art is never redrawn for an expression.
+- The title screen now has the wizard standing on the horizon beside the chapel,
+  breathing in its own companion poses.
+
+### Fixed
+
+- The pty smoke test looked for the old character's ink; it now checks the
+  wizard's outline, which nothing else in the game draws in.
+
 ### Added — a title screen, branching conversations, and a cast of nine
 
 - **An animated title screen.** The game opens on a night sky over the chapel:

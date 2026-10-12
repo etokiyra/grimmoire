@@ -9,7 +9,6 @@
 
 pub mod animation;
 pub mod art;
-pub mod cast;
 pub mod dialogue;
 pub mod effects;
 pub mod exploration;
@@ -22,6 +21,7 @@ pub mod scenery;
 pub mod screen;
 pub mod settings;
 pub mod showcase;
+pub mod sprite;
 pub mod stage;
 pub mod theme;
 pub mod title;

@@ -55,10 +55,13 @@ the wood, the village, the shrine and the catacombs recognisable before their
 names are read: grass and pollen in the wood, ash and cinders in the village, pale
 marble under cold silver motes in the shrine, bone dust in the catacombs.
 
-The player and the people they meet are small **figures**, not single letters:
-several cells tall, drawn in several colours at once (hair, skin, cloth, trim and
-eyes), with four facing directions, a walk cycle that keeps pace with movement, a
-sprint of their own, and an idle breath that blinks now and then.
+The player and the people they meet are **sprites**, not single letters: seven
+cells wide and five tall (eleven by seven for something that deserves a boss
+bar), drawn from a central library in eight inks each — outline, mass, shade,
+light, highlight, metal, eye and accent. The wizard has two walk poses, a breath
+and a sprint, chosen once per *step* so a pose can never drift from the movement
+it illustrates. Facing west is the same art reflected, so the staff changes
+hands.
 
 Play needs a viewport of at least 80×24. Below that the game suspends to a short
 explanation, ignores input, keeps all of its state, and resumes by itself when the

@@ -8,6 +8,12 @@ Every wall, every candle, every face is a character drawn into a cell grid by a
 renderer Grimmoire owns. No image files, no sprites, no graphics protocol — just
 glyphs, ink, and light.
 
+The cast is a **library of fixed sprites**: seven cells wide, five tall, drawn in
+eight inks each — outline, mass, shade, light, highlight, metal, eye and accent.
+The art is stored row for row and never trimmed or recoloured; what colour a cell
+is depends on what the cell *is*, and a test compares the library against the
+supplied art so a stray edit fails the build.
+
 Talk to people. Ask things. Some of them lie, and remembering that changes what
 they say next.
 
@@ -106,9 +112,18 @@ content. See [`ROADMAP.md`](ROADMAP.md).
 - **Names and words live in the model.** `Entity::name`, `Dialogue::speaker` and
   every journal line are content; the renderer has no idea what any of them say.
 
-The player is a kawaii mage bunny: long pink ears, a pale face with two big bright
-eyes, a violet robe with white lace, and a star wand that twinkles. Four rows
-tall, drawn from the same legend every other character is.
+The player is a small wizard in violet and royal blue, with a gold-tipped staff
+and a gem at their collar. They have two walk poses, a breath and a sprint,
+chosen once per *step* so a pose can never drift from the movement it illustrates,
+and facing west is the same art reflected so the staff changes hands.
+
+Nine characters are in the world: a hooded wraith with two cold lights, a lantern
+keeper, a scavenger under a bundle, a priestess under a crescent crown, a
+skeleton wound in grave-wrappings, an apprentice with ribbons, a wandering mage
+under an enormous hat, a moss-and-mushroom spirit, and a warden in plumed steel.
+Eleven more — a necromancer, a hag, a plague doctor, an assassin, a dark knight,
+an imp, a bat, an ooze, a drake, and the Lich King — are in the library for what
+comes next.
 
 <div align="center">
 <img src="docs/images/bunny.png" alt="The mage bunny drawn as ASCII, zoomed" width="330">
@@ -122,7 +137,7 @@ tall, drawn from the same legend every other character is.
 chapel standing on it, and the name in a warm ramp. The menu knows whether there
 is a journey to continue, and starting again over one asks first.
 
-<img src="docs/images/title.png" alt="The Grimmoire title screen" width="820">
+<img src="docs/images/title.png" alt="The Grimmoire title screen, with the wizard standing on the horizon" width="820">
 
 **Conversations.** A speaker's face in its own inset, their name set into the
 plate, lines that arrive a character at a time — and, when they are asking
@@ -330,6 +345,7 @@ build a terminal emulator.
 | `anim` | Time-based animation with an explicitly advanced clock. |
 | `input` | Terminal-independent key and event types, including press/repeat/release. |
 | `ui` | Frame composition: the ASCII scenery renderer, the cast table, character animation, feedback effects, the title screen, conversations, the journal, the ornament vocabulary, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
+| `ui::sprite` | The character sprite library: art, inks and poses. |
 | `ui::settings` | The player's preferences, in their own file, shared with the screens that change them. |
 | `app` | Wires input, update, compose and present together. |
 | `pixel` | Software pixel rendering, used only by optional interface art. |
@@ -374,10 +390,12 @@ own the drawing model. No image decoder is needed — Kitty decodes.
 - **Game logic is pure.** Movement, collision, interaction and travel are testable
   without a terminal; the UI decides how things look.
 - **Artwork is source text, not files.** The world is glyph tables and neighbour
-  rules; the cast is a table of ASCII silhouettes and inks in `ui::cast`; the
-  optional interface art is ASCII sprite tables rendered in memory. Nothing is
-  read from disk, so there is no third-party imagery and no missing file to break
-  the game.
+  rules; the cast is the sprite library in `ui::sprite`; the optional interface art
+  is ASCII sprite tables rendered in memory. Nothing is read from disk, so there
+  is no third-party imagery and no missing file to break the game.
+- **Colour belongs to the renderer.** A sprite says nothing about its own colour:
+  `part_of` classifies each cell and the character's inks say what that class is.
+  Recolouring a character must never mean editing its art.
 - **A character is a role the model names, not a picture.** The world says *"a
   lantern keeper"*; `ui::cast` decides what that looks like. Adding a character
   means adding a role, an entry in the cast table, and nothing else — the

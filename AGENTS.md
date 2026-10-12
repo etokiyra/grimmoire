@@ -105,6 +105,31 @@ All current area names, entities, and dialogue lines are placeholders.
 - **Nothing the player must act on may be hidden.** A panel may announce, but it
   must not cover an exit, a landmark, or the player.
 
+## Character art
+
+- **The sprite library is the authority.** `ui::sprite` holds the character art
+  row for row. It is never trimmed, reflowed, padded or rewritten: a row's
+  leading and trailing spaces are part of the silhouette, and
+  `preserves_every_declared_row_exactly` compares the library against the
+  supplied text so a careless edit fails the build.
+- **Colour is chosen by glyph, never stored in the art.** `part_of` classifies a
+  cell as outline, mass, shade, light, highlight, metal, eye or accent, and the
+  character's `ArtInks` says what each is. A sprite can be recoloured, re-posed or
+  drawn over anything without a glyph changing.
+- **Every sprite declares its logical size, and every glyph is one column wide.**
+  `every_sprite_glyph_is_one_cell_wide` enforces it. If a future sprite needs a
+  glyph that is not one column, the renderer must grow an explicit
+  logical-versus-physical distinction rather than let a row shear.
+- **Companion frames are companions.** A pose is a *separate* row set; the base
+  art is never one of its own frames, and a sprite without a pose for the moment
+  holds its base rather than inventing one.
+- **New characters follow the library's idiom**: a strong silhouette at 7×5 (11×7
+  for a boss), a mass made mostly of shading rather than solid blocks, a readable
+  face, and deliberate headwear. Do not add a character whose mass is one solid
+  colour — it reads as a blob, not a person.
+- **Readability is checked against the floor.** An ink set whose mass is the same
+  value as the stone it stands on is a bug, not a mood.
+
 ## Content and progression
 
 - **A discovery is the reward.** Recording one is what "finding something" means,

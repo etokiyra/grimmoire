@@ -25,8 +25,9 @@ use super::journal::JournalScreen;
 use super::ornament;
 use super::screen::{Command, Screen};
 use super::settings::{Motion, Shared};
+use super::sprite;
 use super::theme::Palette;
-use crate::game::{Discovery, Progress};
+use crate::game::{Discovery, Figure, Progress};
 use crate::input::{Key, KeyCode};
 use crate::render::{AssetId, CanvasView, Frame, Rect, Style, glyph};
 use crate::save::{SaveData, SaveStore};
@@ -490,6 +491,20 @@ impl TitleScreen {
             &art::TOWER,
             Style::new().with_fg(palette.accent_alt_dim),
         );
+
+        // The wizard stands on the horizon, so the first thing the game shows is
+        // the character the player is about to be.
+        let hero = sprite::for_figure(Figure::Mage);
+        let hero_x = bounds.right().saturating_sub(30);
+        let hero_y = horizon.saturating_sub(hero.height.saturating_sub(1));
+        // It breathes: the wizard's own companion poses, alternately, on the
+        // clock — the base art is one of them, never altered.
+        let pose = if motion.animates() && (time * 0.9).sin() > 0.3 {
+            sprite::Pose::Idle
+        } else {
+            sprite::Pose::Walk { step: 0 }
+        };
+        sprite::draw(&mut view, hero_x, hero_y, hero, pose, hero.inks, false);
 
         // Runes rising off the ground, so the sky is not the only thing moving.
         if motion.animates() {

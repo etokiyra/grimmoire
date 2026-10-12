@@ -271,6 +271,7 @@ impl ExplorationScreen {
             palette,
             phase: self.phase,
             player,
+            step: self.performance.steps(),
             effects: &self.effects,
         }
         .draw(&mut view);
@@ -989,16 +990,10 @@ mod tests {
         let screen = screen();
         let (canvas, _) = compose_into(&screen, 120, 40);
         let text = frame_text(&canvas);
-        assert!(
-            text.contains("(o:o)"),
-            "the bunny's face is missing:\n{text}"
-        );
-        // The gap between the ears is transparent, so they are counted rather
-        // than matched as a string.
-        assert!(
-            text.lines().any(|line| line.matches('^').count() >= 2),
-            "the bunny's ears are missing"
-        );
+        // The wizard's hat and staff: the sprite is drawn from the library, so
+        // these are the supplied glyphs, not a stand-in.
+        assert!(text.contains("▟▖"), "the wizard's hat is missing:\n{text}");
+        assert!(text.contains("▓▓▓"), "the wizard's robe is missing");
     }
 
     #[test]

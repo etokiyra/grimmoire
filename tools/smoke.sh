@@ -108,10 +108,10 @@ checks = [
     ("composed the ASCII world", b"\xe2\x80\xa2" in out or b"#" in out),
     # The title is the first thing the game says, and it says it in glyphs.
     ("composed the title screen", b"New Game" in title),
-    # The witch's hair ink. Nothing else in the palette uses it, and the face
-    # cannot be matched as text because every ink change between its cells emits
-    # an escape sequence.
-    ("drew the player", b"38;5;219m" in out),
+    # The wizard's outline ink. Nothing else in the game draws in it, and the
+    # sprite cannot be matched as text because every ink change between its cells
+    # emits an escape sequence.
+    ("drew the player", b"38;5;55m" in out),
     ("showed the controls", b"interact" in out),
     ("suspended below the minimum viewport", b"too small" in suspended),
     ("resumed after the resize", b"Ruined Chapel" in resumed),

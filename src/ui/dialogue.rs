@@ -28,9 +28,9 @@
 use std::time::Duration;
 
 use super::FrameContext;
-use super::cast;
 use super::ornament;
 use super::screen::{Command, Message, Screen};
+use super::sprite;
 use crate::anim::Easing;
 use crate::game::{Choice, Conversation, Effect, Figure, Known, Mood, Node, TalkStart};
 use crate::input::{Key, KeyCode};
@@ -392,56 +392,59 @@ impl Screen for DialogueScreen {
 
 impl DialogueScreen {
     /// The speaker's face, in the expression they are holding.
+    ///
+    /// The portrait is the character's **sprite** — the same art the world draws,
+    /// shown on its own plate rather than stretched or redrawn. Their expression
+    /// comes from the ink it is lit in, so the supplied art is never altered.
     fn compose_portrait(&self, frame: &mut Frame, plate: Rect, context: &FrameContext) {
         if let Some(asset) = self.portrait {
             frame.place_image(plate, asset);
             return;
         }
-        let art = cast::art(self.figure);
-        let Some(bust) = art.bust.as_ref() else {
-            return;
-        };
-        let width = bust
-            .rows
-            .iter()
-            .map(|row| row.chars().count())
-            .max()
-            .unwrap_or(0) as u16;
-        if plate.width < width || plate.height < bust.rows.len() as u16 {
-            return;
-        }
-        let inks = cast::inks(&context.palette, self.figure);
-        // The portrait gets its own darker inset. A character in a hood is drawn
-        // in inks that are almost the colour of the panel, and a face has to be
-        // legible against something: the plate is the something.
+        let palette = &context.palette;
+        let art = sprite::for_figure(self.figure);
+        let inks = art.inks.mooded(self.node.mood);
+        let revealed = self.reveal();
+
+        // Its own darker inset: a character in a hood is drawn in inks that are
+        // almost the colour of the panel, and a face has to be legible against
+        // something.
         {
             let mut inset = frame.view(plate);
+            let bounds = inset.bounds();
             inset.fill_style(
-                inset.bounds(),
+                bounds,
                 Style::new()
-                    .with_fg(context.palette.text)
-                    .with_bg(context.palette.background),
+                    .with_fg(palette.text)
+                    .with_bg(palette.background),
             );
+            // A ring behind the figure, so the plate reads as a presentation
+            // rather than as a hole in the panel.
+            let ring = Style::new().with_fg(palette.accent_dim);
+            for x in 1..bounds.width.saturating_sub(1) {
+                inset.put_char(x, 1, ornament::DOT, ring);
+                inset.put_char(x, bounds.height.saturating_sub(2), ornament::DOT, ring);
+            }
         }
-        // The plate brightens as it settles, so a face comes into focus rather
-        // than appearing.
-        let brightness = self.reveal();
+
         let mut view = frame.view(plate);
         let bounds = view.bounds();
+        let width = art.width;
+        let height = art.height;
+        if bounds.width < width || bounds.height < height.saturating_add(2) {
+            return;
+        }
         let left = bounds.centered_x(width);
-        let top = bounds.y;
-        let eye_row = self.node.mood.band();
-        for (row, line) in bust.rows.iter().enumerate() {
-            let line = if row == 3 { bust.eyes[eye_row] } else { line };
+        let top = bounds.y + 1 + (bounds.height.saturating_sub(height + 2) / 2);
+        let rows = sprite::Pose::Idle.rows_for(art);
+        for (row, line) in rows.iter().enumerate() {
             for (column, ch) in line.chars().enumerate() {
                 if ch == ' ' {
                     continue;
                 }
-                let Some(ink) = super::scenery::ink_for(ch, &inks) else {
-                    continue;
-                };
+                let ink = inks.of(sprite::part_of(ch));
                 let mut style = Style::new().with_fg(ink).bold();
-                if brightness < 0.5 {
+                if revealed < 0.5 {
                     style = style.dim();
                 }
                 view.put_char(
