@@ -617,3 +617,116 @@ One more gameplay place, again a single place, now that the seam is a one-line
 enum and the stack tells screens what they need. But the honest recommendation is
 to spend the next stage on the chapel's **architecture legibility** first: the
 atmosphere is now doing its job and the stone is what is letting the scene down.
+
+## 12. Stage 4 outcome: New Game, and the opening
+
+Two things: a bug that made the front door lie, and the first cinematic.
+
+### The bug
+
+`TitleScreen::arrive` pushed `ExplorationScreen::from_save` for **both** menu
+actions. So New Game restored the save and continued the old journey: the menu
+said "begin again" and did "resume". The fix is a second constructor,
+`ExplorationScreen::fresh`, which builds the prototype world at its spawn with
+nothing restored — and keeps the store, so the journey the player just began is
+the one that gets saved from there on. New Game and Continue now differ in the one
+place that matters, and the regression test drives the real application through
+both and asserts that they land in different areas at different positions.
+
+Confirmation was already there and still is: with a save present, New Game asks
+before it takes it, and `esc` keeps what the player had.
+
+### The cinematic
+
+`ui::opening` is a fullscreen scene of about six and a half seconds: a vast
+cathedral under a huge moon, a great circle drawing itself clockwise in the sky,
+the wizard arriving in the lit doorway, a figure watching from the far dark, the
+name written across the top and the chapter named beneath it, and then the ground
+rising to take it. It is a placeholder and it is built to be replaced.
+
+Almost none of it is new drawing — the sky is `ui::atmosphere`, the building is
+`ui::cathedral`, the actors are the supplied sprites, the chapter's name comes out
+of the model and the wordmark is the title's — which is the point. Two things are
+worth carrying forward:
+
+- **A field has no brightness knob, so "out of the dark" is a series of skies.**
+  The stops are taken from the shipped night and mixed towards black inside
+  `opening.rs`, so the module's catalogue stays small and the art stays in the
+  file that wants it.
+- **A screen hands over with a message.** The cinematic builds no world and
+  touches no save: it returns `Message::Finished`, and the title — which owns the
+  store and knows what was asked for — opens the game. That is the same route a
+  conversation uses, and it means the placeholder can be replaced wholesale
+  without touching New Game.
+
+### The three weakest elements, and what was done
+
+Found by capturing the running sequence at each beat:
+
+1. **The magic circle was noise.** A faint scatter of blue dots behind the
+   building, mostly hidden by it. It is now its own light in the open sky, to one
+   side, in two colours, drawn clockwise and then filled in with four spokes. A
+   circle *behind* a building is invisible; one wide enough to frame a whole
+   facade cannot fit the height of a terminal.
+2. **The moon washed out the end of the name.** Both were written along the same
+   band of sky. The moon moved further right and higher, with a much tighter halo.
+3. **The actors were placed badly.** The wizard stood beside a dark wall and read
+   as another dark shape, and the watcher was behind the right-hand tower. The
+   wizard now stands *in* the lit doorway, backlit by the one bright thing at the
+   base of the building; the watcher stands outside the facade, against the sky.
+
+A fourth, smaller one was found in the same pass and is worth recording because it
+was in the *title*: its save summary shared a row with the centred key hints, and
+ran into them as `1 places seew/s choose` once the summary was long enough to
+reach the middle. The summary now has the free row above the hints.
+
+### Measurements
+
+| Phase (150×37, pty, one core) | Cost | Output |
+| --- | --- | --- |
+| The opening cinematic | 3.49% | 134 KiB/s |
+| The title, idle | 2.66% | 151 KiB/s |
+| The ruined chapel, idle | 3.32% | 158 KiB/s |
+
+The cinematic is **cheaper than the world's own idle** in bytes, and it asks for a
+frame only while it is playing: a frame is composed and diffed every tick, but
+only the parts that move are written, so the sky's 4 Hz clock, the circle's slow
+turn and the rising motes never add up to a full-screen redraw. Input is
+event-driven and unchanged, so a skip lands on the next frame.
+
+### Screenshots
+
+Real fullscreened Kitty captures in `docs/images/`: `title-menu.png`,
+`opening-dark.png`, `opening-rise.png`, `opening-circle.png`, `opening-words.png`,
+`opening-away.png`, `opening-world.png`, `opening-skipped.png`,
+`opening-small.png`, `title-continue.png`, and `chapel-legible.png` for the
+secondary task.
+
+### The chapel, second pass
+
+The report from stage 3 said the chapel read as a field of symbols. One focused,
+area-scoped change was made: the chapel's floor **grit** was the same value as a
+wall's **cap**, so the floor competed with the masonry for the same attention.
+Bright walls, quiet floor — the cap is now the brightest structural ink in the
+place and the floor has receded. `the_chapel_floor_does_not_outshine_its_own_walls`
+holds it there. The other five places are untouched and the *deeper* problem —
+that the chapel's map is mostly open floor — is still open.
+
+### What still looks weak
+
+- **The opening is one scene with no story.** It says the chapter's name and
+  nothing else. A real opening would have several scenes, captions and a reason.
+- **The wizard is small.** It is 6×5 cells of supplied art and cannot be scaled, so
+  in a viewport-height composition it is a small figure. The building carries the
+  scale instead.
+- **The sky's rise is three steps**, so its brightening is a short series of small
+  jumps rather than a blend. It reads as the night coming up; a real brightness
+  control on the field would read better.
+- **The chapel's architecture** is improved but not solved, for the reason above.
+
+### The next safest step
+
+The cinematic is now a screen that announces a game and hands it back, so a second
+scene is a matter of pushing another screen with the same contract. The honest
+next step is to give the opening *content* — a caption, a second tableau — rather
+than to build a scripting engine for it.

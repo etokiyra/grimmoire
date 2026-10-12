@@ -18,6 +18,7 @@ pub mod help;
 pub mod journal;
 pub mod layout;
 pub mod motion;
+pub mod opening;
 pub mod ornament;
 pub mod scenery;
 pub mod screen;

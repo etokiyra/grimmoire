@@ -217,9 +217,18 @@ Respect these; they are the point of the current structure:
   atmosphere left as the background, because it is a silhouette against a lit sky
   and a shaded glyph would let the sky through. Symmetric about its spine, and the
   masonry is hashed by distance from that spine so the texture mirrors too.
+- `src/ui/opening.rs` — the opening cinematic, and the **placeholder** for the
+  longer one that will follow. It builds no world and touches no save: it ends by
+  returning `Message::Finished`, and the title — which owns the store and knows
+  what the player asked for — opens the game. That is the route a conversation
+  uses, and it is what makes the file replaceable wholesale. A field has no
+  brightness knob, so "out of the dark" is a short series of skies rather than a
+  blend; the stops are mixed towards black inside the file that wants them,
+  keeping the atmosphere's catalogue small.
 - `src/ui/atmosphere.rs` — the procedural true-colour background layer. It draws
   one `▀` per cell, foreground above and background below, which is two vertical
-  samples in a model that has one. **The title screen is its only host so far.**
+  samples in a model that has one. Its hosts are the title screen, the opening
+  cinematic and the ruined chapel — and nowhere else.
   A cell it keeps carries two samples; a glyph drawn over it keeps its own ink and
   the *lower* sample as its background; a glyph with its own background replaces
   both; a space flattens the cell. Do not claim two samples beneath a glyph — the
@@ -265,6 +274,15 @@ Additional rules:
   fallback in the same rectangle; the presenter reserves the rectangle and the
   graphics layer decides whether to paint pixels there. Kitty draws an image at
   the cursor, so a placement must move the cursor to the rectangle first.
+- **New Game and Continue are different constructors.** `ExplorationScreen::fresh`
+  builds the world at its spawn with nothing restored; `from_save` restores. They
+  are not the same screen with a flag, and pushing `from_save` for a new game is
+  how the front door came to lie about what it did — "begin again" that resumed.
+  A new game keeps the store, so the journey it begins is the one that is saved.
+- **A cinematic announces a game; it does not create one.** A screen that ends by
+  returning `Message::Finished` leaves the decision to the screen that pushed it.
+  Do not build a world, read a save, or duplicate initialisation inside a
+  cinematic, and do not build a scripting engine for one either.
 - **Every route that adds a screen must tell it what the application knows.**
   `ScreenStack::install` hands a screen the terminal's capabilities and the
   current viewport on the way in. The application reports a resize only when the
@@ -376,9 +394,10 @@ After substantial changes, update the documentation in the same change:
   investigation, the proposed atmosphere layer, the prototype's measurements,
   stage 1's outcome (the `ui::atmosphere` module, its corrections and its budget),
   stage 2's (the title-screen integration, its art-direction findings and its
-  numbers), and stage 3's (the ruined chapel, the `Backdrop` seam, the stack bug
-  it exposed, and the fact that the architecture — not the light — is what the
-  chapel is now short of).
+  numbers), stage 3's (the ruined chapel, the `Backdrop` seam, the stack bug it
+  exposed, and the fact that the architecture — not the light — is what the chapel
+  is now short of), and stage 4's (the New Game bug, the opening cinematic, and
+  what it is still missing).
 - `ROADMAP.md` — phasing for future work.
 - `CHANGELOG.md` — notable changes under `[Unreleased]`.
 - This file — if vision, boundaries, or workflow change.

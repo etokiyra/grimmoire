@@ -435,6 +435,44 @@ when the size *changes*, and every screen before this one happened to be the roo
 and so caught the first one. `ScreenStack::install` now tells every screen what is
 already known on the way in, whichever route added it.
 
+### The opening cinematic
+
+`ui::opening` is the layer's second host and the game's first cinematic: a vast
+cathedral under a huge moon, a great circle drawing itself in the sky, the wizard
+arriving at the door, something watching from the far dark, and the chapter's name
+written along the top. It is a **placeholder** for a longer opening, and it is
+built so that replacing it is a matter of writing a different screen.
+
+Almost none of it is new drawing. The sky is the atmosphere, the building is
+`ui::cathedral`, the actors are the supplied sprites, the words are the chapter's
+own name out of the model, and the wordmark is the title's. What is new is their
+**timing**: eight eased windows inside 6.6 seconds, with the sky on the
+atmosphere's 4 Hz clock, the circle on the frame clock and the motes on their own.
+Nothing pulses in step with anything else.
+
+Two things about it are worth reusing:
+
+- **The sky comes up in steps.** A field is a cached picture and has no brightness
+  knob, so "out of the dark" is two more skies rather than a blend — the stops are
+  taken from the shipped night and mixed towards black in `opening.rs`, which
+  keeps the module's catalogue small and the art in the file that wants it.
+- **The screen hands over with a message.** It does not build a world and it does
+  not touch a save. It ends by returning `Message::Finished`, and the title —
+  which owns the store and knows what the player asked for — opens the game. That
+  is the same route a conversation uses to change the world, and it is why the
+  file can be replaced wholesale without touching New Game at all.
+
+### New Game and Continue are different paths
+
+They were not. Both pushed `ExplorationScreen::from_save`, so **New Game silently
+continued the saved game**: the menu said one thing and did another, and no amount
+of correct wording hides that. New Game now plays the opening and is answered with
+`ExplorationScreen::fresh`, which builds the prototype world at its spawn with
+nothing restored and keeps the store so the journey the player just began is the
+one that gets saved. Continue restores, as it always did. The regression test
+drives the real application through both and asserts that the two land in
+different places.
+
 ### Why the wordmark is one row
 
 The name was a figlet banner, five rows of block letters. It could not be made to
@@ -547,6 +585,19 @@ reduction; 120×29 cells at font size 20):
 | The player stays readable | the wizard's silhouette is unchanged; its light is now the tile *ink*, not the background |
 | It costs nothing per frame | 60 fps with 16 of 3480 cells painted; the field resolves once |
 | The fallback is honest | 256 colours keep a smooth (grey) gradient; 16 colours keep the stone |
+
+**The opening cinematic** (Kitty 0.49.2, fullscreened, `grim`, 120×29):
+
+| Check | Result |
+| --- | --- |
+| It begins in darkness | the first frame is stars coming up out of black, and 8 KiB of it |
+| It stages rather than appears | sky, then the building rises and its windows light, then the circle draws, then the actors, then the words, then it settles |
+| The actors are readable | the wizard stands in the lit doorway; the watcher is a silhouette outside the facade with two cold points |
+| Skipping works | `esc` or `enter` plays the ground rising and then the game starts; a release or a repeat does nothing |
+| It finishes on its own | unanswered it takes the same exit after 6.6 seconds |
+| It is composed of one column | every glyph asserted drawable, at every beat |
+| It survives a resize | composed cleanly from 0×0 to 240×60 |
+| Its cost | 3.49% of one core, 134 KiB/s — *less* than the world's own idle, because the diff only sees what moves |
 
 **Frame rate, measured** (a pseudo-terminal at 200×50, with `GRIMMOIRE_FRAME_STATS=1`
 reporting what the loop actually did): **64 frames/s walking east, 60 walking

@@ -25,6 +25,12 @@ use super::FrameContext;
 pub enum Message {
     /// A conversation ended, having done these things. The world applies them.
     Talk(Vec<crate::game::Effect>),
+    /// A screen has finished its piece, and the screen beneath should carry on.
+    ///
+    /// This is how a cinematic leaves without knowing what comes next: it says it
+    /// is done, and the screen that pushed it — which is the one that owns the
+    /// save store and knows what the player asked for — decides what to open.
+    Finished,
 }
 
 /// What a screen asks the stack to do after handling input.

@@ -366,7 +366,30 @@ Delivered:
   it reads as a field of symbols with thin runs of wall in it. That is the next
   thing worth doing here, and it is bigger than the atmosphere.
 
-## Phase 16 — Story
+## Phase 16 — New Game fixed, and the opening cinematic (done)
+
+The front door lied and there was no opening. Both are dealt with, and the
+placeholder is built so that it can be replaced. `docs/renderer-investigation.md`
+§12 is the report.
+
+Delivered:
+
+- **The bug**: New Game pushed `from_save`, the same screen Continue did, so
+  "begin again" resumed the old journey. `ExplorationScreen::fresh` now builds the
+  world at its spawn with nothing restored, and the regression test drives the real
+  application through both and asserts that they differ.
+- **`ui/opening`**, a fullscreen animated ASCII opening: a cathedral under a huge
+  moon, a great circle drawing itself, the wizard in the lit doorway, a watcher in
+  the far dark, the name and the chapter — eight eased beats in 6.6 seconds, then
+  the ground rises and the game starts.
+- **`Message::Finished`**, so a cinematic announces a game without creating one.
+- **Cost: 3.49% of one core, 134 KiB/s**, less than the world's own idle.
+- **The chapel**: bright walls, quiet floor. Its architecture reads better; the
+  deeper problem — a map that is mostly open floor — is still open.
+- Still weak: the opening is one scene with no story, the wizard cannot be scaled,
+  and the sky's rise is three steps rather than a blend.
+
+## Phase 17 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

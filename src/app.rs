@@ -471,9 +471,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{App, Startup};
-    use crate::input::Key;
+    use crate::input::{Key, KeyCode};
     use crate::render::Color;
-    use crate::save::SaveStore;
+    use crate::save::{SaveData, SaveStore};
     use crate::terminal::Capabilities;
 
     fn scratch(tag: &str) -> std::path::PathBuf {
@@ -550,6 +550,105 @@ mod tests {
         let text = frame_text(&app);
         assert!(text.contains("New Game"), "the menu is missing:\n{text}");
         assert!(text.contains("Continue"), "{text}");
+    }
+
+    #[test]
+    fn a_new_game_starts_a_fresh_journey_and_continue_restores_the_save() {
+        // The bug this is here for: New Game pushed the same screen Continue did,
+        // so choosing it silently carried on the saved game. Every assertion
+        // below is about the two *differing*.
+        let directory = scratch("new-or-continue");
+        let store = SaveStore::at(directory.join("save.txt"));
+        let saved = SaveData::new("hollow-village", 62, 30, vec!["ruined-chapel".to_string()]);
+        store.save(&saved).expect("save");
+
+        // -- New Game ------------------------------------------------------
+        let mut startup = Startup::headless(Capabilities::conservative());
+        startup.save = Some(store.clone());
+        let mut app = App::new(startup);
+        app.set_size(120, 40);
+        // Let the title's own opening settle, so its menu is on screen.
+        app.advance(Duration::from_secs(2));
+        app.compose_frame();
+        assert!(
+            frame_text(&app).contains("New Game"),
+            "the title is missing"
+        );
+
+        // There is a journey to lose, so it asks before it takes it.
+        app.handle_key(Key::new(KeyCode::Enter));
+        app.compose_frame();
+        assert!(
+            frame_text(&app).contains("replace the journey"),
+            "starting again over a save did not ask first"
+        );
+
+        // Confirming plays the opening, and only then opens the world.
+        app.handle_key(Key::new(KeyCode::Enter));
+        for _ in 0..25 {
+            app.advance(Duration::from_millis(80));
+        }
+        app.compose_frame();
+        assert_eq!(
+            "opening",
+            app.stack.active_name(),
+            "New Game did not play the opening"
+        );
+
+        // Skipping it hands the screen back, and the journey is the new one.
+        app.handle_key(Key::new(KeyCode::Esc));
+        for _ in 0..25 {
+            app.advance(Duration::from_millis(80));
+        }
+        app.compose_frame();
+        let fresh = frame_text(&app);
+        assert_eq!("exploration", app.stack.active_name());
+        assert!(
+            fresh.contains("Ruined Chapel"),
+            "the fresh journey is missing:\n{fresh}"
+        );
+        assert!(
+            !fresh.contains("Hollow Village"),
+            "New Game continued the saved game instead of starting one:\n{fresh}"
+        );
+        assert!(
+            fresh.contains("70,44"),
+            "the fresh journey did not start at the spawn:\n{fresh}"
+        );
+
+        // -- Continue ------------------------------------------------------
+        let mut startup = Startup::headless(Capabilities::conservative());
+        startup.save = Some(store.clone());
+        let mut app = App::new(startup);
+        app.set_size(120, 40);
+        app.advance(Duration::from_secs(2));
+        app.compose_frame();
+        app.handle_key(Key::new(KeyCode::Down));
+        app.handle_key(Key::new(KeyCode::Enter));
+        for _ in 0..25 {
+            app.advance(Duration::from_millis(80));
+        }
+        app.compose_frame();
+        let restored = frame_text(&app);
+        assert_eq!(
+            "exploration",
+            app.stack.active_name(),
+            "Continue did not open the world"
+        );
+        assert!(
+            restored.contains("Hollow Village"),
+            "Continue did not restore where the save left off:\n{restored}"
+        );
+        assert!(
+            restored.contains("62,30"),
+            "Continue restored the wrong position:\n{restored}"
+        );
+        assert!(
+            !restored.contains("the smell of old stone"),
+            "Continue replayed a fresh game's opening line:\n{restored}"
+        );
+
+        fs::remove_dir_all(&directory).expect("cleanup");
     }
 
     #[test]

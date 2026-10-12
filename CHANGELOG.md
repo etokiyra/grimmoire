@@ -9,6 +9,50 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Fixed — New Game started someone else's journey
+
+The title pushed the same screen for **New Game** and **Continue**, so choosing
+"begin again" restored the save and carried on the old game. The menu said one
+thing and did another.
+
+- **`ExplorationScreen::fresh`** builds the prototype world at its spawn with
+  nothing restored, and keeps the store so the journey that was just begun is the
+  one that gets saved. New Game opens it; Continue restores, as before.
+- **A regression test drives the real application through both** and asserts that
+  they land in different areas at different positions, that New Game plays the
+  opening and Continue does not, and that a save still prompts before it is
+  replaced.
+- Fixed in passing: the title's save summary shared a row with the centred key
+  hints and ran into them as `1 places seew/s choose` once the summary was long
+  enough to reach the middle.
+
+### Added — an animated ASCII opening sequence
+
+A fullscreen cinematic between choosing New Game and the first frame of the world,
+built to be replaced.
+
+- **The scene**: a vast cathedral under a huge moon, a great circle drawing itself
+  clockwise in the sky, the wizard arriving in the lit doorway, a figure watching
+  from the far dark, the name written across the top and the chapter named beneath
+  it, and then the ground rising to take it.
+- **Eight eased beats in 6.6 s**, with the sky on the atmosphere's clock, the
+  circle on the frame clock and the motes on their own. Nothing pulses in step.
+- **Skippable** with `esc` or `enter`, which plays the same exit rather than a cut;
+  a release or a repeat never skips, and skipping is not a menu action.
+- **`Message::Finished`**: the cinematic builds no world and touches no save. It
+  says it is done and the title opens the game, which is what keeps the file
+  replaceable and New Game initialisation in one place.
+- **Cost: 3.49% of one core, 134 KiB/s** — less than the world's own idle.
+
+### Changed — the ruined chapel's floor stops competing with its walls
+
+The floor's grit was the same value as a wall's cap, so the place read as a field
+of symbols rather than as a nave. Bright walls, quiet floor: the cap is now the
+brightest structural ink in the chapel and the floor has receded.
+`the_chapel_floor_does_not_outshine_its_own_walls` holds it there. The other five
+places are deliberately untouched.
+
+### Changed — the ruined chapel is lit by its own air
 ### Changed — the ruined chapel is lit by its own air
 
 The first gameplay location to use the atmosphere layer, and the only one: the

@@ -138,6 +138,21 @@ impl ExplorationScreen {
         }
     }
 
+    /// Creates a brand-new journey, restoring nothing.
+    ///
+    /// This is what **New Game** opens, and the difference from [`from_save`] is
+    /// the whole point: `from_save` restores whatever the file holds, so pushing
+    /// it for a new game silently continues the old one. The store is kept, so
+    /// the journey the player just began is the one that gets saved from here on.
+    ///
+    /// [`from_save`]: ExplorationScreen::from_save
+    #[must_use]
+    pub fn fresh(save: Option<SaveStore>, portrait: Option<AssetId>) -> Self {
+        let mut world = World::new(areas::all(), areas::CHAPEL);
+        world.set_message("The Ruined Chapel. Cold air, and the smell of old stone.");
+        ExplorationScreen::new(world, save, portrait)
+    }
+
     /// Creates the screen with the prototype world, restoring a save if present.
     ///
     /// A save that is missing, unreadable, or inconsistent is ignored and a new
@@ -538,6 +553,9 @@ impl Screen for ExplorationScreen {
                 self.persist();
                 Command::None
             }
+            // Nothing pushes a game and then waits for it to finish; the world
+            // ends the run rather than reporting back.
+            Message::Finished => Command::None,
         }
     }
 

@@ -88,13 +88,18 @@ impl Arte {
         use crate::game::areas;
         match area {
             // Aged stone, gold glass, and candlelight.
+            //
+            // The floor is deliberately dimmer than the masonry: a chapel reads as
+            // a building when the eye finds its walls first, and the grit of an
+            // open floor competes with a wall's cap for the same attention if the
+            // two are the same value. Bright walls, quiet floor.
             areas::CHAPEL => Arte {
-                cap: Color::Indexed(180),
+                cap: Color::Indexed(222),
                 wall: Color::Indexed(137),
-                base: Color::Indexed(137),
+                base: Color::Indexed(101),
                 mass: Color::Indexed(233),
                 floor: Color::Indexed(95),
-                grit: Color::Indexed(180),
+                grit: Color::Indexed(109),
                 window: Color::Indexed(214),
                 light: Color::Indexed(235),
                 dark: Color::Indexed(233),
@@ -797,6 +802,34 @@ mod tests {
             );
             assert_ne!(arte.light, arte.dark, "{place:?} has no pool at all");
         }
+    }
+
+    #[test]
+    fn the_chapel_floor_does_not_outshine_its_own_walls() {
+        // A building reads when the eye finds its masonry first. The chapel's
+        // floor grit was the same value as a wall's cap, which is part of why the
+        // place read as a field of symbols rather than as a nave. Only the chapel
+        // is asserted here: the other five places are deliberately untouched, and
+        // whether they want the same treatment is a question for their own phases.
+        let arte = Arte::rich(crate::game::areas::CHAPEL);
+        let value = |colour: Color| {
+            colour
+                .as_rgb()
+                .map(|(r, g, b)| u32::from(r) + u32::from(g) + u32::from(b))
+                .unwrap_or(0)
+        };
+        assert!(
+            value(arte.grit) < value(arte.cap),
+            "floor grit {:?} is not below the wall cap {:?}",
+            arte.grit,
+            arte.cap
+        );
+        assert!(
+            value(arte.floor) < value(arte.base),
+            "the floor {:?} is not below the wall's base {:?}",
+            arte.floor,
+            arte.base
+        );
     }
 
     #[test]

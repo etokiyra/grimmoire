@@ -47,7 +47,7 @@ use super::atmosphere::{Atmosphere, Rgb, Sky};
 use super::cathedral;
 use super::journal::JournalScreen;
 use super::ornament;
-use super::screen::{Command, Screen};
+use super::screen::{Command, Message, Screen};
 use super::settings::{Motion, Shared};
 use super::sprite;
 use crate::game::{Discovery, Figure, Progress};
@@ -310,13 +310,20 @@ impl TitleScreen {
         }
     }
 
-    /// Builds the world, or quits, now that the departure has played.
+    /// Opens what the player asked for, now that the departure has played.
+    ///
+    /// **New Game and Continue are different paths.** Continue restores the file;
+    /// New Game opens the opening cinematic, which hands back through
+    /// `Message::Finished` and is answered with a *fresh* journey. Pushing
+    /// `from_save` for both — which is what this did — made New Game silently
+    /// continue the old game, and no amount of correct menu wording hides that.
     fn arrive(&mut self) -> Command {
         match self.departure {
             Some(Action::Quit) | None => Command::Quit,
             // The journal and the settings panel never leave this screen.
             Some(Action::Journal) | Some(Action::Settings) => Command::None,
-            Some(Action::NewGame) | Some(Action::Continue) => Command::Push(Box::new(
+            Some(Action::NewGame) => Command::Push(Box::new(super::opening::OpeningScreen::new())),
+            Some(Action::Continue) => Command::Push(Box::new(
                 super::exploration::ExplorationScreen::from_save(self.save.clone(), self.portrait),
             )),
         }
@@ -483,6 +490,24 @@ impl Screen for TitleScreen {
         match self.leaving {
             Some(age) if age >= DEPARTURE => self.arrive(),
             _ => Command::None,
+        }
+    }
+
+    /// Answers the opening cinematic when it is done.
+    ///
+    /// A dialogue screen would be answered by pushing another dialogue; the
+    /// opening is answered by starting the game it was announcing, which only
+    /// this screen can do because only this screen holds the store.
+    fn receive(&mut self, message: Message) -> Command {
+        match message {
+            Message::Finished if self.departure == Some(Action::NewGame) => {
+                Command::Push(Box::new(super::exploration::ExplorationScreen::fresh(
+                    self.save.clone(),
+                    self.portrait,
+                )))
+            }
+            // A screen that finished costing nothing to answer.
+            Message::Finished | Message::Talk(_) => Command::None,
         }
     }
 
@@ -879,9 +904,17 @@ impl TitleScreen {
                 ),
                 None => "no journey yet".to_string(),
             };
-            let needed = glyph::display_width(&summary) + glyph::display_width(&hint) + 4;
-            if needed <= area.width {
-                view.put_str(2, hint_row, &summary, palette.muted_style());
+            // Its own row, directly above the keys. Sharing one row with a
+            // centred hint ran the two together as "1 places seew/s choose" as
+            // soon as the save's summary was long enough to reach the middle.
+            let summary_row = hint_row.saturating_sub(1);
+            if summary_row > row {
+                view.put_str(
+                    area.centered_x(glyph::display_width(&summary)),
+                    summary_row,
+                    &summary,
+                    palette.muted_style(),
+                );
             }
         }
     }
