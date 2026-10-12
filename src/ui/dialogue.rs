@@ -25,12 +25,13 @@
 use std::time::Duration;
 
 use super::FrameContext;
+use super::cast;
 use super::screen::{Command, Screen};
 use super::theme::Palette;
 use crate::anim::Easing;
-use crate::game::Dialogue;
+use crate::game::{Dialogue, Figure};
 use crate::input::{Key, KeyCode};
-use crate::render::{AssetId, Frame, Rect, Style, glyph};
+use crate::render::{AssetId, CanvasView, Frame, Rect, Style, glyph};
 
 /// How wide the portrait plate is, in cells.
 const PORTRAIT_WIDTH: u16 = 22;
@@ -41,24 +42,13 @@ const ENTRANCE: Duration = Duration::from_millis(220);
 /// How long it takes to slide away again.
 const EXIT: Duration = Duration::from_millis(150);
 
-/// The speaker's bust, drawn as ASCII when there is no image.
-///
-/// Deliberately chibi: a big cowl and two large eyes take most of the plate,
-/// which is the same proportions as the figures out in the world.
-const PORTRAIT_ASCII: [&str; 7] = [
-    "   _____   ",
-    "  /     \\  ",
-    " |  o o  | ",
-    "  \\_____/  ",
-    " /#######\\ ",
-    "|#########|",
-    " \\#######/ ",
-];
-
-/// A modal panel showing a short exchange, with a portrait when one exists.
+/// A modal panel showing a short exchange, with the speaker's face beside it.
 #[derive(Debug, Clone, Copy)]
 pub struct DialogueScreen {
     dialogue: Dialogue,
+    /// Who is speaking, so the panel can show *their* face rather than a
+    /// generic one.
+    figure: Figure,
     portrait: Option<AssetId>,
     /// Time since the panel opened.
     open: Duration,
@@ -67,15 +57,22 @@ pub struct DialogueScreen {
 }
 
 impl DialogueScreen {
-    /// Creates a panel for `dialogue`, showing `portrait` when available.
+    /// Creates a panel for `dialogue`, spoken by `figure`.
     #[must_use]
-    pub const fn new(dialogue: Dialogue, portrait: Option<AssetId>) -> Self {
+    pub const fn new(dialogue: Dialogue, figure: Figure, portrait: Option<AssetId>) -> Self {
         DialogueScreen {
             dialogue,
+            figure,
             portrait,
             open: Duration::ZERO,
             closing: None,
         }
+    }
+
+    /// Who is speaking.
+    #[must_use]
+    pub const fn figure(&self) -> Figure {
+        self.figure
     }
 
     /// The dialogue being shown.
@@ -228,7 +225,7 @@ impl Screen for DialogueScreen {
             if let Some(portrait) = self.portrait {
                 frame.place_image(plate, portrait);
             } else {
-                draw_ascii_portrait(frame, plate, palette);
+                draw_ascii_portrait(frame, plate, palette, self.figure);
             }
             text = Rect::new(
                 plate.right().saturating_add(2),
@@ -265,25 +262,43 @@ impl Screen for DialogueScreen {
 }
 
 /// Draws the speaker's bust in the portrait plate, centred.
-fn draw_ascii_portrait(frame: &mut Frame, plate: Rect, palette: &Palette) {
-    let width = PORTRAIT_ASCII
+///
+/// The bust is the same character the world draws, in the inks that figure is
+/// drawn in, so the face in a conversation is the face on the path. A character
+/// with no bust — the player, who never speaks — falls back to a plain plate.
+fn draw_ascii_portrait(frame: &mut Frame, plate: Rect, palette: &Palette, figure: Figure) {
+    let Some(bust) = cast::art(figure).bust else {
+        return;
+    };
+    let width = bust
         .iter()
         .map(|row| row.chars().count())
         .max()
         .unwrap_or(0) as u16;
-    if plate.width < width || plate.height < PORTRAIT_ASCII.len() as u16 {
+    if plate.width < width || plate.height < bust.len() as u16 {
         return;
     }
+    let inks = cast::inks(palette, figure);
     let mut view = frame.view(plate);
     let left = view.bounds().centered_x(width);
-    let top = view.bounds().centered_y(PORTRAIT_ASCII.len() as u16);
-    for (row, line) in PORTRAIT_ASCII.iter().enumerate() {
-        view.put_str(
-            left,
-            top.saturating_add(row as u16),
-            line,
-            Style::new().with_fg(palette.character).bold(),
-        );
+    let top = view.bounds().centered_y(bust.len() as u16);
+    for (row, line) in bust.iter().enumerate() {
+        draw_inked(&mut view, left, top.saturating_add(row as u16), line, &inks);
+    }
+}
+
+/// Draws one row of a bust, each glyph in its own ink.
+///
+/// The portrait uses the same legend the world figures use, so a bust is not a
+/// second art format to keep in step: it is the same art, drawn larger.
+fn draw_inked(view: &mut CanvasView, x: u16, y: u16, line: &str, inks: &super::theme::Inks) {
+    let mut column = x;
+    for ch in line.chars() {
+        if ch != ' ' {
+            let ink = super::scenery::ink_for(ch, inks).unwrap_or(inks.cloth);
+            view.put_char(column, y, ch, Style::new().with_fg(ink).bold());
+        }
+        column = column.saturating_add(1);
     }
 }
 
@@ -292,7 +307,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{DialogueScreen, ENTRANCE, EXIT};
-    use crate::game::Dialogue;
+    use crate::game::{Dialogue, Figure};
     use crate::input::{Key, KeyCode, KeyKind};
     use crate::render::{AssetId, Canvas, Frame, ImagePlacement};
     use crate::terminal::{Capabilities, GraphicsSupport, PresentStats};
@@ -319,7 +334,7 @@ mod tests {
 
     /// A panel that has finished arriving.
     fn settled() -> DialogueScreen {
-        let mut screen = DialogueScreen::new(dialogue(), None);
+        let mut screen = DialogueScreen::new(dialogue(), Figure::Veiled, None);
         screen.update(ENTRANCE);
         screen
     }
@@ -387,7 +402,7 @@ mod tests {
 
     #[test]
     fn the_panel_rises_into_place() {
-        let mut screen = DialogueScreen::new(dialogue(), None);
+        let mut screen = DialogueScreen::new(dialogue(), Figure::Veiled, None);
         assert!(screen.reveal() < 0.01, "it starts off the bottom");
         assert!(screen.is_animating());
 
@@ -404,7 +419,7 @@ mod tests {
     #[test]
     fn a_panel_that_has_not_risen_yet_leaves_the_screen_alone() {
         // At rest the panel sits below the bottom edge, so nothing of it is drawn.
-        let screen = DialogueScreen::new(dialogue(), None);
+        let screen = DialogueScreen::new(dialogue(), Figure::Veiled, None);
         let (canvas, _) = compose(&screen, 100, 30);
         assert!(
             !frame_text(&canvas).contains("Ysolde"),

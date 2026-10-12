@@ -9,6 +9,70 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Added — a region worth exploring, and something to find in it
+
+- **Four new places, and the world is now a graph rather than two rooms.**
+  *Whispering Woods* (a trodden trail, a hidden glade, a keeper with a lantern),
+  *Hollow Village* (a crossroad, six fallen houses, a dry well), *Moonwell Shrine*
+  (a pale colonnade around a pool, three braziers, a dial, and a sealed door), and
+  *Forgotten Catacombs* (burial galleries and a scribe's tomb). Every one is
+  reachable from the chapel without solving anything.
+- **Every area has a material and an air.** The wood is floored in grass and
+  breathes pollen and blossom; the village is ash and cinders; the shrine is pale
+  marble under cold silver motes; the catacombs are bone dust. Trees are now drawn
+  neighbour-aware, so a wood reads as a canopy with edges rather than a field of
+  identical icons.
+- **Five characters, each with a silhouette and an opinion.** Ysolde is joined by
+  Rin the lantern keeper, Cassen the scavenger, Ioreth the priestess, and Vesper
+  the revenant. Each has four authored facings and a bust that appears when they
+  speak.
+- **Discoveries and a journal.** Seven discoveries, each with a title and a piece
+  of the setting, recorded when they are *found* rather than when an area loads.
+  The journal (`j`) lists them and how many are still out there.
+- **Dialogue that remembers.** A character's speech is a default plus variants
+  unlocked by discoveries, so what you have learned changes what people will tell
+  you.
+- **The moonwell.** Three braziers marked with phases of the moon and a dial cut
+  into the floor naming the order. Light them in order and the water answers;
+  light one out of turn and all three go out. Solved state and lit braziers
+  persist, and answering it opens a shortcut between the shrine and the
+  catacombs — both ways, so it is a shortcut rather than a toll.
+- **A cast table** (`ui::cast`): every figure's art, inks and dialogue bust in one
+  place, so the renderer draws a role the model named rather than a hardcoded
+  character. Props work the same way, replacing the old "tell objects apart by
+  their single glyph" hack.
+
+### Fixed — a panel dismissed itself on the key's own release
+
+- The journal (and, latently, the help overlay) treated the *release* of the key
+  that opened them as an activation, so `j` opened the panel and its release closed
+  it again in the same instant. Both now require a genuine press, like the dialogue
+  panel already did. Found by driving the game in a real terminal, which is the
+  only place it shows up.
+
+### Changed — the save format grew a version, and migrates
+
+- **Save version 2** adds the journal and the moonwell's braziers. **Version 1
+  files are still read**, widened into the new fields rather than converted: a
+  player from before progression existed keeps their place and simply has nothing
+  discovered. Nothing is reinterpreted and no valid save is discarded because the
+  schema grew.
+- Progression ids this build does not recognise are dropped individually, so a
+  discovery that was renamed or removed costs only itself.
+- A version 1 file carrying a version 2 field is rejected rather than guessed at.
+- The generator now **carves a tree out of a passage** exactly as it carves a
+  wall, which is how the wood's trails are thinned to the character's width.
+
+### Changed — the generator catches a whole class of map mistake
+
+- `tools/apply-areas.py` writes the generated maps into `src/game/areas.rs`, so
+  the committed layout is always the one the generator produces.
+- The generator resolves every named landmark against the *finished* map and
+  refuses to continue if one landed more than a few cells from where it was asked
+  for. That is what catches the failure this phase actually hit: a glade drawn
+  with the trail stopping three cells short of it, which was then quietly sealed
+  off as an unreachable island.
+
 ### Changed — passages the character can actually walk through, and GPLv3
 
 - **Every passage now fits the character.** The sprite is five cells wide, and the

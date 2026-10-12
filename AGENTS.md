@@ -71,9 +71,35 @@ All current area names, entities, and dialogue lines are placeholders.
 - The rule is enforced twice, so a hand edit cannot quietly regress it:
   `tools/generate-areas.py` (`widen`) widens a narrow map and refuses to emit
   one, and `src/game/areas.rs` asserts it in `every_passage_fits_the_character`.
+- Maps are **generated**: `tools/generate-areas.py` draws them, `tools/apply-areas.py`
+  writes the grids into `src/game/areas.rs`. Everything around the grid — the
+  cast, the props, the doorways, the spawns, the landmarks — is authored by hand
+  there, from the coordinates the generator prints.
 - Read [`docs/map-design.md`](docs/map-design.md) before drawing or editing an
   area. It also lists the rules a map already had to satisfy (reachability,
-  doorway placement, viewport size).
+  doorway placement, viewport size) and the material/air/motif identity each area
+  should carry.
+
+## Content and progression
+
+- **A discovery is the reward.** Recording one is what "finding something" means,
+  and it happens when the player examines a relic or answers the moonwell — never
+  because an area was loaded. `game::discovery` is the whole list.
+- **A character is a role, not a picture.** The model names a `Figure` or a `Prop`;
+  `ui::cast` and one table in `ui::scenery` decide what it looks like. Adding a
+  character or an artefact must not add a branch to the renderer.
+- **Names and words live in the model.** `Entity::name`, `Dialogue::speaker` and
+  every journal line are content. The renderer has no idea what any of them say.
+- **Progression stays small and principled.** What exists is discoveries, the
+  journal order, and the moonwell's braziers. Do not add a level, a skill tree, an
+  economy or an inventory until a phase concretely needs one; the state is shaped
+  so those can be added beside it rather than replacing it.
+- **Unlocking is a shortcut, not a toll.** Every area must be reachable without
+  solving anything; a puzzle may open a faster way between two places.
+- **Saving migrates, it does not discard.** Files are written at the current
+  version and older ones are read, widened into the new fields. A progression id
+  this build does not know costs only itself. Never reset a valid save because the
+  schema grew.
 
 ## Architecture invariants
 

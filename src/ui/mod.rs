@@ -9,10 +9,12 @@
 
 pub mod animation;
 pub mod art;
+pub mod cast;
 pub mod dialogue;
 pub mod effects;
 pub mod exploration;
 pub mod help;
+pub mod journal;
 pub mod layout;
 pub mod motion;
 pub mod scenery;
@@ -26,6 +28,7 @@ pub mod viewport;
 pub use dialogue::DialogueScreen;
 pub use exploration::ExplorationScreen;
 pub use help::HelpOverlay;
+pub use journal::JournalScreen;
 pub use layout::Layout;
 pub use screen::{Command, Outcome, Screen, ScreenStack};
 pub use showcase::{Scene, Showcase};

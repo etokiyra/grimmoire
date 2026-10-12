@@ -91,6 +91,12 @@ pub struct Palette {
     pub character: Color,
     /// Growth and natural materials.
     pub nature: Color,
+    /// The same, in shade: the mass of a wood rather than its edges.
+    ///
+    /// A separate role rather than `nature` plus the dim attribute, because a
+    /// terminal may not honour dim on an indexed colour at all — which is exactly
+    /// what made the first forest a wall of full-brightness green.
+    pub nature_dark: Color,
     /// Relics and cool accents.
     pub relic: Color,
     /// Warnings and errors.
@@ -103,10 +109,18 @@ pub struct Palette {
     pub shade_near: Color,
     /// Foreground used on top of a bright highlight background.
     pub highlight_fg: Color,
-    /// The player character's colours.
+    /// The player character's colours: the mage bunny.
     pub mage: Inks,
     /// The veiled figure's colours.
     pub veiled: Inks,
+    /// A small keeper carrying a lantern: warm gold and amber.
+    pub lantern: Inks,
+    /// A scavenger: weathered tan, dull brown, and a glint of brass.
+    pub scavenger: Inks,
+    /// A priestess: pale silver, deep indigo, and moonlight.
+    pub priestess: Inks,
+    /// A bound revenant: bone, grave-wrappings, and rust.
+    pub revenant: Inks,
 }
 
 impl Palette {
@@ -135,6 +149,7 @@ impl Palette {
         player: Color::LightYellow,
         character: Color::LightMagenta,
         nature: Color::LightGreen,
+        nature_dark: Color::Green,
         relic: Color::LightBlue,
         warning: Color::LightRed,
         shade_deep: Color::Black,
@@ -163,6 +178,50 @@ impl Palette {
             magic: Color::LightMagenta,
             shadow: Color::Black,
         },
+        lantern: Inks {
+            skin: Color::LightYellow,
+            hair: Color::Yellow,
+            cloth: Color::LightRed,
+            cloth_dark: Color::Red,
+            trim: Color::White,
+            eye: Color::LightCyan,
+            wood: Color::Yellow,
+            magic: Color::LightYellow,
+            shadow: Color::Black,
+        },
+        scavenger: Inks {
+            skin: Color::Yellow,
+            hair: Color::DarkGrey,
+            cloth: Color::DarkGrey,
+            cloth_dark: Color::Black,
+            trim: Color::Red,
+            eye: Color::White,
+            wood: Color::Yellow,
+            magic: Color::Red,
+            shadow: Color::Black,
+        },
+        priestess: Inks {
+            skin: Color::White,
+            hair: Color::LightCyan,
+            cloth: Color::Blue,
+            cloth_dark: Color::Black,
+            trim: Color::White,
+            eye: Color::LightCyan,
+            wood: Color::Cyan,
+            magic: Color::LightCyan,
+            shadow: Color::Black,
+        },
+        revenant: Inks {
+            skin: Color::White,
+            hair: Color::DarkGrey,
+            cloth: Color::DarkGrey,
+            cloth_dark: Color::Black,
+            trim: Color::Red,
+            eye: Color::LightGreen,
+            wood: Color::Red,
+            magic: Color::LightGreen,
+            shadow: Color::Black,
+        },
     };
 
     /// The richer 256-colour palette: an inky violet night with warm stone.
@@ -186,6 +245,7 @@ impl Palette {
         player: Color::Indexed(231),
         character: Color::Indexed(176),
         nature: Color::Indexed(107),
+        nature_dark: Color::Indexed(22),
         relic: Color::Indexed(110),
         warning: Color::Indexed(203),
         shade_deep: Color::Indexed(234),
@@ -218,6 +278,57 @@ impl Palette {
             eye: Color::Indexed(141),
             wood: Color::Indexed(234),
             magic: Color::Indexed(141),
+            shadow: Color::Indexed(233),
+        },
+        // Rin, the keeper: a warm, bright little figure, the second most
+        // saturated thing on screen after the player.
+        lantern: Inks {
+            skin: Color::Indexed(223),
+            hair: Color::Indexed(222),
+            cloth: Color::Indexed(179),
+            cloth_dark: Color::Indexed(94),
+            trim: Color::Indexed(231),
+            eye: Color::Indexed(87),
+            wood: Color::Indexed(137),
+            magic: Color::Indexed(214),
+            shadow: Color::Indexed(234),
+        },
+        // Cassen, the scavenger: weathered, dusty, and a little dishonest. Warm
+        // but desaturated, so he sits in the landscape rather than on it.
+        scavenger: Inks {
+            skin: Color::Indexed(180),
+            hair: Color::Indexed(101),
+            cloth: Color::Indexed(95),
+            cloth_dark: Color::Indexed(237),
+            trim: Color::Indexed(137),
+            eye: Color::Indexed(144),
+            wood: Color::Indexed(101),
+            magic: Color::Indexed(137),
+            shadow: Color::Indexed(234),
+        },
+        // Ioreth, the priestess: cold silver and deep indigo, lit from above.
+        priestess: Inks {
+            skin: Color::Indexed(189),
+            hair: Color::Indexed(189),
+            cloth: Color::Indexed(61),
+            cloth_dark: Color::Indexed(17),
+            trim: Color::Indexed(255),
+            eye: Color::Indexed(159),
+            wood: Color::Indexed(144),
+            magic: Color::Indexed(195),
+            shadow: Color::Indexed(234),
+        },
+        // Vesper, the revenant: bone, grave-cloth, and rust. The only figure
+        // with a green light in it, which is what makes it read as wrong.
+        revenant: Inks {
+            skin: Color::Indexed(187),
+            hair: Color::Indexed(180),
+            cloth: Color::Indexed(238),
+            cloth_dark: Color::Indexed(236),
+            trim: Color::Indexed(130),
+            eye: Color::Indexed(155),
+            wood: Color::Indexed(137),
+            magic: Color::Indexed(155),
             shadow: Color::Indexed(233),
         },
     };

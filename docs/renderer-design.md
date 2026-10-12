@@ -180,6 +180,35 @@ walked constantly are drawn wider. A one-cell corridor would put her shoulders
 through the wall on both sides. [`map-design.md`](map-design.md) states the rule
 and the widths in use; `areas::MIN_PASSAGE` and the generator enforce it.
 
+### The cast is a table, not a special case
+
+`ui::cast` holds every character's art, inks and dialogue bust in one place. The
+world model names a **role** (`Figure::Lantern`), the interface decides what that
+looks like, and `ui::scenery` never learns who it is drawing. That is what let the
+cast go from one hardcoded silhouette to five distinct characters without the
+renderer growing a branch per character — and adding a sixth is a variant, a table
+entry, and nothing else.
+
+The same holds for props: an object names a `Prop`, and one table maps it to art
+and ink. Before, objects were told apart by their single drawing character, which
+meant adding one meant editing a match in the renderer and hoping no two shared a
+glyph.
+
+### Place: material and air
+
+Two knobs give an area its identity, and both are small:
+
+- **`Ground`** — the glyphs, ink and grit of the open floor. The wood is grass and
+  leaf litter, the village is ash and brick-dust, the shrine is pale polished
+  slab, the catacombs are bone dust. The floor is the largest surface on screen,
+  so it is the loudest cue for *where* the player is.
+- **`Air`** — what drifts. The same mote system, with a different particle:
+  pollen and blossom in the wood, ash and the odd cinder in the village, cold
+  silver in the shrine, bone dust in the catacombs. Density differs too, so a wood
+  is busier than a crypt.
+
+A third, the **motif** inlaid into open floors, was already there.
+
 ```
  ^ ^                  ___
 (●:●)   the bunny    (o@o)   Ysolde

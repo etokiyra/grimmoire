@@ -21,6 +21,11 @@
 //!    time, and none of it is ever drawn over a character, a prop or a doorway.
 //! 5. **Figures.** Characters are multi-coloured ASCII figures: hair, skin, cloth,
 //!    trim and eyes are separate inks, with four facing directions and a stride.
+//!    Which art a figure gets comes from [`super::cast`], never from a special
+//!    case here.
+//! 6. **Place.** Each area has its own ground, its own air, and its own inlay, so
+//!    a wood, a village, a shrine and a crypt are told apart before the location
+//!    name is read.
 //!
 //! # Draw order
 //!
@@ -31,9 +36,10 @@
 //! Everything here is pure: a world, a palette, a time and a pose in; cells out.
 //! It knows nothing about terminals, input, or the game's rules.
 
-use crate::game::{Area, AreaId, Direction, EntityKind, Position, Tile, World};
+use crate::game::{Area, AreaId, Direction, EntityKind, Figure, Position, Prop, Tile, World};
 
 use super::animation::{Pose, Stage};
+use super::cast;
 use super::effects::{Effects, Pulse};
 use super::theme::{Inks, Palette};
 use crate::render::{CanvasView, Color, Style};
@@ -50,6 +56,14 @@ mod art {
     pub const FLOOR: &[char] = &['·', '.', '·', '.', '·', '\''];
     /// Trodden earth paths.
     pub const PATH: &[char] = &[',', '·', ',', ';', ',', '.'];
+    /// Grass, leaf litter and clover, for the wood.
+    pub const GRASS: &[char] = &['"', '\'', ',', '"', '.', '\''];
+    /// Ash, brick-dust and broken tile, for the village.
+    pub const ASH: &[char] = &['·', '.', '·', '.', ',', '·'];
+    /// Pale polished slabs, for the shrine.
+    pub const MARBLE: &[char] = &['·', '.', '·', '.', '·', '\''];
+    /// Bone dust and splinters, for the catacombs.
+    pub const BONE: &[char] = &['·', '.', '·', '.', ';', '·'];
     /// Flood water, calm to moving.
     pub const WATER: &[char] = &['~', '~', '≈', '~', '∼', '~'];
     /// Rubble and broken masonry scattered over a floor.
@@ -57,53 +71,37 @@ mod art {
     /// A candle flame, in the order it gutters.
     pub const FLAME: &[char] = &['\'', '.', 'i', '*', 'i', '.'];
 
-    /// The mage bunny's head: two rows for `[north, east, south, west]`.
-    ///
-    /// Chibi proportions on purpose: two long ears and a face with big eyes take
-    /// the whole figure, and the robe underneath is one row. The whole sprite is
-    /// three cells tall, the same as a doorway or a tree, so she stands in the
-    /// world rather than towering over it.
-    ///
-    /// The profiles are authored rather than mirrored at draw time, and the eye
-    /// sits *toward* the direction of travel, because that is the only cue that
-    /// makes a two-row head read as facing one way or the other.
-    pub const BUNNY_HEAD: [[&str; 2]; 4] = [
-        // North: the backs of the ears.
-        [" ^ ^ ", " ~~~ "],
-        // East: the eye forward, the muzzle to the right.
-        ["  ^^ ", "( :●)"],
-        // South: face on, two big eyes.
-        [" ^ ^ ", "(●:●)"],
-        // West: the mirrored profile.
-        [" ^^  ", "(●: )"],
-    ];
-
-    /// The veiled figure's head: a deep cowl and two cold lights.
-    ///
-    /// No skin ink at all, which is what makes her read as something other than a
-    /// person.
-    pub const VEILED_HEAD: [[&str; 2]; 4] = [
-        [" ___ ", " ### "],
-        [" ___ ", " (o@)"],
-        [" ___ ", "(o@o)"],
-        [" ___ ", "(@o)"],
-    ];
-
-    /// The hem row: the dress, swishing as she walks.
-    pub const DRESS: [&str; 2] = ["/#+#\\", "\\#+#/"];
-    /// The veiled figure's robe, with the same sway.
-    pub const ROBE: [&str; 2] = ["/###\\", "\\###/"];
-
     /// Sparkles thrown off by magic, in the order they twinkle.
     pub const SPARKLE: &[char] = &['·', '+', '✧', '*', '✧', '+'];
 
-    /// A wand: a star on a short haft, held beside the witch.
-    pub const WAND: [&str; 2] = ["*", "|"];
+    // -- props ---------------------------------------------------------------
+    //
+    // Each is a small block drawn with its baseline on a world cell, in a single
+    // role colour. They are shapes rather than pictograms: five cells across is
+    // enough for a silhouette to be unmistakable and not enough for detail, which
+    // is exactly the discipline the world renderer works under.
 
-    /// A cracked basin, two cells high.
+    /// A cracked basin: a bowl on a stem.
     pub const BASIN: [&str; 3] = [".---.", "\\___/", "  |  "];
     /// A faded sigil, cut into the floor, in its two turning phases.
     pub const SIGIL: [[&str; 3]; 2] = [["\\|/", "-O-", "/|\\"], ["/|\\", "-O-", "\\|/"]];
+    /// A well: a stone drum, unlike the basin because it is solid to the ground.
+    pub const WELL: [&str; 3] = [".---.", "|###|", "\\___/"];
+    /// A bundle of letters, tied with string.
+    pub const LETTERS: [&str; 3] = [" ___ ", "/=+=\\", "\\___/"];
+    /// A cairn of stacked stones.
+    pub const CAIRN: [&str; 3] = ["  ^  ", " ( ) ", "(-=-)"];
+    /// A standing stone with a hole worn through it.
+    pub const STANDING_STONE: [&str; 3] = [" ___ ", "| o |", "|_|_|"];
+    /// A dial cut into the floor, marked with the moon's phases.
+    pub const DIAL: [&str; 3] = [" ___ ", "(o o)", "\\_=_/"];
+    /// A stone coffin with its lid still on.
+    pub const SARCOPHAGUS: [&str; 3] = [" _____ ", "|=|=|=|", "|_____|"];
+    /// A bronze brazier, empty.
+    pub const BRAZIER: [&str; 3] = [" ___ ", "|___|", "  |  "];
+    /// A brazier's flame, drawn above the bowl once it is lit.
+    pub const BRAZIER_FLAME: &[char] = &['*', '\'', 'i', '*'];
+
     /// An arched doorway.
     pub const DOOR: [&str; 3] = [".-.", "| |", "|_|"];
     /// A bare, dead tree.
@@ -132,22 +130,144 @@ fn motif_for(area: AreaId) -> Option<&'static Motif> {
         rings: &[4, 8, 12],
         lattice: false,
     };
-    if area == areas::CHAPEL {
-        Some(&CHAPEL)
-    } else if area == areas::CELLAR {
-        Some(&CELLAR)
-    } else {
-        None
+    // The glade: rings around the standing stone, in a clearing cleared by hand.
+    static WOODS: Motif = Motif {
+        centre: (18, 30),
+        rings: &[3, 6, 9],
+        lattice: false,
+    };
+    // The village: a lattice of trodden ground between the fallen houses.
+    static VILLAGE: Motif = Motif {
+        centre: (62, 20),
+        rings: &[9, 22],
+        lattice: true,
+    };
+    // The shrine: rings widening from the moonwell itself.
+    static SHRINE: Motif = Motif {
+        centre: (56, 20),
+        rings: &[9, 15],
+        lattice: false,
+    };
+    // The catacombs: a bone lattice cut around the scribe's chamber.
+    static CATACOMBS: Motif = Motif {
+        centre: (71, 22),
+        rings: &[5, 9],
+        lattice: true,
+    };
+    match area {
+        areas::CHAPEL => Some(&CHAPEL),
+        areas::CELLAR => Some(&CELLAR),
+        areas::WOODS => Some(&WOODS),
+        areas::VILLAGE => Some(&VILLAGE),
+        areas::SHRINE => Some(&SHRINE),
+        areas::CATACOMBS => Some(&CATACOMBS),
+        _ => None,
     }
 }
 
-/// One character's art: its head rows, its hem, the inks it is drawn in, and
-/// whether it carries a wand.
-struct Figure<'a> {
-    heads: &'a [[&'a str; 2]; 4],
-    hems: &'a [&'a str; 2],
-    inks: &'a Inks,
-    wand: bool,
+/// What an area's open ground is made of.
+///
+/// The single strongest cue for telling one place from another: the eye reads the
+/// field colour before it reads a single wall. Each area is one material, and the
+/// material chooses the glyphs, the ink, and how often grit appears in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ground {
+    /// Worn grey flagstones, with moss in the joints.
+    Stone,
+    /// Damp stone, dark and beaded with water.
+    Damp,
+    /// Grass and leaf litter.
+    Grass,
+    /// Ash, brick-dust and broken tiles.
+    Ash,
+    /// Pale polished slabs.
+    Marble,
+    /// Bone dust and splinters.
+    Bone,
+}
+
+/// The ground an area is floored with.
+fn ground_for(area: AreaId) -> Ground {
+    use crate::game::areas;
+    match area {
+        areas::CELLAR => Ground::Damp,
+        areas::WOODS => Ground::Grass,
+        areas::VILLAGE => Ground::Ash,
+        areas::SHRINE => Ground::Marble,
+        areas::CATACOMBS => Ground::Bone,
+        _ => Ground::Stone,
+    }
+}
+
+/// What drifts through an area's air.
+///
+/// The same effect as motes everywhere, with a different nature, so a shrine and
+/// a wood are alive in different ways without one becoming noise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Air {
+    /// Dust in still air.
+    Dust,
+    /// Pollen and blossom, and the occasional late firefly.
+    Pollen,
+    /// Fine ash, and the odd cinder.
+    Ash,
+    /// Cold, bright motes: moonlight with something in it.
+    Silver,
+    /// Bone dust, and a green something that is not dust.
+    Bone,
+}
+
+/// The air an area breathes.
+fn air_for(area: AreaId) -> Air {
+    use crate::game::areas;
+    match area {
+        areas::WOODS => Air::Pollen,
+        areas::VILLAGE => Air::Ash,
+        areas::SHRINE => Air::Silver,
+        areas::CATACOMBS => Air::Bone,
+        _ => Air::Dust,
+    }
+}
+
+/// The four glyphs a mote can wear as it fades in, brightens, and goes out, plus
+/// how thinly it is spread.
+struct AirArt {
+    /// A mote just arriving, steady, bright, and a rare flourish.
+    glyphs: [char; 4],
+    /// One mote per this many tiles, before the drifting lattice is applied.
+    density: u32,
+    /// The ink each mote is drawn in.
+    ink: fn(&Palette) -> Color,
+}
+
+fn air_art(air: Air) -> AirArt {
+    match air {
+        Air::Dust => AirArt {
+            glyphs: ['.', '\'', '·', '·'],
+            density: 53,
+            ink: |palette| palette.text_muted,
+        },
+        Air::Pollen => AirArt {
+            glyphs: ['.', '·', '✿', '❀'],
+            density: 29,
+            ink: |palette| palette.mage.hair,
+        },
+        Air::Ash => AirArt {
+            glyphs: ['.', '\'', '·', '*'],
+            density: 61,
+            ink: |palette| palette.border,
+        },
+        Air::Silver => AirArt {
+            glyphs: ['.', '·', '✧', '·'],
+            density: 41,
+            ink: |palette| palette.relic,
+        },
+        Air::Bone => AirArt {
+            glyphs: ['.', '\'', '·', '*'],
+            density: 71,
+            ink: |palette| palette.text_secondary,
+        },
+    }
 }
 
 /// The world, a palette, the time, and what the player is doing.
@@ -300,23 +420,104 @@ impl Scenery<'_> {
                 }
                 (ch, style)
             }
-            Tile::Floor => {
+            // Open ground is the strongest sign of *where* the player is, so the
+            // area's material decides the glyphs, the ink, and what grows in it.
+            Tile::Floor | Tile::Path => {
                 let h = hash(position.x as i32, position.y as i32, 0x21);
-                if h % 37 == 0 {
-                    let glyph = art::RUBBLE[(h as usize >> 8) % art::RUBBLE.len()];
-                    return (glyph, Style::new().with_fg(palette.border));
+                let trodden = tile == Tile::Path;
+                match ground_for(self.world.area_id()) {
+                    Ground::Grass => {
+                        if h % 43 == 0 {
+                            // A stone the roots have shouldered out.
+                            return ('*', Style::new().with_fg(palette.text_muted));
+                        }
+                        if h % 6 == 0 {
+                            // Blades catch the light; the ground under them does not.
+                            return ('"', Style::new().with_fg(palette.nature));
+                        }
+                        let glyph = if trodden {
+                            art::PATH[(h as usize >> 8) % art::PATH.len()]
+                        } else {
+                            art::GRASS[(h as usize >> 16) % art::GRASS.len()]
+                        };
+                        let ink = if trodden {
+                            palette.text_muted
+                        } else {
+                            palette.nature_dark
+                        };
+                        (glyph, Style::new().with_fg(ink))
+                    }
+                    Ground::Ash => {
+                        if h % 31 == 0 {
+                            return ('.', Style::new().with_fg(palette.text_muted));
+                        }
+                        let glyph = art::ASH[(h as usize >> 16) % art::ASH.len()];
+                        let ink = if trodden {
+                            palette.text_muted
+                        } else {
+                            palette.border
+                        };
+                        (glyph, Style::new().with_fg(ink))
+                    }
+                    Ground::Marble => {
+                        if h % 47 == 0 {
+                            // A polished joint catching the light.
+                            return ('=', Style::new().with_fg(palette.relic));
+                        }
+                        let glyph = art::MARBLE[(h as usize >> 16) % art::MARBLE.len()];
+                        let ink = if trodden {
+                            palette.relic
+                        } else {
+                            palette.separator
+                        };
+                        (glyph, Style::new().with_fg(ink))
+                    }
+                    Ground::Bone => {
+                        if h % 37 == 0 {
+                            return ('x', Style::new().with_fg(palette.text_secondary));
+                        }
+                        let glyph = art::BONE[(h as usize >> 16) % art::BONE.len()];
+                        let ink = if trodden {
+                            palette.text_muted
+                        } else {
+                            palette.separator
+                        };
+                        (glyph, Style::new().with_fg(ink))
+                    }
+                    Ground::Damp => {
+                        if h % 29 == 0 {
+                            return ('"', Style::new().with_fg(palette.accent_alt).dim());
+                        }
+                        let glyph = art::FLOOR[(h as usize >> 16) % art::FLOOR.len()];
+                        let ink = if trodden {
+                            palette.accent_alt_dim
+                        } else {
+                            palette.separator
+                        };
+                        (glyph, Style::new().with_fg(ink).dim())
+                    }
+                    Ground::Stone => {
+                        if h % 37 == 0 {
+                            let glyph = art::RUBBLE[(h as usize >> 8) % art::RUBBLE.len()];
+                            return (glyph, Style::new().with_fg(palette.border));
+                        }
+                        if h % 29 == 0 {
+                            // Moss creeping out of the joints.
+                            return ('"', Style::new().with_fg(palette.nature).dim());
+                        }
+                        let glyph = if trodden {
+                            art::PATH[(h as usize >> 8) % art::PATH.len()]
+                        } else {
+                            art::FLOOR[(h as usize >> 16) % art::FLOOR.len()]
+                        };
+                        let ink = if trodden {
+                            palette.text_muted
+                        } else {
+                            palette.separator
+                        };
+                        (glyph, Style::new().with_fg(ink))
+                    }
                 }
-                if h % 29 == 0 {
-                    // Moss creeping out of the joints.
-                    return ('"', Style::new().with_fg(palette.nature).dim());
-                }
-                let glyph = art::FLOOR[(h as usize >> 16) % art::FLOOR.len()];
-                (glyph, Style::new().with_fg(palette.separator))
-            }
-            Tile::Path => {
-                let h = hash(position.x as i32, position.y as i32, 0x31);
-                let glyph = art::PATH[(h as usize >> 8) % art::PATH.len()];
-                (glyph, Style::new().with_fg(palette.text_muted))
             }
             Tile::Water => {
                 // Two wave trains at different speeds, so the surface carries a
@@ -335,7 +536,34 @@ impl Scenery<'_> {
                 };
                 (art::WATER[index], style)
             }
-            Tile::Tree => ('♣', Style::new().with_fg(palette.nature).bold()),
+            // A wood is a mass, not a field of identical icons. Deep inside it the
+            // tiles read as one dark canopy; only where the wood meets open ground
+            // does a crown or a trunk show, which is what makes its shape legible
+            // at a glance.
+            Tile::Tree => {
+                if !neighbours.north {
+                    return ('♣', Style::new().with_fg(palette.nature).bold());
+                }
+                if !neighbours.south {
+                    return ('|', Style::new().with_fg(palette.nature_dark));
+                }
+                if !neighbours.east || !neighbours.west {
+                    return ('▓', Style::new().with_fg(palette.nature_dark));
+                }
+                // Deep in the wood the trees are a mass, and a mass painted solid
+                // green is a wall of green however dark the green is. So the mass
+                // is drawn in shade with the wood breaking through it: the eye
+                // reads depth, and the green stays where it belongs - at the edges
+                // and in the gaps.
+                let h = hash(position.x as i32, position.y as i32, 0x61);
+                if h % 4 == 0 {
+                    ('♣', Style::new().with_fg(palette.nature_dark))
+                } else if h % 13 == 0 {
+                    ('♠', Style::new().with_fg(palette.border))
+                } else {
+                    ('▓', Style::new().with_fg(palette.shade_mid))
+                }
+            }
             Tile::Door => ('.', Style::new().with_fg(palette.separator)),
         }
     }
@@ -379,29 +607,65 @@ impl Scenery<'_> {
 
     // -- props ---------------------------------------------------------------
 
-    /// Draws doors, trees and the objects people can interact with.
+    /// Draws doors, the objects people can interact with, and the braziers.
     fn draw_props(&self, view: &mut CanvasView, area: &Area, window: Window) {
         window.each(|(sx, sy), position| {
-            let art = match area.tile(position) {
-                Tile::Door => Some(&art::DOOR[..]),
-                Tile::Tree => Some(&art::TREE[..]),
-                _ => None,
-            };
-            if let Some(art) = art {
-                self.draw_art(view, window, (sx, sy), art, self.palette.border, 2);
+            // A sealed doorway is drawn exactly like an open one: the player can
+            // see where it goes and can try it. What is withheld is the way
+            // through, not the knowledge that it is there.
+            if area.tile(position) == Tile::Door {
+                let open = area.portal_index_at(position).is_some_and(|index| {
+                    area.portal(index)
+                        .is_some_and(|portal| portal.is_open(|d| self.world.knows(d)))
+                });
+                let ink = if open {
+                    self.palette.border
+                } else {
+                    self.palette.accent_dim
+                };
+                self.draw_art(view, window, (sx, sy), &art::DOOR, ink, 2);
+            }
+            // A tree standing on its own in the open is drawn in full, with a
+            // crown and a trunk. A tree in a wood is part of the mass, and is drawn
+            // by the terrain pass instead.
+            if area.tile(position) == Tile::Tree {
+                let neighbours = neighbours_of(area, position);
+                let alone =
+                    !neighbours.north && !neighbours.south && !neighbours.east && !neighbours.west;
+                if alone {
+                    self.draw_art(view, window, (sx, sy), &art::TREE, self.palette.nature, 2);
+                }
             }
         });
 
         for entity in area.entities() {
-            let (art, ink, baseline) = match entity.kind {
-                EntityKind::Object { .. } => match entity.glyph {
-                    '*' => (sigil_phase(self.phase), self.palette.effect, 1),
-                    _ => (&art::BASIN[..], self.palette.interactive, 2),
-                },
-                EntityKind::Npc { .. } => continue,
+            let Some(at) = window.screen(entity.position, view) else {
+                continue;
             };
-            if let Some(at) = window.screen(entity.position, view) {
-                self.draw_art(view, window, at, art, ink, baseline);
+            match entity.kind {
+                EntityKind::Npc { .. } => {}
+                EntityKind::Object { prop, .. } => {
+                    let (art, ink, baseline) = prop_art(self.phase, prop, self.palette);
+                    self.draw_art(view, window, at, art, ink, baseline);
+                }
+                EntityKind::Brazier { phase, .. } => {
+                    self.draw_art(view, window, at, &art::BRAZIER, self.palette.border, 2);
+                    if self.world.progress().is_lit(phase) {
+                        // The flame gutters above the bowl, each phase out of step
+                        // with the next, so three lit braziers are visibly three
+                        // fires rather than one pattern repeated.
+                        let index = (self.phase * 5.0 + phase.index() as f32 * 1.7) as usize
+                            % art::BRAZIER_FLAME.len();
+                        self.draw_cell(
+                            view,
+                            window,
+                            i32::from(at.0),
+                            i32::from(at.1) - 2,
+                            art::BRAZIER_FLAME[index],
+                            self.palette.effect,
+                        );
+                    }
+                }
             }
         }
     }
@@ -415,6 +679,7 @@ impl Scenery<'_> {
     /// shifting lattice, which is what makes them drift with no per-mote state,
     /// and they are only ever drawn on bare floor.
     fn draw_ambience(&self, view: &mut CanvasView, area: &Area, window: Window) {
+        let air = air_art(air_for(self.world.area_id()));
         let drift_x = (self.phase * 0.55) as i32;
         let drift_y = (self.phase * 0.31) as i32;
         let shimmer = (self.phase * 0.9).sin();
@@ -431,7 +696,7 @@ impl Scenery<'_> {
                 i32::from(position.y) - drift_y,
                 0x7f,
             );
-            if h % 53 != 0 {
+            if h % air.density != 0 {
                 return;
             }
             // Each mote breathes: it fades in, drifts, and fades out.
@@ -439,17 +704,17 @@ impl Scenery<'_> {
             if breath < -0.2 {
                 return;
             }
-            // A few of them are blossom rather than dust, which is most of what
-            // makes the air read as anime rather than as a dusty room.
-            let petal = h % 5 == 0;
-            let (glyph, ink) = if petal {
-                (if breath > 0.5 { '✿' } else { '❀' }, self.palette.mage.hair)
+            // Most motes are the same particle at a different moment of its life;
+            // the fourth glyph is the rare one, which is what gives each place its
+            // own weather - blossom in the wood, cinders in the village.
+            let (glyph, ink) = if h % 5 == 0 && breath > 0.2 {
+                (air.glyphs[3], self.palette.focus)
             } else if breath > 0.7 {
-                ('·', self.palette.focus)
+                (air.glyphs[2], (air.ink)(self.palette))
             } else if breath > 0.1 {
-                ('\'', self.palette.text_muted)
+                (air.glyphs[1], (air.ink)(self.palette))
             } else {
-                ('.', self.palette.border)
+                (air.glyphs[0], self.palette.border)
             };
             let mut style = Style::new().with_fg(ink);
             if shimmer > 0.85 {
@@ -465,39 +730,28 @@ impl Scenery<'_> {
     /// Draws the people, in front of everything else.
     fn draw_figures(&self, view: &mut CanvasView, area: &Area, window: Window) {
         for entity in area.entities() {
-            if !matches!(entity.kind, EntityKind::Npc { .. }) {
+            let EntityKind::Npc { figure, facing, .. } = entity.kind else {
                 continue;
-            }
-            let sway = (self.phase * 1.1).sin() > 0.3;
-            let figure = Figure {
-                heads: &art::VEILED_HEAD,
-                hems: &art::ROBE,
-                inks: &self.palette.veiled,
-                wand: false,
             };
+            // Everyone breathes, but not in unison.
+            let sway = (self.phase * 1.1 + f32::from(entity.position.x)).sin() > 0.3;
             self.draw_figure(
                 view,
                 window,
                 entity.position,
-                &figure,
-                &Pose::idle(Direction::South),
+                figure,
+                &Pose::idle(facing),
                 sway,
             );
         }
 
         // A sprint leans into the direction of travel and leaves a wake.
         let sprinting = matches!(self.player.stage, Stage::Sprint);
-        let figure = Figure {
-            heads: &art::BUNNY_HEAD,
-            hems: &art::DRESS,
-            inks: &self.palette.mage,
-            wand: true,
-        };
         self.draw_figure(
             view,
             window,
             self.world.player(),
-            &figure,
+            Figure::Mage,
             &self.player,
             self.player.frame % 2 == 1,
         );
@@ -506,21 +760,27 @@ impl Scenery<'_> {
         }
     }
 
-    /// Draws a figure: body, stride, and optionally the staff it carries.
+    /// Draws a figure: head, hem, stride, and whatever it carries.
+    ///
+    /// The art and the inks both come from the cast table, so this function knows
+    /// nothing about who it is drawing — a new character needs an entry there and
+    /// no change here at all.
     fn draw_figure(
         &self,
         view: &mut CanvasView,
         window: Window,
         at: Position,
-        figure: &Figure<'_>,
+        figure: Figure,
         pose: &Pose,
         sway: bool,
     ) {
         let Some((sx, sy)) = window.screen(at, view) else {
             return;
         };
-        let head = &figure.heads[pose.facing as usize];
-        let hem = figure.hems[usize::from(sway)];
+        let art = cast::art(figure);
+        let inks = cast::inks(self.palette, figure);
+        let head = &art.heads[pose.facing.index()];
+        let hem = art.hems[usize::from(sway)];
         let width = head[0].chars().count() as i32;
         let left = i32::from(sx) - (width - 1) / 2;
         let top = i32::from(sy) - (HEAD_ROWS + 1 - 1);
@@ -530,7 +790,7 @@ impl Scenery<'_> {
                 if ch == ' ' {
                     continue;
                 }
-                let Some(ink) = ink_for(ch, figure.inks) else {
+                let Some(ink) = ink_for(ch, &inks) else {
                     continue;
                 };
                 let glyph = ink_glyph(ch, pose.blinking);
@@ -545,28 +805,28 @@ impl Scenery<'_> {
             }
         }
 
-        if figure.wand {
-            // The wand is held out on the side she is not facing into.
-            let wand_left = match pose.facing {
+        if let Some(held) = art.held {
+            // Whatever is carried is held out on the side the figure is not
+            // facing into, so it is never drawn across the face.
+            let held_left = match pose.facing {
                 Direction::East => left + width,
-                Direction::West => left - 1,
-                Direction::North => left - 1,
+                Direction::West | Direction::North => left - 1,
                 Direction::South => left + width,
             };
-            for (row, line) in art::WAND.iter().enumerate() {
+            for (row, line) in held.iter().enumerate() {
                 let Some(ch) = line.chars().next() else {
                     continue;
                 };
-                let Some(ink) = ink_for(ch, figure.inks) else {
+                let Some(ink) = ink_for(ch, &inks) else {
                     continue;
                 };
-                // The star on the wand twinkles rather than sitting still.
-                let glyph = if ch == '*' {
+                // A light twinkles rather than sitting still.
+                let glyph = if ch == '*' || ch == '+' {
                     art::SPARKLE[(self.phase * 6.0) as usize % art::SPARKLE.len()]
                 } else {
                     ch
                 };
-                self.draw_cell(view, window, wand_left, top + row as i32, glyph, ink);
+                self.draw_cell(view, window, held_left, top + row as i32, glyph, ink);
             }
         }
     }
@@ -746,6 +1006,23 @@ fn sigil_phase(phase: f32) -> &'static [&'static str] {
     &art::SIGIL[(phase * 0.7) as usize % art::SIGIL.len()]
 }
 
+/// The art, ink and baseline for a prop.
+///
+/// One table, keyed by the prop the *model* named. Adding an artefact means a new
+/// [`Prop`] and a new arm here, and nothing else in the renderer learns about it.
+fn prop_art(phase: f32, prop: Prop, palette: &Palette) -> (&'static [&'static str], Color, usize) {
+    match prop {
+        Prop::Basin => (&art::BASIN[..], palette.interactive, 2),
+        Prop::Sigil => (sigil_phase(phase), palette.effect, 1),
+        Prop::Well => (&art::WELL[..], palette.interactive, 2),
+        Prop::Letters => (&art::LETTERS[..], palette.interactive, 2),
+        Prop::Cairn => (&art::CAIRN[..], palette.border, 2),
+        Prop::StandingStone => (&art::STANDING_STONE[..], palette.relic, 2),
+        Prop::Dial => (&art::DIAL[..], palette.relic, 2),
+        Prop::Sarcophagus => (&art::SARCOPHAGUS[..], palette.border, 2),
+    }
+}
+
 /// The inlay glyph at `position`, if the motif has one there.
 fn inlay_glyph(motif: &Motif, position: Position) -> Option<char> {
     let dx = i32::from(position.x) - motif.centre.0;
@@ -775,7 +1052,10 @@ fn ink_glyph(ch: char, blinking: bool) -> char {
 ///
 /// Unknown characters are cloth: silhouettes are written with punctuation, and
 /// garment-coloured punctuation is exactly right.
-fn ink_for(ch: char, inks: &Inks) -> Option<Color> {
+///
+/// Shared with the dialogue panel, which draws the same busts at a larger size:
+/// the legend is the format, so there is only ever one of these.
+pub(crate) fn ink_for(ch: char, inks: &Inks) -> Option<Color> {
     Some(match ch {
         ' ' => return None,
         'o' | 'v' | '●' => inks.eye,
@@ -1048,11 +1328,17 @@ mod tests {
 
     #[test]
     fn the_veiled_figure_is_drawn_distinctly() {
+        // Ysolde stands facing east, so the panel shows her profile: one cold
+        // light in a void, which is what makes her read as something other than a
+        // person.
         let mut world = World::new(areas::all(), areas::CHAPEL);
         world.set_player_for_test(Position::new(56, 38));
         let (_, text) = draw(&world, 60, 24, 0.0);
-        assert!(text.contains("(o@o)"), "Ysolde's eyes are missing:\n{text}");
+        // The space in `( @o)` is transparent, so the floor shows through it and
+        // only the drawn glyphs can be matched.
+        assert!(text.contains("@o)"), "Ysolde's profile is missing:\n{text}");
         assert!(text.contains("___"), "Ysolde's cowl is missing");
+        assert!(text.contains("/###\\"), "Ysolde's robe is missing");
     }
 
     #[test]

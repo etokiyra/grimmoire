@@ -39,8 +39,10 @@ impl Screen for HelpOverlay {
     }
 
     fn handle_key(&mut self, key: Key) -> Command {
-        // Auto-repeat must not dismiss the overlay the moment it opens.
-        if key.is_repeat() {
+        // Only a genuine press dismisses the overlay. `h` is followed immediately
+        // by its own release, and treating that as an activation would close the
+        // overlay in the same instant it opened; auto-repeat must not either.
+        if !key.is_down() || key.is_repeat() {
             return Command::None;
         }
         match key.code {

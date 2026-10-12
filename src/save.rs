@@ -1,17 +1,33 @@
 //! Persistence for essential exploration state.
 //!
 //! The save format is a small, versioned, line-oriented text file. It is written
-//! by hand rather than through a serialization dependency: the payload is four
-//! fields, the format needs to stay readable and stable, and a strict parser
-//! makes a corrupt or future save fail safely instead of half-loading.
+//! by hand rather than through a serialization dependency: the payload is a
+//! handful of fields, the format needs to stay readable and stable, and a strict
+//! parser makes a corrupt or future save fail safely instead of half-loading.
 //!
-//! Saving is **fail-soft**: if the file is missing, unreadable, malformed, or
-//! belongs to a different version, loading simply returns `None` and the game
-//! starts fresh. Writing never replaces the previous save until the new contents
-//! are safely on disk.
+//! Saving is **fail-soft**: if the file is missing, unreadable, or malformed,
+//! loading simply returns `None` and the game starts fresh. Writing never replaces
+//! the previous save until the new contents are safely on disk.
 //!
-//! Only essential exploration state is persisted: the area the player is in,
-//! their position, and which areas they have visited.
+//! What is persisted is the exploration state that cannot be reconstructed: the
+//! area the player is in, their position, which areas they have visited, what
+//! they have discovered, and how far the moonwell puzzle has progressed.
+//!
+//! # Versions and migration
+//!
+//! | Version | Fields | Read by |
+//! | --- | --- | --- |
+//! | 1 | `area`, `pos`, `visited` | every version |
+//! | 2 | the above, plus `journal` and `braziers` | 2 and later |
+//!
+//! Files are always *written* at [`VERSION`]. Older files are still *read*: a
+//! version 1 save loads with an empty journal and no braziers lit, which is
+//! exactly the state that player was in when it was written. Migration is
+//! therefore a widening rather than a conversion — nothing is reinterpreted, and
+//! no valid save is ever discarded because the schema grew.
+//!
+//! A version 1 file that contains a version 2 field is rejected: it is not a file
+//! the game ever wrote, and guessing what it meant is worse than starting fresh.
 
 use std::fs;
 use std::io;
@@ -21,7 +37,10 @@ use std::path::{Path, PathBuf};
 const MAGIC: &str = "grimmoire-save";
 
 /// The save format version. Bump this when the layout changes incompatibly.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
+
+/// The oldest save version this build still understands.
+pub const OLDEST_SUPPORTED: u32 = 1;
 
 /// The essential exploration state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,10 +53,16 @@ pub struct SaveData {
     pub y: u16,
     /// The areas the player has visited.
     pub visited: Vec<String>,
+    /// The discoveries recorded, in the order they were found.
+    pub journal: Vec<String>,
+    /// The moonwell braziers lit so far, in the order they were lit.
+    pub braziers: Vec<String>,
 }
 
 impl SaveData {
-    /// Creates save data.
+    /// Creates save data with no progression.
+    ///
+    /// This is the shape a version 1 save migrates to.
     #[must_use]
     pub fn new(area: impl Into<String>, x: u16, y: u16, visited: Vec<String>) -> Self {
         SaveData {
@@ -45,14 +70,24 @@ impl SaveData {
             x,
             y,
             visited,
+            journal: Vec::new(),
+            braziers: Vec::new(),
         }
+    }
+
+    /// Adds the recorded progression.
+    #[must_use]
+    pub fn with_progress(mut self, journal: Vec<String>, braziers: Vec<String>) -> Self {
+        self.journal = journal;
+        self.braziers = braziers;
+        self
     }
 }
 
 /// Renders save data as text, ending with a newline.
 #[must_use]
 pub fn encode(data: &SaveData) -> String {
-    let mut out = String::with_capacity(64);
+    let mut out = String::with_capacity(128);
     out.push_str(MAGIC);
     out.push(' ');
     out.push_str(&VERSION.to_string());
@@ -68,14 +103,23 @@ pub fn encode(data: &SaveData) -> String {
     out.push_str("visited=");
     out.push_str(&data.visited.join(" "));
     out.push('\n');
+    out.push_str("journal=");
+    out.push_str(&data.journal.join(" "));
+    out.push('\n');
+    out.push_str("braziers=");
+    out.push_str(&data.braziers.join(" "));
+    out.push('\n');
     out
 }
 
 /// Parses save data, returning `None` for anything unexpected.
 ///
 /// The parser is intentionally strict: an unknown field, a malformed number, a
-/// missing field, or an unexpected trailing token all reject the whole file, so
-/// partially understood state can never be loaded.
+/// missing field, a field the file's own version does not define, or an
+/// unexpected trailing token all reject the whole file, so partially understood
+/// state can never be loaded. Fields added in a later version are optional when
+/// reading that version, so a save written by an older build of the same version
+/// still loads.
 #[must_use]
 pub fn decode(text: &str) -> Option<SaveData> {
     let mut lines = text.lines();
@@ -84,7 +128,8 @@ pub fn decode(text: &str) -> Option<SaveData> {
     if header.next()? != MAGIC {
         return None;
     }
-    if header.next()?.parse::<u32>().ok()? != VERSION {
+    let version = header.next()?.parse::<u32>().ok()?;
+    if !(OLDEST_SUPPORTED..=VERSION).contains(&version) {
         return None;
     }
     if header.next().is_some() {
@@ -94,6 +139,8 @@ pub fn decode(text: &str) -> Option<SaveData> {
     let mut area: Option<String> = None;
     let mut position: Option<(u16, u16)> = None;
     let mut visited: Option<Vec<String>> = None;
+    let mut journal: Option<Vec<String>> = None;
+    let mut braziers: Option<Vec<String>> = None;
 
     for line in lines {
         if line.trim().is_empty() {
@@ -119,6 +166,14 @@ pub fn decode(text: &str) -> Option<SaveData> {
             "visited" => {
                 visited = Some(value.split_whitespace().map(str::to_string).collect());
             }
+            // Progression fields exist from version 2 onwards. A version 1 file
+            // carrying them was not written by this game.
+            "journal" if version >= 2 => {
+                journal = Some(value.split_whitespace().map(str::to_string).collect());
+            }
+            "braziers" if version >= 2 => {
+                braziers = Some(value.split_whitespace().map(str::to_string).collect());
+            }
             _ => return None,
         }
     }
@@ -129,6 +184,8 @@ pub fn decode(text: &str) -> Option<SaveData> {
         x,
         y,
         visited: visited.unwrap_or_default(),
+        journal: journal.unwrap_or_default(),
+        braziers: braziers.unwrap_or_default(),
     })
 }
 
@@ -254,6 +311,65 @@ mod tests {
     fn decode_treats_a_missing_visited_list_as_empty() {
         let data = decode("grimmoire-save 1\narea=a\npos=1 2\n").expect("decoded");
         assert!(data.visited.is_empty());
+    }
+
+    #[test]
+    fn a_version_one_save_migrates_with_empty_progression() {
+        // Exactly what version 1 wrote, from a real play session.
+        let legacy = "grimmoire-save 1\narea=sunken-cellar\npos=20 12\nvisited=ruined-chapel sunken-cellar\n";
+        let data = decode(legacy).expect("a version 1 save must still load");
+        assert_eq!("sunken-cellar", data.area);
+        assert_eq!((20, 12), (data.x, data.y));
+        assert_eq!(2, data.visited.len());
+        assert!(
+            data.journal.is_empty(),
+            "a version 1 player had discovered nothing"
+        );
+        assert!(data.braziers.is_empty());
+    }
+
+    #[test]
+    fn the_newest_version_writes_every_field() {
+        let text = encode(&sample());
+        assert!(text.starts_with("grimmoire-save 2"));
+        assert!(text.contains("\njournal="));
+        assert!(text.contains("\nbraziers="));
+    }
+
+    #[test]
+    fn progression_round_trips() {
+        let data = sample().with_progress(
+            vec!["village-well".to_string(), "woods-glade".to_string()],
+            vec!["waning".to_string()],
+        );
+        assert_eq!(Some(data.clone()), decode(&encode(&data)));
+    }
+
+    #[test]
+    fn a_version_one_file_carrying_a_newer_field_is_rejected() {
+        let forged = "grimmoire-save 1\narea=a\npos=0 0\njournal=village-well\n";
+        assert_eq!(
+            None,
+            decode(forged),
+            "a file no version of the game could have written must not be guessed at"
+        );
+    }
+
+    #[test]
+    fn a_future_version_is_rejected_rather_than_guessed() {
+        assert_eq!(None, decode("grimmoire-save 3\narea=a\npos=0 0\n"));
+    }
+
+    #[test]
+    fn a_malformed_progression_field_is_rejected() {
+        assert_eq!(
+            None,
+            decode("grimmoire-save 2\narea=a\npos=0 0\njournal=village-well\nmystery=1\n")
+        );
+        assert_eq!(
+            None,
+            decode("grimmoire-save 2\narea=a\npos=0 0\nnot a field\n")
+        );
     }
 
     #[test]

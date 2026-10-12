@@ -5,6 +5,7 @@
 //! module is pure data and geometry: it knows nothing about rendering, input, or
 //! terminal I/O.
 
+use super::discovery::Discovery;
 use super::entity::Entity;
 
 /// A stable identifier for an area, used in save data and lookups.
@@ -97,6 +98,21 @@ impl Direction {
         }
     }
 
+    /// This direction's index in [`Direction::ALL`].
+    ///
+    /// Art tables are indexed by facing rather than matched on, so the mapping
+    /// from a direction to a row is stated once, here, instead of being implied
+    /// by the order the variants happen to be declared in.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Direction::North => 0,
+            Direction::East => 1,
+            Direction::South => 2,
+            Direction::West => 3,
+        }
+    }
+
     /// A lower-case name, for player-facing readouts.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -157,10 +173,17 @@ pub struct Portal {
     pub arrive: Position,
     /// A short player-facing label for the destination.
     pub label: &'static str,
+    /// The discovery that opens this doorway, if it starts sealed.
+    ///
+    /// A sealed doorway is drawn and can be reached and interacted with from the
+    /// start: it is visible, it explains itself, and it opens the moment the
+    /// world state says it should. Nothing about it is hidden from the player
+    /// except the way through.
+    pub requires: Option<Discovery>,
 }
 
 impl Portal {
-    /// Creates a doorway.
+    /// Creates an open doorway.
     #[must_use]
     pub const fn new(at: Position, to: AreaId, arrive: Position, label: &'static str) -> Self {
         Portal {
@@ -168,7 +191,32 @@ impl Portal {
             to,
             arrive,
             label,
+            requires: None,
         }
+    }
+
+    /// Creates a doorway that stays shut until `requires` is discovered.
+    #[must_use]
+    pub const fn sealed(
+        at: Position,
+        to: AreaId,
+        arrive: Position,
+        label: &'static str,
+        requires: Discovery,
+    ) -> Self {
+        Portal {
+            at,
+            to,
+            arrive,
+            label,
+            requires: Some(requires),
+        }
+    }
+
+    /// Whether this doorway can be used, given what the player knows.
+    #[must_use]
+    pub fn is_open(&self, known: impl Fn(Discovery) -> bool) -> bool {
+        self.requires.is_none_or(known)
     }
 }
 
@@ -439,8 +487,8 @@ mod tests {
     fn entities_block_movement_and_are_found_by_position() {
         let entity = super::super::entity::Entity::object(
             Position::new(1, 1),
-            'o',
             "an object",
+            super::super::entity::Prop::Basin,
             "nothing much",
         );
         let area = Area::new(
@@ -477,5 +525,32 @@ mod tests {
             area.portal(area.portal_index_at(Position::new(2, 2)).expect("portal"))
         );
         assert_eq!(None, area.portal_index_at(Position::new(0, 0)));
+    }
+
+    #[test]
+    fn an_ordinary_doorway_is_always_open() {
+        let portal = Portal::new(
+            Position::new(1, 1),
+            AreaId::new("elsewhere"),
+            Position::new(0, 0),
+            "Elsewhere",
+        );
+        assert_eq!(None, portal.requires);
+        assert!(portal.is_open(|_| false));
+    }
+
+    #[test]
+    fn a_sealed_doorway_opens_only_for_the_discovery_it_names() {
+        use crate::game::discovery::Discovery;
+        let portal = Portal::sealed(
+            Position::new(1, 1),
+            AreaId::new("elsewhere"),
+            Position::new(0, 0),
+            "Elsewhere",
+            Discovery::MoonwellAnswered,
+        );
+        assert!(!portal.is_open(|_| false));
+        assert!(!portal.is_open(|known| known == Discovery::VillageWell));
+        assert!(portal.is_open(|known| known == Discovery::MoonwellAnswered));
     }
 }

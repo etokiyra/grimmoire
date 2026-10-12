@@ -1,21 +1,38 @@
-//! Temporary prototype world content.
+//! The authored region: its maps, its cast, and its points of interest.
 //!
-//! The names, layouts, and lines here are deliberately provisional. The story,
-//! setting, and characters have not been decided, and nothing in this file
-//! should be treated as canon. It exists to make the exploration slice playable
-//! and to exercise the world model.
+//! **Content, not logic.** Every map here is an ASCII grid plus a list of things
+//! placed on it; every character is a name, a [`Speech`], and a [`Figure`]; every
+//! doorway is a position and a destination. Nothing in this file decides how any
+//! of it looks — the interface maps figures and props to art — and nothing in it
+//! runs a rule: the world model does that.
 //!
-//! Both areas are **larger than a normal terminal viewport**, so the camera
-//! scrolls and the world fills the screen instead of sitting as a small island
-//! in a large frame. They are authored as fixed-width ASCII rows; see
-//! [`super::area::Area::new`] for the characters that are recognised, and
-//! `tools/generate-areas.py` for how the layouts were drawn. Every walkable tile
-//! is connected to every other: the generator seals off any pocket that is not
-//! reachable from the main space.
+//! # The region
+//!
+//! ```text
+//!                    Hollow Village ─────┐
+//!                          │             │
+//!   Ruined Chapel ── Whispering Woods ── Moonwell Shrine
+//!        │                                   │ (sealed until answered)
+//!   Sunken Cellar ── Forgotten Catacombs ─────┘
+//! ```
+//!
+//! Every area is reachable without solving anything. The moonwell does not gate a
+//! place: it opens a *shortcut* between the shrine and the catacombs, which is a
+//! reward for exploring rather than a toll on it.
+//!
+//! # Maps
+//!
+//! The `&[...]` grids below are **generated**, not hand-edited: see
+//! `tools/generate-areas.py` and `tools/apply-areas.py`, and
+//! [`docs/map-design.md`](../../docs/map-design.md) for the rules they enforce —
+//! above all that no passage the player can stand in is narrower than
+//! [`MIN_PASSAGE`] cells, because the character sprite is five cells wide.
 
-use super::area::{Area, AreaId, Portal, Position};
-use super::dialogue::Dialogue;
-use super::entity::Entity;
+use super::area::{Area, AreaId, Direction, Portal, Position};
+use super::dialogue::{Dialogue, Speech};
+use super::discovery::Discovery;
+use super::entity::{Entity, Figure, Prop};
+use super::progress::MoonPhase;
 
 /// The narrowest a passage may be, in cells.
 ///
@@ -38,23 +55,168 @@ pub const DOORWAY: u16 = 5;
 
 /// The id of the area the game starts in.
 pub const CHAPEL: AreaId = AreaId::new("ruined-chapel");
-
-/// The id of the second area.
+/// The flooded crypt beneath the chapel.
 pub const CELLAR: AreaId = AreaId::new("sunken-cellar");
+/// The wood the chapel stands in.
+pub const WOODS: AreaId = AreaId::new("whispering-woods");
+/// The village north of the wood, empty for a generation.
+pub const VILLAGE: AreaId = AreaId::new("hollow-village");
+/// The shrine east of the wood, and the moonwell inside it.
+pub const SHRINE: AreaId = AreaId::new("moonwell-shrine");
+/// The burial galleries beneath the shrine.
+pub const CATACOMBS: AreaId = AreaId::new("forgotten-catacombs");
 
-/// Placeholder dialogue for the only character in the slice.
-///
-/// Names and lines here are provisional, like everything else in this file. They
-/// live in the model so a later phase can rewrite them without touching the
-/// renderer: the interface reads `Entity::name` and `Dialogue::speaker`, and has
-/// no idea what either says.
-const YSOLDE: Dialogue = Dialogue::new(
-    "Ysolde",
+// -- the cast ----------------------------------------------------------------
+//
+// Names and lines are content and nothing else: the renderer reads
+// `Entity::name` and `Dialogue::speaker` without knowing what either says, and
+// the figure is a role the interface maps to art. Rewriting the cast touches
+// this section and nothing else.
+//
+// They are still, like everything in the region, provisional.
+
+/// Ysolde, who has no face and has been here longer than the chapel.
+const YSOLDE: Speech = Speech::reacting(
+    Dialogue::new(
+        "Ysolde",
+        &[
+            "You walk where the stones still remember.",
+            "The stair below has not been swept in a long while. Mind the water.",
+        ],
+    ),
     &[
-        "You walk where the stones still remember.",
-        "The stair below has not been swept in a long while. Mind the water.",
+        (
+            Discovery::MoonwellAnswered,
+            Dialogue::new(
+                "Ysolde",
+                &[
+                    "You answered the moon. Nobody has done that since the village was alive.",
+                    "The door under the shrine remembers you now. It will let you both ways.",
+                ],
+            ),
+        ),
+        (
+            Discovery::ChapelBasin,
+            Dialogue::new(
+                "Ysolde",
+                &[
+                    "You looked in the basin. Most people only look at it.",
+                    "It fills itself. I have never decided whether that is a kindness.",
+                ],
+            ),
+        ),
     ],
 );
+
+/// Rin, who keeps the lanterns on the wood's path and remembers very little.
+const RIN: Speech = Speech::reacting(
+    Dialogue::new(
+        "Rin",
+        &[
+            "Oh — a person. I have not seen one since, um. Since a while.",
+            "I keep the lanterns lit along the path. Someone has to, or the path forgets where it goes.",
+        ],
+    ),
+    &[(
+        Discovery::WoodsGlade,
+        Dialogue::new(
+            "Rin",
+            &[
+                "You found the glade! I keep that clear too. I do not remember being told to.",
+                "Do not mention it to the man in the village. He takes things, and that is the one thing he cannot have.",
+            ],
+        ),
+    )],
+);
+
+/// Cassen, who scavenges the village and would rather you did not look closely.
+const CASSEN: Speech = Speech::reacting(
+    Dialogue::new(
+        "Cassen",
+        &[
+            "Mind the houses. They come down if you lean on them, and then so do you.",
+            "You would not have anything worth trading. No. Nobody ever does.",
+        ],
+    ),
+    &[
+        (
+            Discovery::VillageLetters,
+            Dialogue::new(
+                "Cassen",
+                &[
+                    "Those letters were hers, and now they are chapel business. That is what the address says.",
+                    "You are not going to read them out loud. I would rather you did not.",
+                ],
+            ),
+        ),
+        (
+            Discovery::VillageWell,
+            Dialogue::new(
+                "Cassen",
+                &[
+                    "So you found the well. Dry, and the rope cut at the top, not the bottom.",
+                    "I did not cut it. I only said that I would, which is a different thing, legally.",
+                ],
+            ),
+        ),
+    ],
+);
+
+/// Ioreth, who tends the moonwell and tells the truth in an inconvenient order.
+const IORETH: Speech = Speech::reacting(
+    Dialogue::new(
+        "Ioreth",
+        &[
+            "The moon drank here before the village had a name. It still drinks, if it is asked properly.",
+            "Very little of this is mine to explain. The floor explains it better.",
+        ],
+    ),
+    &[
+        (
+            Discovery::MoonwellAnswered,
+            Dialogue::new(
+                "Ioreth",
+                &[
+                    "The seal is open. Whatever is below was buried on purpose, by people who could have destroyed it.",
+                    "I will not tell you not to go. I will tell you to take your own light.",
+                ],
+            ),
+        ),
+        (
+            Discovery::MoonwellDial,
+            Dialogue::new(
+                "Ioreth",
+                &[
+                    "You have read the dial, then. Waning, full, waxing: dark, filled, and let go.",
+                    "Light the braziers in that order and the water will remember what it is for.",
+                ],
+            ),
+        ),
+    ],
+);
+
+/// Vesper, who was buried standing up and resents it.
+const VESPER: Speech = Speech::reacting(
+    Dialogue::new(
+        "Vesper",
+        &[
+            "Do not stand in the doorway. The draught takes the warmth out of the living.",
+            "I am not a ghost. I am the last thing that was left of one.",
+        ],
+    ),
+    &[(
+        Discovery::CatacombScribe,
+        Dialogue::new(
+            "Vesper",
+            &[
+                "So you found the scribe. She wrote the same name until her hands stopped doing it.",
+                "It was the moon's name. She got as far as the second letter.",
+            ],
+        ),
+    )],
+);
+
+// -- areas -------------------------------------------------------------------
 
 /// The starting area: a long ruined chapel, its nave running north to the apse.
 #[must_use]
@@ -86,11 +248,11 @@ pub fn chapel() -> Area {
             "#...............,.,#...##....#.............................##.,,.##.,,,,,.##.,,.##..............................,.,#...##....#.............#",
             "#...............,............#......................................,,,,,.......................................,............#.............#",
             "#...............#............#........................#..,..........,,,,,..........#..,.........................#............#.............#",
-            "#...............#............#........................#..,.,,.##.,,.,,,,,.,,.##.,,.#..,.........................#............#.............#",
-            "#...............,............,........................#..,..........,,,,,..........#..,.........................,............,.............#",
-            "#...................................................................,,,,,..................................................................#",
-            "#...............,............,......................................,,,,,.......................................,............,.............#",
-            "#...............#............#......................................,,,,,.......................................#............#.............#",
+            "+...............#............#........................#..,.,,.##.,,.,,,,,.,,.##.,,.#..,.........................#............#.............#",
+            "+...............,............,........................#..,..........,,,,,..........#..,.........................,............,.............#",
+            "+...................................................................,,,,,..................................................................#",
+            "+...............,............,......................................,,,,,.......................................,............,.............#",
+            "+...............#............#......................................,,,,,.......................................#............#.............#",
             "#...............#............#...............................#...#..,,,,,..#...#................................#............#.............#",
             "#...............#............#......................................,,,,,.......................................#............#.............#",
             "#...............,.,#...##....#........................#..,..........,,,,,..........#..,.........................,.,#...##....#.............#",
@@ -109,33 +271,54 @@ pub fn chapel() -> Area {
             "#..,,.~~~~~~~.......................................................,,,,,.........................................................#,.,#,...#",
             "#.....~~~~~~~.......T...............................................,,,,,..................................................T...............#",
             "#.....~~~~~~~...............................................T.......,,,,,.....................................T.............T..............#",
-            "#.....~~~~~~~~T...................................T.................,,,,,......................T...........................................#",
-            "#..............T........T.....T.....................................,,,,,.......T...................T.................T....................#",
+            "#.....~~~~~~~.,...................................T.................,,,,,......................T...........................................#",
+            "#..............T........T.....T.....................................,,,,,.......,...................T.................T....................#",
             "#...,,.....,,.....,,.....,,.....#,.....,,.....,,.....,,.....,,.....,,,,,,.,,.....,,.....,,.....,,.....,,.....,,.....#,.....,,.....,,.......#",
             "#.......,...........#...........#...........#...........#...........,,,,,.......,...........#...........#...........#...........#..........#",
-            "#.......#...........#...........#...........#...........#...........,.,.........,...........#...........#...........#...........#..........#",
+            "#.......#...........#...........#...........#...........#...........,...........#...........#...........#...........#...........#..........#",
             "####################################################################+++++###################################################################",
         ],
         vec![
-            Entity::npc(Position::new(56, 33), 'N', "Ysolde", YSOLDE),
-            Entity::object(
+            Entity::npc(
+                Position::new(56, 33),
+                "Ysolde",
+                YSOLDE,
+                Figure::Veiled,
+                Direction::East,
+            ),
+            Entity::relic(
                 Position::new(76, 6),
-                'o',
                 "a cracked basin",
+                Prop::Basin,
                 "Still water, cold and dark; it has not rained in a long while.",
+                Discovery::ChapelBasin,
+            ),
+            Entity::object(
+                Position::new(60, 44),
+                "a worn sigil",
+                Prop::Sigil,
+                "Cut into the flagstones, and worn almost away by feet that are long gone.",
             ),
         ],
-        vec![Portal::new(
-            Position::new(70, 51),
-            CELLAR,
-            Position::new(20, 12),
-            "the Sunken Cellar",
-        )],
+        vec![
+            Portal::new(
+                Position::new(70, 51),
+                CELLAR,
+                Position::new(20, 12),
+                "the Sunken Cellar",
+            ),
+            Portal::new(
+                Position::new(0, 25),
+                WOODS,
+                Position::new(64, 40),
+                "the Whispering Woods",
+            ),
+        ],
         Position::new(70, 44),
     )
 }
 
-/// The second area: a flooded crypt of four chambers joined by bridges.
+/// The crypt beneath the chapel: four chambers, one of them under water.
 #[must_use]
 pub fn cellar() -> Area {
     Area::new(
@@ -180,41 +363,448 @@ pub fn cellar() -> Area {
             "#.....#~~~~~~~~~~~~~~~~~~~~~~~~~,,,~~~~~~~~~~~~~~~~~~~~~~~~~#.............#............#.............,...........................#.....#",
             "#.....#~~~~~~~~~~~~~~~~~~~~~~~~~,,,~~~~~~~~~~~~~~~~~~~~~~~~~#.............#..........................,...........................#.....#",
             "#.....#~~~~~~~~~~~~~~~~~~~~~~~~~,,,~~~~~~~~~~~~~~~~~~~~~~~~~#....#........,.,#....##....##....##....#,....##....##....##....##...#.....#",
-            "#.....#######################################################.............,###########,,,##########################################....#",
-            "#..................................................................#...................................................................#",
-            "#......................................................................................................................................#",
-            "#......................................................................................................................................#",
-            "#......................................................................................................................................#",
-            "########################################################################################################################################",
+            "#.....#######################################################.............,###########,,,############################...###########....#",
+            "#..................................................................#.................................................,,,...............#",
+            "#....................................................................................................................,,,...............#",
+            "#....................................................................................................................,,,...............#",
+            "#....................................................................................................................,,,...............#",
+            "####################################################################################################################+++++###############",
         ],
         vec![Entity::object(
             Position::new(118, 13),
-            'o',
             "a faded sigil",
+            Prop::Sigil,
             "The carving is worn smooth, but it hums faintly under your fingers.",
         )],
-        vec![Portal::new(
-            Position::new(20, 0),
-            CHAPEL,
-            Position::new(70, 49),
-            "the Ruined Chapel",
-        )],
+        vec![
+            Portal::new(
+                Position::new(20, 0),
+                CHAPEL,
+                Position::new(70, 49),
+                "the Ruined Chapel",
+            ),
+            Portal::new(
+                Position::new(118, 43),
+                CATACOMBS,
+                Position::new(8, 21),
+                "the Forgotten Catacombs",
+            ),
+        ],
         Position::new(20, 12),
     )
 }
 
-/// Every area in the prototype world, in a stable order.
+/// The wood: a trodden trail between the chapel and the village, and a glade.
+#[must_use]
+pub fn woods() -> Area {
+    Area::new(
+        WOODS,
+        "Whispering Woods",
+        &[
+            "############################################################+++++###############################################################",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTT,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,T,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,T,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,TT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,+",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,+",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,+",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTT,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,TT,,,,,TTTTTTTTTTTTTTTTTTTTTT,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTT,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTT,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTT,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTT,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTT,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,T,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTT,,,,,,,,,,,T,,,,,TTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTT,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTT,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTT,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTT,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTT,,,TT,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,,,,,,,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "#TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT,,,,,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT#",
+            "##############################################################+++++#############################################################",
+        ],
+        vec![
+            Entity::npc(
+                Position::new(63, 17),
+                "Rin",
+                RIN,
+                Figure::Lantern,
+                Direction::South,
+            ),
+            Entity::relic(
+                Position::new(18, 30),
+                "a standing stone",
+                Prop::StandingStone,
+                "A hole worn right through it, and a floor around it swept clean of leaves.",
+                Discovery::WoodsGlade,
+            ),
+            Entity::object(
+                Position::new(52, 26),
+                "a waymarker cairn",
+                Prop::Cairn,
+                "Stones stacked by someone with more patience than sense.",
+            ),
+        ],
+        vec![
+            Portal::new(
+                Position::new(64, 43),
+                CHAPEL,
+                Position::new(5, 25),
+                "the Ruined Chapel",
+            ),
+            Portal::new(
+                Position::new(62, 0),
+                VILLAGE,
+                Position::new(62, 38),
+                "the Hollow Village",
+            ),
+            Portal::new(
+                Position::new(127, 20),
+                SHRINE,
+                Position::new(5, 20),
+                "the Moonwell Shrine",
+            ),
+        ],
+        Position::new(64, 40),
+    )
+}
+
+/// The village: a crossroad of fallen houses around a dry well.
+#[must_use]
+pub fn village() -> Area {
+    Area::new(
+        VILLAGE,
+        "Hollow Village",
+        &[
+            "############################################################################################################################",
+            "#..........................................................................................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#.............,#########################,.......,#########################,.......,############################............#",
+            "#.............,.,#...##...##...##...##..,.......,.,#...##...##...##...##..,.......,.,#...##...##...##...##....#............#",
+            "#.............,.........................,.......,.........................,.......,...........................#............#",
+            "#.............#.........................#.......#.........................#.......#...........................#............#",
+            "#.............#..........#.,............#.......#..........#.,............#.......#............,.#............#............#",
+            "#.............#...........#.............#.......#...........#.............#.......#.............#.............#............#",
+            "#.............#..........,.#............#.......#..........,.#............#.......#............#.,............#............#",
+            "#.............#.........................#.......#.........................#.......#...........................#............#",
+            "#.............#.........................#.......#.........................#.......#...........................#............#",
+            "#.............,.,#...##...#,...##...##..,.......,.,#...##...#,...##...##..,.......,.,#...##...#,...##...##....#............#",
+            "#.............,###########...###########,.......,###########...###########,.......,############...#############............#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.#",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.#",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.#",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.#",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#.............,###########...###########,.......,###########...###########,.......,############...#############............#",
+            "#.............,.,#...##...##...##...##..,.......,.,#...##...##...##...##..,.......,.,#...##...##...##...##....#............#",
+            "#.............,.........................,.......,.........................,.......,...........................#............#",
+            "#.............#.........................#.......#.........................#.......#...........................#............#",
+            "#.............#.........................#.......#.........................#.......#...........................#............#",
+            "#.............#..........#.,............#.......#..........#.,............#.......#............#.,............#............#",
+            "#.............#...........#.............#.......#...........#.............#.......#.............#.............#............#",
+            "#.............#..........,.,............#.......#..........,.,............#.......#............,.#............#............#",
+            "#.............#.........................#.......#.........................#.......#...........................#............#",
+            "#.............,.,#...##...,,...##...##..,.......,.,#...##...,,...##...##..,.......,.,#...##...##...##...##....#............#",
+            "#.............,#########################,.......,#########################,.......,#############,,,############............#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "#...........................................................,,,,,..........................................................#",
+            "############################################################+++++###########################################################",
+        ],
+        vec![
+            Entity::npc(
+                Position::new(40, 20),
+                "Cassen",
+                CASSEN,
+                Figure::Scavenger,
+                Direction::East,
+            ),
+            Entity::relic(
+                Position::new(62, 20),
+                "the village well",
+                Prop::Well,
+                "Dry to the bottom. The rope is cut at the top, not the bottom.",
+                Discovery::VillageWell,
+            ),
+            Entity::relic(
+                Position::new(20, 10),
+                "a bundle of letters",
+                Prop::Letters,
+                "Tied with string and addressed to the chapel. None of them were opened.",
+                Discovery::VillageLetters,
+            ),
+        ],
+        vec![
+            Portal::new(
+                Position::new(62, 41),
+                WOODS,
+                Position::new(64, 40),
+                "the Whispering Woods",
+            ),
+            Portal::new(
+                Position::new(0, 20),
+                SHRINE,
+                Position::new(56, 5),
+                "the Moonwell Shrine",
+            ),
+        ],
+        Position::new(62, 38),
+    )
+}
+
+/// The shrine: a pale hall around the moonwell, with three braziers and a dial.
+#[must_use]
+pub fn shrine() -> Area {
+    Area::new(
+        SHRINE,
+        "Moonwell Shrine",
+        &[
+            "######################################################+++++#############################################################",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#.....................................................,,,,,............................................................#",
+            "#.....................................................,,,,,............................................................#",
+            "#.........#.....#.....#.....#.....#.....#.....#.....#.,,,,#.....#.....#.....#.....#.....#.....#.....#.....#............#",
+            "#.....................................................,,,,,............................................................#",
+            "#.....................................................,,,,,............................................................#",
+            "#.....................................................,,,,,............................................................#",
+            "#.....................................................,,,,,............................................................#",
+            "#.....................................................,,,,,............................................................#",
+            "#.........#.....#.....#.....#.....#.....#.....#.....,.,,,,,.....,.....#.....#.....#.....#.....#.....#.....#............#",
+            "#.....................................................,,~,,............................................................#",
+            "#.................................................~~~~~~~~~~~~~........................................................#",
+            "#..............................................~~~~~~~~~~~~~~~~~~~.....................................................#",
+            "#.............................................~~~~~~~~~~~~~~~~~~~~~....................................................#",
+            "#............................................~~~~~~~~~~~~~~~~~~~~~~~...................................................#",
+            "+.........#.....#.....#.....#.....#.....#...~~~~~~~~~~~~~~~~~~~~~~~~~.,.....#.....#.....#.....#.....#.....#............+",
+            "+...........................................~~~~~~~~~~~~~~~~~~~~~~~~~..................................................+",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,..~~~~~~~~~~~~~~~~~~~~~~~~~~~.................................................+",
+            "+...........................................~~~~~~~~~~~~~~~~~~~~~~~~~..................................................+",
+            "+...........................................~~~~~~~~~~~~~~~~~~~~~~~~~..................................................+",
+            "#............................................~~~~~~~~~~~~~~~~~~~~~~~...................................................#",
+            "#.........#.....#.....#.....#.....#.....#.....~~~~~~~~~~~~~~~~~~~~~...#.....#.....#.....#.....#.....#.....#............#",
+            "#..............................................~~~~~~~~~~~~~~~~~~~.....................................................#",
+            "#.................................................~~~~~~~~~~~~~........................................................#",
+            "#.......................................................~..............................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#.........#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#.....#............#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "#......................................................................................................................#",
+            "########################################################################################################################",
+        ],
+        vec![
+            Entity::npc(
+                Position::new(30, 14),
+                "Ioreth",
+                IORETH,
+                Figure::Priestess,
+                Direction::East,
+            ),
+            Entity::relic(
+                Position::new(40, 20),
+                "the moon dial",
+                Prop::Dial,
+                "A waning crescent, a full moon, and a waxing one — in that order.",
+                Discovery::MoonwellDial,
+            ),
+            Entity::brazier(
+                Position::new(78, 16),
+                "the first brazier",
+                MoonPhase::Waning,
+                "A bronze bowl on a stem, marked with a closing crescent. Cold.",
+            ),
+            Entity::brazier(
+                Position::new(78, 20),
+                "the second brazier",
+                MoonPhase::Full,
+                "A bronze bowl on a stem, marked with a full moon. Cold.",
+            ),
+            Entity::brazier(
+                Position::new(78, 24),
+                "the third brazier",
+                MoonPhase::Waxing,
+                "A bronze bowl on a stem, marked with an opening crescent. Cold.",
+            ),
+        ],
+        vec![
+            Portal::new(
+                Position::new(56, 0),
+                VILLAGE,
+                Position::new(62, 38),
+                "the Hollow Village",
+            ),
+            Portal::new(
+                Position::new(0, 20),
+                WOODS,
+                Position::new(124, 20),
+                "the Whispering Woods",
+            ),
+            Portal::sealed(
+                Position::new(119, 20),
+                CATACOMBS,
+                Position::new(121, 21),
+                "the Forgotten Catacombs",
+                Discovery::MoonwellAnswered,
+            ),
+        ],
+        Position::new(56, 5),
+    )
+}
+
+/// The catacombs: a long gallery of burials, and something still awake in it.
+#[must_use]
+pub fn catacombs() -> Area {
+    Area::new(
+        CATACOMBS,
+        "Forgotten Catacombs",
+        &[
+            "####################################################################################################################################",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#.....##.......##..,,,..##.......##.......##,,.....##.......##.......##.......##.......##......,,,.......##.......##.,,,...##......#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,............############,,,############..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#.....#........#...,,,..#........#........#,,,.....#......#,,,,,,,,,,,,,,,,,,,,,,,,,#..,.......,,,.......#........#..,,,...#.......#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.+",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.+",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.+",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.+",
+            "+.,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.+",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#.....#........#...,,,..#........#........#,,,.....#......#,,,,,,,,,,,,,,,,,,,,,,,,,#..,.......,,,.......#........#..,,,...#.......#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............#,,,,,,,,,,,,,,,,,,,,,,,,,#..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,............############,,,############..........,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#.....##.......##..,,,..##.......##.......##,,.....##.......,,.......,#.......,,.......##......,,,.......##.......##.,,,...##......#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................,,,.....................,,,.................................................,,,...................,,,...........#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "#..................................................................................................................................#",
+            "####################################################################################################################################",
+        ],
+        vec![
+            Entity::npc(
+                Position::new(52, 21),
+                "Vesper",
+                VESPER,
+                Figure::Revenant,
+                Direction::West,
+            ),
+            Entity::relic(
+                Position::new(71, 22),
+                "the bone scribe's tomb",
+                Prop::Sarcophagus,
+                "The lid is carved with a name that stops after two letters, over and over.",
+                Discovery::CatacombScribe,
+            ),
+            Entity::object(
+                Position::new(20, 30),
+                "a heap of grave goods",
+                Prop::Cairn,
+                "Wax, a stylus, and a bowl. Whoever was buried here meant to keep working.",
+            ),
+        ],
+        vec![
+            Portal::new(
+                Position::new(0, 21),
+                CELLAR,
+                Position::new(118, 40),
+                "the Sunken Cellar",
+            ),
+            Portal::sealed(
+                Position::new(131, 21),
+                SHRINE,
+                Position::new(115, 20),
+                "the Moonwell Shrine",
+                Discovery::MoonwellAnswered,
+            ),
+        ],
+        Position::new(8, 21),
+    )
+}
+
+/// Every area in the region, in a stable order.
 #[must_use]
 pub fn all() -> Vec<Area> {
-    vec![chapel(), cellar()]
+    vec![
+        chapel(),
+        cellar(),
+        woods(),
+        village(),
+        shrine(),
+        catacombs(),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{all, cellar, chapel};
+    use super::{
+        CATACOMBS, CELLAR, CHAPEL, all, catacombs, cellar, chapel, shrine, village, woods,
+    };
     use crate::game::area::{Area, Direction, Position, Tile};
+    use crate::game::discovery::Discovery;
     use crate::game::entity::EntityKind;
-    use std::collections::{BTreeSet, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     /// The viewport the world is designed to fill, from `ui::viewport`.
     const REFERENCE: (u16, u16) = (120, 40);
@@ -314,12 +904,11 @@ mod tests {
 
     #[test]
     fn the_main_routes_are_wider_than_the_minimum() {
-        // The two routes a player walks constantly are drawn to the character's
-        // full width rather than to the floor.
+        // The route a player walks constantly is drawn to the character's full
+        // width rather than to the floor.
         let chapel = chapel();
-        let nave = Position::new(70, 44);
         assert!(
-            clearance(&chapel, nave) >= super::DOORWAY,
+            clearance(&chapel, Position::new(70, 44)) >= super::DOORWAY,
             "the nave should be a full character wide"
         );
     }
@@ -331,10 +920,20 @@ mod tests {
             for portal in area.portals() {
                 // The door is a run of door tiles in the wall; measure it along
                 // the wall it sits in.
-                let horizontal = area
-                    .tile(Position::new(portal.at.x.saturating_sub(1), portal.at.y))
-                    == Tile::Door
-                    || area.tile(Position::new(portal.at.x + 1, portal.at.y)) == Tile::Door;
+                // A door on an edge has no neighbour outside it: `checked_sub`
+                // rather than `saturating_sub`, or the door would be compared
+                // with itself and read as a one-cell horizontal opening.
+                let left = portal
+                    .at
+                    .x
+                    .checked_sub(1)
+                    .map(|x| area.tile(Position::new(x, portal.at.y)));
+                let right = portal
+                    .at
+                    .x
+                    .checked_add(1)
+                    .map(|x| area.tile(Position::new(x, portal.at.y)));
+                let horizontal = left == Some(Tile::Door) || right == Some(Tile::Door);
                 let (dx, dy) = if horizontal { (1, 0) } else { (0, 1) };
                 let mut width = 1;
                 for sign in [1i32, -1] {
@@ -350,7 +949,7 @@ mod tests {
                     }
                 }
                 assert!(
-                    width >= super::DOORWAY,
+                    width >= super::MIN_PASSAGE,
                     "{}: the doorway at {},{} is only {width} cells wide",
                     area.name(),
                     portal.at.x,
@@ -361,11 +960,13 @@ mod tests {
     }
 
     #[test]
-    fn the_world_has_two_areas_with_distinct_ids_and_names() {
+    fn every_area_has_a_distinct_id_and_name() {
         let areas = all();
-        assert_eq!(2, areas.len());
-        assert_ne!(areas[0].id(), areas[1].id());
-        assert_ne!(areas[0].name(), areas[1].name());
+        let ids: BTreeSet<_> = areas.iter().map(crate::game::Area::id).collect();
+        let names: BTreeSet<_> = areas.iter().map(crate::game::Area::name).collect();
+        assert_eq!(areas.len(), ids.len(), "two areas share an id");
+        assert_eq!(areas.len(), names.len(), "two areas share a name");
+        assert!(areas.len() >= 6, "the region lost a place");
     }
 
     #[test]
@@ -401,9 +1002,9 @@ mod tests {
             for entity in area.entities() {
                 assert!(
                     area.tile_walkable(entity.position),
-                    "{} stands {} on terrain",
+                    "{} stands on terrain in {}",
                     entity.name,
-                    entity.position.x
+                    area.name()
                 );
                 assert!(
                     adjacent_to_reachable(area, entity.position, &seen),
@@ -460,6 +1061,85 @@ mod tests {
     }
 
     #[test]
+    fn every_doorway_runs_both_ways() {
+        let areas = all();
+        for area in &areas {
+            for portal in area.portals() {
+                let destination = areas
+                    .iter()
+                    .find(|candidate| candidate.id() == portal.to)
+                    .unwrap_or_else(|| panic!("{} leads nowhere", area.name()));
+                assert!(
+                    destination
+                        .portals()
+                        .iter()
+                        .any(|back| back.to == area.id()),
+                    "{} leads to {} but there is no way back",
+                    area.name(),
+                    destination.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_whole_region_is_reachable_from_where_the_game_starts() {
+        // A breadth-first walk over the *area graph*, following only doorways that
+        // are open from the start. This is the test that would have caught a new
+        // place being drawn, populated, and then walled off from the world.
+        let areas = all();
+        let start = areas
+            .iter()
+            .find(|area| area.id() == CHAPEL)
+            .expect("the chapel exists");
+        let mut seen = BTreeSet::new();
+        let mut queue = VecDeque::new();
+        seen.insert(start.id());
+        queue.push_back(start.id());
+        while let Some(id) = queue.pop_front() {
+            let area = areas
+                .iter()
+                .find(|area| area.id() == id)
+                .expect("a known area");
+            for portal in area.portals() {
+                // A sealed doorway is still a connection: it is reachable, visible
+                // and interactive, it simply does not open yet.
+                if seen.insert(portal.to) {
+                    queue.push_back(portal.to);
+                }
+            }
+        }
+        assert_eq!(
+            areas.len(),
+            seen.len(),
+            "unreachable areas: {:?}",
+            areas
+                .iter()
+                .map(crate::game::Area::id)
+                .filter(|id| !seen.contains(id))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn at_least_one_doorway_stays_open_into_every_hidden_place() {
+        // A whole area behind a puzzle would be a toll on exploration rather than
+        // a reward for it. Only the shortcut may be sealed.
+        for area in all() {
+            let sealed = area
+                .portals()
+                .iter()
+                .filter(|portal| portal.requires.is_some())
+                .count();
+            assert!(
+                sealed < area.portals().len() || sealed == 0,
+                "{} is only reachable through a sealed door",
+                area.name()
+            );
+        }
+    }
+
+    #[test]
     fn most_of_each_area_is_one_connected_space() {
         for area in &all() {
             let seen = reachable(area, area.spawn());
@@ -474,35 +1154,142 @@ mod tests {
     }
 
     #[test]
-    fn the_world_contains_a_doorway_each_way_and_an_npc_and_objects() {
-        assert_eq!(1, chapel().portals().len());
-        assert_eq!(1, cellar().portals().len());
-
-        let has_npc = chapel()
-            .entities()
+    fn the_region_has_every_voice_and_somewhere_to_use_it() {
+        let voices: BTreeSet<&str> = all()
             .iter()
-            .any(|entity| matches!(entity.kind, EntityKind::Npc { .. }));
-        assert!(has_npc, "the slice needs an NPC");
-
-        let objects = chapel()
-            .entities()
-            .iter()
-            .chain(cellar().entities().iter())
-            .filter(|entity| matches!(entity.kind, EntityKind::Object { .. }))
-            .count();
-        assert!(objects >= 2, "the slice needs discoverable objects");
+            .flat_map(|area| area.entities())
+            .filter_map(|entity| match entity.kind {
+                EntityKind::Npc { .. } => Some(entity.name),
+                _ => None,
+            })
+            .collect();
+        assert!(voices.len() >= 5, "the cast shrank to {voices:?}");
+        assert!(voices.contains("Ysolde"), "the first voice is gone");
     }
 
     #[test]
-    fn entity_glyphs_are_printable_ascii() {
+    fn each_area_has_something_to_look_at() {
+        for area in &all() {
+            let landmarks = area
+                .entities()
+                .iter()
+                .filter(|entity| !matches!(entity.kind, EntityKind::Npc { .. }))
+                .count();
+            assert!(
+                landmarks >= 1,
+                "{} has nothing in it to examine",
+                area.name()
+            );
+        }
+    }
+
+    #[test]
+    fn every_discovery_can_actually_be_made() {
+        // Each discovery is either granted by examining a landmark or by answering
+        // the moonwell. An unreachable journal entry would be content that exists
+        // and can never be read.
+        let mut granted: BTreeSet<Discovery> = BTreeSet::new();
+        let mut braziers = 0;
         for area in all() {
             for entity in area.entities() {
-                assert!(
-                    entity.glyph.is_ascii_graphic(),
-                    "{} has a non-ASCII glyph",
-                    entity.name
-                );
+                if let EntityKind::Object {
+                    discovery: Some(discovery),
+                    ..
+                } = entity.kind
+                {
+                    granted.insert(discovery);
+                }
+                if matches!(entity.kind, EntityKind::Brazier { .. }) {
+                    braziers += 1;
+                }
             }
+        }
+        let phases: BTreeSet<crate::game::MoonPhase> = all()
+            .iter()
+            .flat_map(|area| area.entities())
+            .filter_map(|entity| match entity.kind {
+                EntityKind::Brazier { phase, .. } => Some(phase),
+                _ => None,
+            })
+            .collect();
+        if braziers > 0 {
+            assert_eq!(
+                crate::game::progress::MOON_ORDER.len(),
+                phases.len(),
+                "the moonwell needs one brazier per phase, and no repeats"
+            );
+            granted.insert(Discovery::MoonwellAnswered);
+        }
+        for discovery in Discovery::ALL {
+            assert!(
+                granted.contains(&discovery),
+                "{} can never be discovered",
+                discovery.title()
+            );
+        }
+    }
+
+    #[test]
+    fn the_moonwell_braziers_are_all_in_one_place() {
+        let areas: BTreeMap<_, _> = all()
+            .into_iter()
+            .map(|area| {
+                let count = area
+                    .entities()
+                    .iter()
+                    .filter(|entity| matches!(entity.kind, EntityKind::Brazier { .. }))
+                    .count();
+                (area.id(), count)
+            })
+            .collect();
+        let with_braziers: Vec<_> = areas
+            .iter()
+            .filter(|(_, count)| **count > 0)
+            .map(|(id, count)| (*id, *count))
+            .collect();
+        assert_eq!(
+            vec![(super::SHRINE, 3)],
+            with_braziers,
+            "the braziers belong together, in the shrine"
+        );
+    }
+
+    #[test]
+    fn every_area_has_a_reachable_exit() {
+        for area in all() {
+            assert!(!area.portals().is_empty(), "{} is a dead end", area.name());
+        }
+        // And the two places below ground connect to each other, not only upwards.
+        let cellar = cellar();
+        assert!(
+            cellar.portals().iter().any(|portal| portal.to == CATACOMBS),
+            "the cellar has no way down to the catacombs"
+        );
+        assert!(catacombs().portals().iter().any(|p| p.to == CELLAR));
+        assert!(woods().portals().iter().any(|p| p.to == CHAPEL));
+        assert!(village().portals().iter().any(|p| p.to == super::WOODS));
+        assert!(shrine().portals().iter().any(|p| p.to == super::VILLAGE));
+    }
+
+    #[test]
+    fn the_sealed_way_is_the_shortcut_and_needs_the_moonwell() {
+        let sealed: Vec<_> = all()
+            .into_iter()
+            .flat_map(|area| {
+                area.portals()
+                    .iter()
+                    .filter(|portal| portal.requires.is_some())
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(2, sealed.len(), "the shortcut has two ends");
+        for portal in sealed {
+            assert_eq!(
+                Some(Discovery::MoonwellAnswered),
+                portal.requires,
+                "only the moonwell opens anything"
+            );
         }
     }
 }

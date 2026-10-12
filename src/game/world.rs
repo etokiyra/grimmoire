@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 
 use super::area::{Area, AreaId, Direction, Position};
 use super::dialogue::Dialogue;
-use super::entity::EntityKind;
+use super::discovery::Discovery;
+use super::entity::{EntityKind, Figure};
+use super::progress::{Lighted, MoonPhase, Progress};
 use crate::save::SaveData;
 
 /// The thing adjacent to the player that an interaction would affect.
@@ -30,6 +32,8 @@ pub enum Prompt {
     Examine(&'static str),
     /// A doorway is within reach.
     Enter(&'static str),
+    /// A doorway is within reach, but shut until something is discovered.
+    Sealed(&'static str),
 }
 
 /// The outcome of an interaction attempt.
@@ -39,13 +43,21 @@ pub enum Interaction {
     Nothing,
     /// Feedback was recorded in the message line.
     Message,
-    /// A dialogue should be shown.
-    Dialogue(Dialogue),
+    /// A dialogue should be shown, with the figure who is speaking it.
+    Dialogue {
+        /// What is said.
+        dialogue: Dialogue,
+        /// Who said it, so the interface can draw the right face.
+        figure: Figure,
+    },
+    /// Something was learned for the first time, and recorded in the journal.
+    Discovered(Discovery),
     /// The player stepped through into another area.
     Travelled(AreaId),
 }
 
-/// The whole playable world: its areas and the player's place among them.
+/// The whole playable world: its areas, the player's place among them, and what
+/// they have learned.
 #[derive(Debug, Clone)]
 pub struct World {
     areas: Vec<Area>,
@@ -53,6 +65,7 @@ pub struct World {
     player: Position,
     facing: Direction,
     visited: BTreeSet<AreaId>,
+    progress: Progress,
     message: String,
 }
 
@@ -81,8 +94,27 @@ impl World {
             player,
             facing: Direction::South,
             visited,
+            progress: Progress::new(),
             message: String::new(),
         }
+    }
+
+    /// What the player has learned, and what it has changed.
+    #[must_use]
+    pub const fn progress(&self) -> &Progress {
+        &self.progress
+    }
+
+    /// The discoveries recorded, in the order they were found.
+    #[must_use]
+    pub fn journal(&self) -> &[Discovery] {
+        self.progress.journal()
+    }
+
+    /// Whether the player has learned `discovery`.
+    #[must_use]
+    pub fn knows(&self, discovery: Discovery) -> bool {
+        self.progress.knows(discovery)
     }
 
     /// The area the player is currently in.
@@ -214,12 +246,18 @@ impl World {
                 let entity = self.area().entity(index)?;
                 Some(match entity.kind {
                     EntityKind::Npc { .. } => Prompt::Speak(entity.name),
-                    EntityKind::Object { .. } => Prompt::Examine(entity.name),
+                    EntityKind::Object { .. } | EntityKind::Brazier { .. } => {
+                        Prompt::Examine(entity.name)
+                    }
                 })
             }
             Target::Portal(index) => {
                 let portal = self.area().portal(index)?;
-                Some(Prompt::Enter(portal.label))
+                if portal.is_open(|discovery| self.progress.knows(discovery)) {
+                    Some(Prompt::Enter(portal.label))
+                } else {
+                    Some(Prompt::Sealed(portal.label))
+                }
             }
         }
     }
@@ -249,38 +287,94 @@ impl World {
 
         match target {
             Target::Entity(index) => match self.area().entity(index) {
-                Some(entity) => match entity.kind {
-                    EntityKind::Npc { dialogue } => {
-                        self.message = format!("You speak with {}.", entity.name);
-                        Interaction::Dialogue(dialogue)
-                    }
-                    EntityKind::Object { description } => {
-                        self.message = format!("{}: {description}", entity.name);
-                        Interaction::Message
-                    }
-                },
+                Some(entity) => self.use_entity(entity.name, entity.kind),
                 None => {
                     self.message = "There is nothing within reach.".to_string();
                     Interaction::Nothing
                 }
             },
             Target::Portal(index) => match self.area().portal(index) {
-                Some(portal) => match self.index_of(portal.to) {
-                    Some(destination) => {
-                        self.current = destination;
-                        self.player = portal.arrive;
-                        self.visited.insert(portal.to);
-                        self.message = format!("You step through into {}.", self.area().name());
-                        Interaction::Travelled(portal.to)
+                Some(portal) => {
+                    if !portal.is_open(|discovery| self.progress.knows(discovery)) {
+                        self.message = format!(
+                            "The way to {} is sealed. Something is missing.",
+                            portal.label
+                        );
+                        return Interaction::Message;
                     }
-                    None => {
-                        self.message = "The way is sealed.".to_string();
-                        Interaction::Nothing
+                    match self.index_of(portal.to) {
+                        Some(destination) => {
+                            self.current = destination;
+                            self.player = portal.arrive;
+                            self.visited.insert(portal.to);
+                            self.message = format!("You step through into {}.", self.area().name());
+                            Interaction::Travelled(portal.to)
+                        }
+                        None => {
+                            self.message = "The way is sealed.".to_string();
+                            Interaction::Nothing
+                        }
                     }
-                },
+                }
                 None => {
                     self.message = "There is nothing within reach.".to_string();
                     Interaction::Nothing
+                }
+            },
+        }
+    }
+
+    /// Applies an interaction with one entity.
+    ///
+    /// One match over the entity kind, in one place: a new kind of thing the
+    /// player can use is a new arm here and a new arm in the renderer, and the
+    /// compiler says so.
+    fn use_entity(&mut self, name: &'static str, kind: EntityKind) -> Interaction {
+        match kind {
+            EntityKind::Npc { speech, figure, .. } => {
+                self.message = format!("You speak with {name}.");
+                Interaction::Dialogue {
+                    dialogue: speech.resolve(&self.progress),
+                    figure,
+                }
+            }
+            EntityKind::Object {
+                description,
+                discovery,
+                ..
+            } => {
+                self.message = format!("{name}: {description}");
+                match discovery {
+                    Some(discovery) if self.progress.record(discovery) => {
+                        Interaction::Discovered(discovery)
+                    }
+                    _ => Interaction::Message,
+                }
+            }
+            EntityKind::Brazier { phase, description } => match self.progress.light(phase) {
+                Lighted::Lit => {
+                    let lit = self.progress.braziers().len();
+                    self.message = format!(
+                        "The {} brazier catches. {lit} of 3 are burning.",
+                        phase.name()
+                    );
+                    Interaction::Message
+                }
+                Lighted::Guttered => {
+                    self.message =
+                        "The flame gutters out, and takes the others with it. The order matters."
+                            .to_string();
+                    Interaction::Message
+                }
+                Lighted::Answered => {
+                    let discovery = Discovery::MoonwellAnswered;
+                    self.progress.record(discovery);
+                    self.message = "All three burn, and the water answers.".to_string();
+                    Interaction::Discovered(discovery)
+                }
+                Lighted::Already => {
+                    self.message = format!("{name}: {description}");
+                    Interaction::Message
                 }
             },
         }
@@ -292,6 +386,27 @@ impl World {
     #[cfg(test)]
     pub fn set_player_for_test(&mut self, position: Position) {
         self.player = position;
+    }
+
+    /// Records a discovery without walking to it.
+    ///
+    /// Test-only: used to set up "and then the player learned something", which is
+    /// otherwise a walk across the map.
+    #[cfg(test)]
+    pub fn record_for_test(&mut self, discovery: Discovery) {
+        self.progress.record(discovery);
+    }
+
+    /// Puts the player at an area's spawn without travelling there.
+    ///
+    /// Test-only, and it validates the destination the same way [`World::restore`]
+    /// does, so a test cannot start somewhere impossible.
+    #[cfg(test)]
+    pub fn goto_for_test(&mut self, id: AreaId) {
+        let index = self.index_of(id).expect("a known area");
+        self.current = index;
+        self.player = self.areas[index].spawn();
+        assert!(self.area().tile_walkable(self.player));
     }
 
     /// Puts the player at `position` without a step.
@@ -323,6 +438,8 @@ impl World {
                 .iter()
                 .map(|id| id.as_str().to_string())
                 .collect(),
+            journal: self.progress.journal_ids(),
+            braziers: self.progress.brazier_ids(),
         }
     }
 
@@ -356,6 +473,22 @@ impl World {
             }
         }
         self.visited.insert(self.area_id());
+
+        // Progression is validated the same way the visited set is: a discovery or
+        // a phase this build does not know is dropped on its own, and the rest of
+        // the save is kept. Losing a name the game no longer has must never cost
+        // the player the progress it *does* still understand.
+        let journal = data
+            .journal
+            .iter()
+            .filter_map(|id| Discovery::from_id(id))
+            .collect();
+        let braziers = data
+            .braziers
+            .iter()
+            .filter_map(|id| MoonPhase::from_id(id))
+            .collect();
+        self.progress = Progress::restored(journal, braziers);
         true
     }
 }
@@ -364,8 +497,10 @@ impl World {
 mod tests {
     use super::{Interaction, Prompt, Target, World};
     use crate::game::area::{Area, AreaId, Direction, Portal, Position};
-    use crate::game::dialogue::Dialogue;
-    use crate::game::entity::Entity;
+    use crate::game::dialogue::{Dialogue, Speech};
+    use crate::game::discovery::Discovery;
+    use crate::game::entity::{Entity, Figure, Prop};
+    use crate::game::progress::MoonPhase;
 
     const A: AreaId = AreaId::new("a");
     const B: AreaId = AreaId::new("b");
@@ -377,8 +512,8 @@ mod tests {
             &["#####", "#...#", "#..o#", "#...#", "##+##"],
             vec![Entity::object(
                 Position::new(3, 2),
-                'o',
                 "a pedestal",
+                Prop::Basin,
                 "It is worn smooth.",
             )],
             vec![Portal::new(
@@ -395,9 +530,10 @@ mod tests {
             &["##+##", "#...#", "#.N.#", "#####"],
             vec![Entity::npc(
                 Position::new(2, 2),
-                'N',
                 "a stranger",
-                Dialogue::new("a stranger", &["Keep to the path."]),
+                Speech::always(Dialogue::new("a stranger", &["Keep to the path."])),
+                Figure::Veiled,
+                Direction::South,
             )],
             vec![Portal::new(
                 Position::new(2, 0),
@@ -508,7 +644,7 @@ mod tests {
         world.move_player(Direction::East); // (2, 1)
         assert_eq!(Some(Prompt::Speak("a stranger")), world.prompt());
         match world.interact() {
-            Interaction::Dialogue(dialogue) => {
+            Interaction::Dialogue { dialogue, .. } => {
                 assert_eq!("a stranger", dialogue.speaker);
                 assert_eq!(&["Keep to the path."], dialogue.lines);
             }
@@ -570,6 +706,177 @@ mod tests {
         assert_eq!("Orphan", world.area_name());
     }
 
+    // --- progression --------------------------------------------------------
+
+    /// The real region, starting in the chapel.
+    fn region() -> World {
+        World::new(crate::game::areas::all(), crate::game::areas::CHAPEL)
+    }
+
+    /// Puts the player next to `target` in the current area and faces it, the way
+    /// walking into it would.
+    fn stand_facing(world: &mut World, at: Position, facing: Direction) {
+        world.place_player(at);
+        // A step into an occupied tile turns without moving, which is exactly the
+        // gesture a player makes before pressing `e`.
+        world.move_player(facing);
+        assert_eq!(facing, world.facing());
+    }
+
+    #[test]
+    fn examining_a_relic_records_a_discovery_once() {
+        let mut world = region();
+        stand_facing(&mut world, Position::new(76, 7), Direction::North);
+        assert_eq!(Some(Prompt::Examine("a cracked basin")), world.prompt());
+
+        assert_eq!(
+            Interaction::Discovered(Discovery::ChapelBasin),
+            world.interact()
+        );
+        assert!(world.knows(Discovery::ChapelBasin));
+        assert_eq!(&[Discovery::ChapelBasin], world.journal());
+
+        // Looking again is a plain examination: the journal does not repeat it,
+        // and the interface is not told to celebrate a second time.
+        assert_eq!(Interaction::Message, world.interact());
+        assert_eq!(1, world.journal().len());
+    }
+
+    #[test]
+    fn an_item_that_teaches_nothing_stays_a_plain_examination() {
+        let mut world = region();
+        stand_facing(&mut world, Position::new(60, 43), Direction::South);
+        assert_eq!(Interaction::Message, world.interact());
+        assert!(world.journal().is_empty());
+    }
+
+    #[test]
+    fn a_discovery_changes_what_a_character_says() {
+        let mut world = region();
+        // Ysolde, in the chapel, before anything has been found.
+        stand_facing(&mut world, Position::new(55, 33), Direction::East);
+        let Interaction::Dialogue { dialogue, figure } = world.interact() else {
+            panic!("expected dialogue");
+        };
+        assert_eq!("Ysolde", dialogue.speaker);
+        assert_eq!(Figure::Veiled, figure);
+
+        world.record_for_test(Discovery::ChapelBasin);
+        let Interaction::Dialogue { dialogue, .. } = world.interact() else {
+            panic!("expected dialogue");
+        };
+        assert!(
+            dialogue.lines.iter().any(|line| line.contains("basin")),
+            "she should react to what was found: {:?}",
+            dialogue.lines
+        );
+    }
+
+    #[test]
+    fn the_moonwell_must_be_answered_in_the_order_the_dial_shows() {
+        let mut world = region();
+        world.goto_for_test(crate::game::areas::SHRINE);
+        let braziers = [
+            (
+                Position::new(78, 17),
+                Position::new(78, 16),
+                MoonPhase::Waning,
+            ),
+            (
+                Position::new(78, 21),
+                Position::new(78, 20),
+                MoonPhase::Full,
+            ),
+            (
+                Position::new(78, 25),
+                Position::new(78, 24),
+                MoonPhase::Waxing,
+            ),
+        ];
+
+        // Light the last one first: the whole sequence guttered, and nothing is
+        // lit afterwards.
+        stand_facing(&mut world, braziers[2].0, Direction::North);
+        assert_eq!(Interaction::Message, world.interact());
+        assert!(world.progress().braziers().is_empty());
+        assert!(!world.knows(Discovery::MoonwellAnswered));
+
+        // In order, it answers.
+        for (at, _, phase) in braziers {
+            stand_facing(&mut world, at, Direction::North);
+            world.interact();
+            assert!(world.progress().is_lit(phase) || world.progress().answered());
+        }
+        assert!(world.progress().answered());
+        assert!(world.knows(Discovery::MoonwellAnswered));
+        assert!(world.journal().contains(&Discovery::MoonwellAnswered));
+    }
+
+    #[test]
+    fn a_sealed_doorway_refuses_until_the_moonwell_is_answered() {
+        let mut world = region();
+        world.goto_for_test(crate::game::areas::SHRINE);
+        stand_facing(&mut world, Position::new(118, 20), Direction::East);
+        assert_eq!(
+            Some(Prompt::Sealed("the Forgotten Catacombs")),
+            world.prompt()
+        );
+
+        assert_eq!(Interaction::Message, world.interact());
+        assert_eq!(
+            crate::game::areas::SHRINE,
+            world.area_id(),
+            "a sealed door must not move the player"
+        );
+        assert!(world.message().contains("sealed"));
+
+        world.record_for_test(Discovery::MoonwellAnswered);
+        assert_eq!(
+            Some(Prompt::Enter("the Forgotten Catacombs")),
+            world.prompt()
+        );
+        assert_eq!(
+            Interaction::Travelled(crate::game::areas::CATACOMBS),
+            world.interact()
+        );
+        assert_eq!(crate::game::areas::CATACOMBS, world.area_id());
+    }
+
+    #[test]
+    fn every_area_can_be_walked_between_without_a_key() {
+        // The region's shape, checked through the *world* rather than the area
+        // graph: each hop must land the player somewhere they can actually stand.
+        let mut world = region();
+        let route = [
+            // Each hop stands *next to* the doorway it uses: a portal is used
+            // from the tile you face it from, not from across the room.
+            (
+                Position::new(1, 25),
+                Direction::West,
+                crate::game::areas::WOODS,
+            ),
+            (
+                Position::new(62, 1),
+                Direction::North,
+                crate::game::areas::VILLAGE,
+            ),
+            (
+                Position::new(1, 20),
+                Direction::West,
+                crate::game::areas::SHRINE,
+            ),
+        ];
+        for (at, facing, destination) in route {
+            stand_facing(&mut world, at, facing);
+            assert_eq!(Interaction::Travelled(destination), world.interact());
+            assert!(
+                world.area().tile_walkable(world.player()),
+                "arrived inside terrain in {}",
+                world.area_name()
+            );
+        }
+    }
+
     #[test]
     fn snapshot_and_restore_round_trip() {
         let mut world = world();
@@ -617,6 +924,56 @@ mod tests {
         data.y = 0; // corner wall
         assert!(!world.restore(&data));
         assert_eq!(Position::new(1, 3), world.player());
+    }
+
+    #[test]
+    fn restore_migrates_a_save_from_before_progression_existed() {
+        // Exactly what version 1 wrote: no journal, no braziers. The player must
+        // keep their place, and simply have nothing discovered yet.
+        let legacy = crate::save::SaveData::new(
+            "sunken-cellar",
+            20,
+            12,
+            vec!["ruined-chapel".to_string(), "sunken-cellar".to_string()],
+        );
+        let mut world = region();
+        assert!(world.restore(&legacy));
+        assert_eq!(crate::game::areas::CELLAR, world.area_id());
+        assert_eq!(Position::new(20, 12), world.player());
+        assert!(world.journal().is_empty());
+        assert!(!world.progress().answered());
+        assert_eq!(2, world.visited_count());
+    }
+
+    #[test]
+    fn restore_drops_unknown_progression_but_keeps_the_rest() {
+        let mut world = region();
+        let mut data = world.snapshot();
+        data.journal = vec![
+            "village-well".to_string(),
+            "a-discovery-that-was-removed".to_string(),
+            "moonwell-answered".to_string(),
+        ];
+        data.braziers = vec!["waning".to_string(), "gibbous".to_string()];
+        assert!(world.restore(&data));
+        assert_eq!(
+            &[Discovery::VillageWell, Discovery::MoonwellAnswered],
+            world.journal(),
+            "a name this build does not know must cost only itself"
+        );
+        assert_eq!(
+            &[crate::game::progress::MoonPhase::Waning],
+            world.progress().braziers()
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_save_for_a_place_that_no_longer_exists() {
+        let mut world = region();
+        let mut data = world.snapshot();
+        data.area = "a-place-that-was-cut".to_string();
+        assert!(!world.restore(&data));
+        assert_eq!(crate::game::areas::CHAPEL, world.area_id());
     }
 
     #[test]

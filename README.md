@@ -20,9 +20,35 @@ glyphs, ink, and light.
 </div>
 
 > **Status: early development.** There is no release and no tagged version yet.
-> Grimmoire is a small, playable **exploration prototype** — two large connected
-> areas, responsive movement with sprinting, interaction, one NPC, and fail-soft
-> saving — on top of a custom ASCII renderer. It is not a complete game.
+> Grimmoire is a small, playable **exploration RPG** — a region of six connected
+> places, five characters with something to say, a journal of what you have
+> found, one puzzle, and fail-soft saving — on top of a custom ASCII renderer. It
+> is not a complete game.
+
+## The region
+
+```
+                       Hollow Village
+                             │  │
+   Ruined Chapel ── Whispering Woods ── Moonwell Shrine
+        │                                     │  (sealed until answered)
+   Sunken Cellar ── Forgotten Catacombs ───────┘
+```
+
+Six places, all reachable without solving anything; the moonwell opens a
+*shortcut* between the shrine and the catacombs rather than a door you have to
+earn. Each one has its own floor, its own air, and its own reason to be walked
+through twice.
+
+<div align="center">
+
+| | |
+| --- | --- |
+| **Ruined Chapel** — where you wake. Ysolde has no face and remembers the village. | **Sunken Cellar** — four flooded chambers and a bridge you would rather not slip off. |
+| **Whispering Woods** — a trail between two places, a keeper with a lantern, and a glade nobody mentions. | **Hollow Village** — a crossroad, six fallen houses, a dry well, and Cassen, who is lying. |
+| **Moonwell Shrine** — a pale hall around a well. Three braziers, a dial, and a priestess who answers obliquely. | **Forgotten Catacombs** — burial galleries, a scribe's tomb, and Vesper, who would rather you left. |
+
+</div>
 
 ## What it is
 
@@ -30,11 +56,17 @@ A game about a wizard who grows stronger through **knowledge rather than gear**,
 built for the terminal and taking **ASCII art as its primary visual language**
 rather than as a limitation to escape.
 
-The long-term vision is exploration, character-focused dialogue, strategic
-turn-based magic combat, skill trees, and story-and-mastery progression. The
-story, world, characters, and detailed mechanics are **deliberately undecided** —
-everything currently in the game is placeholder content. See
-[`ROADMAP.md`](ROADMAP.md).
+The loop is **explore → discover → learn → unlock → explore further**. Examining
+something worth examining writes an entry in the **journal** (<kbd>J</kbd>): the
+setting, told a piece at a time. Discoveries change what characters say, and one
+of them opens a door that was not going to open.
+
+There is no experience, no loot, and no combat yet — and deliberately so: the
+reward for looking closely is knowing more. The long-term vision is
+character-focused dialogue, strategic turn-based magic combat, skill trees, and
+story-and-mastery progression. The story, world, characters and detailed mechanics
+are **deliberately undecided** — everything currently in the game is placeholder
+content. See [`ROADMAP.md`](ROADMAP.md).
 
 ## Why it looks the way it does
 
@@ -57,6 +89,12 @@ everything currently in the game is placeholder content. See
   in is narrower than three cells, and the routes walked constantly are wider
   still. The generator refuses to emit a map that breaks the rule, and a test
   enforces it. See [`docs/map-design.md`](docs/map-design.md).
+- **Every place has a material and an air.** The wood is floored in grass and
+  breathes pollen and blossom; the shrine is pale marble under cold silver motes;
+  the catacombs are bone dust. You should know where you are before you read the
+  name.
+- **Names and words live in the model.** `Entity::name`, `Dialogue::speaker` and
+  every journal line are content; the renderer has no idea what any of them say.
 
 The player is a kawaii mage bunny: long pink ears, a pale face with two big bright
 eyes, a violet robe with white lace, and a star wand that twinkles.
@@ -69,20 +107,27 @@ eyes, a violet robe with white lace, and a star wand that twinkles.
 
 <div align="center">
 
-**Speaking with Ysolde, who has no face** — the dialogue panel rises into place
-rather than appearing, and the world keeps breathing behind it.
+**Speaking with Ysolde, who has no face.** The dialogue panel rises into place
+rather than appearing, and the world keeps breathing behind it. Five characters
+have their own silhouette, their own inks, and their own face when they talk.
 
-<img src="docs/images/dialogue.png" alt="The dialogue panel open, showing Ysolde's ASCII portrait and two lines of dialogue" width="820">
+<img src="docs/images/dialogue.png" alt="The dialogue panel open, showing Ysolde's ASCII bust and two lines of dialogue" width="820">
 
-**The Sunken Cellar** — the arrival is marked, and the stair has not been swept in
-a long while.
+**The Whispering Woods** — a dark mass of trees with the green at its edges, a
+trodden trail through it, and a glade the trail does not advertise.
 
-<img src="docs/images/cellar.png" alt="The mage bunny arriving in the Sunken Cellar" width="820">
+<img src="docs/images/woods.png" alt="The mage bunny at a standing stone in a dark forest clearing" width="820">
 
-**The altar in the apse**, and a walk through the nave.
+**The Hollow Village** — a crossroad, six fallen houses, and a well that is dry
+to the bottom.
 
-<img src="docs/images/altar.png" alt="The apse of the Ruined Chapel with a glowing sigil" width="400">
-<img src="docs/images/nave.png" alt="The mage bunny in profile walking east through the nave" width="400">
+<img src="docs/images/village.png" alt="The mage bunny in a ruined village street" width="400">
+<img src="docs/images/shrine.png" alt="The Moonwell Shrine, its water lit and its braziers burning" width="400">
+
+**The Forgotten Catacombs**, and the journal that records what you find.
+
+<img src="docs/images/catacombs.png" alt="The mage bunny in a bone-floored catacomb gallery" width="400">
+<img src="docs/images/journal.png" alt="The journal panel listing discoveries" width="400">
 
 </div>
 
@@ -104,15 +149,16 @@ kitty --directory "$PWD" cargo run --release
 ```
 
 You start in the **Ruined Chapel**. The stair down to the Sunken Cellar is at the
-south end of the nave; **Ysolde** and a cracked basin are elsewhere in the chapel,
-and a faded sigil waits at the far side of the cellar. Press <kbd>e</kbd> when the
-prompt appears.
+south end of the nave, and a door in the west wall leads out into the Whispering
+Woods. Press <kbd>e</kbd> when the prompt appears, and <kbd>J</kbd> to read what
+you have found so far.
 
 | Key | Action |
 | --- | --- |
 | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or arrows | Move, and face that way. **Hold to keep walking.** |
 | <kbd>Shift</kbd> + a direction | Sprint |
 | <kbd>E</kbd> | Interact with what you face |
+| <kbd>J</kbd> | The journal of what you have found |
 | <kbd>H</kbd>, <kbd>?</kbd>, <kbd>F1</kbd> | Help and diagnostics |
 | <kbd>F3</kbd> | Presentation study (rendering prototype) |
 | <kbd>F2</kbd> | Renderer showcase (development screen) |
@@ -127,10 +173,22 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 ## What works today
 
-**The exploration prototype**
+**The exploration RPG**
 
-- Two large connected areas that are **bigger than the viewport**, so the camera
-  scrolls and the environment fills the screen.
+- Six connected areas that are **bigger than the viewport**, so the camera scrolls
+  and the environment fills the screen. Every one is reachable from the start.
+- **Five characters**, each with a silhouette, a palette and a voice of their own:
+  a veiled keeper of the chapel, a lantern child in the wood, a scavenger who is
+  lying about something, a priestess who answers in the right order for the wrong
+  reasons, and something in the catacombs that resents being awake.
+- **A journal** of what you have found, written when you find it rather than when
+  you arrive somewhere, and kept across saves.
+- **Discoveries that matter**: what you learn changes what a character will say to
+  you, and answering the moonwell opens a way that was sealed — for both
+  directions, so it is a shortcut and not a toll.
+- **One puzzle** with its rules written on the floor: three braziers, a dial, and
+  an order. Lighting them out of turn puts all three out, so the order has to be
+  read rather than guessed, and it can never be soft-locked.
 - Tile-based movement with collision against terrain, boundaries and entities,
   plus a facing direction so you can face what you want to use.
 - **Event-driven movement**: a press steps at once, holding walks at a steady
@@ -149,8 +207,10 @@ grows. Grimmoire cannot maximise your window; that part is yours.
   fast as horizontal.
 - An interaction model resolved deterministically from the adjacent tiles, with a
   contextual prompt instead of permanent instructions.
-- Automatic, versioned, **fail-soft** persistence of area, position and discovered
-  areas: anything unrecognised means "start a new game", never a half-loaded one.
+- Automatic, versioned, **fail-soft** persistence of area, position, discovered
+  areas, the journal and the shrine's progress. Anything unrecognised means "start
+  a new game", never a half-loaded one; a save written by an older version is
+  *migrated*, not discarded.
 
 **The renderer underneath**
 
@@ -175,9 +235,10 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 ## Not implemented yet
 
-Combat, spells, inventory, items you can pick up, quests, skill trees, and story.
-There is one NPC and no dialogue branching or scripting. The two areas are
-hand-authored placeholders.
+Combat, spells, inventory, items you can pick up, quests, skill trees, and a
+story. Dialogue branches only on what you have discovered — there is no scripting
+and no conversation tree. The six areas and the five characters are hand-authored
+placeholders.
 
 ## Build and run
 
@@ -231,13 +292,14 @@ build a terminal emulator.
 
 | Module | Responsibility |
 | --- | --- |
-| `game` | The world model and its rules: areas, tiles, entities, movement, collision, interaction, travel. Pure — no rendering, no I/O. |
-| `save` | A small versioned format and the only code that touches the save file. |
+| `game` | The world model and its rules: areas, tiles, entities, movement, collision, interaction, travel, and progression. Pure — no rendering, no I/O. |
+| `game::discovery`, `game::progress` | What can be learned, what has been, and the shrine puzzle's state. |
+| `save` | A small versioned format, its migration path, and the only code that touches the save file. |
 | `render` | Pure, terminal-agnostic drawing: cells, styles, colours, rectangles, canvases, views, `Frame` composition, image handles, and the optional PNG encoder. |
 | `terminal` | The **only** module that talks to the terminal: raw mode, alternate screen, the Kitty keyboard and graphics protocols, input, capability detection, and diffed presentation. |
 | `anim` | Time-based animation with an explicitly advanced clock. |
 | `input` | Terminal-independent key and event types, including press/repeat/release. |
-| `ui` | Frame composition: the ASCII scenery renderer, character animation, feedback effects, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
+| `ui` | Frame composition: the ASCII scenery renderer, the cast table, character animation, feedback effects, the journal, theme, layout, motion, screens, transitions, the screen stack, and the viewport policy. |
 | `app` | Wires input, update, compose and present together. |
 | `pixel` | Software pixel rendering, used only by optional interface art. |
 
@@ -253,8 +315,8 @@ own the drawing model. No image decoder is needed — Kitty decodes.
   are paced differently, the measured numbers, and what was verified live.
 - [`docs/gameplay.md`](docs/gameplay.md) — the world model, controls, movement,
   interaction rules, and save format.
-- [`docs/map-design.md`](docs/map-design.md) — the rules an area must satisfy, and
-  how they are enforced.
+- [`docs/map-design.md`](docs/map-design.md) — the rules an area must satisfy, how
+  a map is generated, and how the rules are enforced.
 - [`AGENTS.md`](AGENTS.md) — the vision, the boundaries, and the invariants.
 - [`ROADMAP.md`](ROADMAP.md) — phasing for future work.
 
@@ -280,9 +342,14 @@ own the drawing model. No image decoder is needed — Kitty decodes.
 - **Game logic is pure.** Movement, collision, interaction and travel are testable
   without a terminal; the UI decides how things look.
 - **Artwork is source text, not files.** The world is glyph tables and neighbour
-  rules; the optional interface art is ASCII sprite tables rendered in memory.
-  Nothing is read from disk, so there is no third-party imagery and no missing file
-  to break the game.
+  rules; the cast is a table of ASCII silhouettes and inks in `ui::cast`; the
+  optional interface art is ASCII sprite tables rendered in memory. Nothing is
+  read from disk, so there is no third-party imagery and no missing file to break
+  the game.
+- **A character is a role the model names, not a picture.** The world says *"a
+  lantern keeper"*; `ui::cast` decides what that looks like. Adding a character
+  means adding a role, an entry in the cast table, and nothing else — the
+  compiler finds every place that must know.
 
 ## Known limitations
 
@@ -292,8 +359,8 @@ own the drawing model. No image decoder is needed — Kitty decodes.
   model has no continuation cell.
 - Presentation repaints per changed cell rather than tracking damage rectangles. A
   step with a scrolled camera rewrites a few thousand cells.
-- The world is two rooms with one NPC and no dialogue branching; the art is
-  placeholder.
+- The world is six rooms with five characters, branching only on discoveries.
+  Nothing is generated, and the art and content are placeholders.
 - Visual verification was done on Linux under Kitty 0.49.2; other platforms are
   untested.
 - Terminal restoration cannot be guaranteed against `SIGKILL` or power loss.

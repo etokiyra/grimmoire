@@ -190,13 +190,19 @@ impl Art {
         }
     }
 
-    /// The portrait to show beside a speaker's words, if there is one.
+    /// The portrait to show for a speaker, if the optional art has one.
     ///
-    /// One portrait exists in the prototype, so every speaker shares it; when
-    /// there are more, this is where the mapping belongs.
+    /// Exactly one image exists, and it is a portrait of the veiled figure. Every
+    /// other character is drawn from their own ASCII bust instead — which is the
+    /// point: the world is drawn from source, and the one picture is an extra for
+    /// the character it was drawn for, not a general portrait system.
     #[must_use]
-    pub const fn portrait_for(&self, _speaker: &str) -> Option<AssetId> {
-        self.portrait
+    pub const fn portrait_for(&self, figure: crate::game::Figure) -> Option<AssetId> {
+        if matches!(figure, crate::game::Figure::Veiled) {
+            self.portrait
+        } else {
+            None
+        }
     }
 }
 
@@ -264,10 +270,15 @@ mod tests {
     #[test]
     fn the_built_assets_resolve_to_a_portrait() {
         use crate::assets::Assets;
+        use crate::game::Figure;
         let assets = Assets::built();
         let art = Art::resolve(&assets);
         assert!(art.portrait.is_some());
-        assert_eq!(art.portrait, art.portrait_for("the Hooded Figure"));
-        assert!(Art::none().portrait_for("anyone").is_none());
+        assert_eq!(art.portrait, art.portrait_for(Figure::Veiled));
+        assert!(
+            art.portrait_for(Figure::Lantern).is_none(),
+            "the one image is the veiled figure's; everyone else has a bust"
+        );
+        assert!(Art::none().portrait_for(Figure::Veiled).is_none());
     }
 }

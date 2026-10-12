@@ -1,8 +1,8 @@
-# Gameplay: the exploration prototype
+# Gameplay: the exploration RPG
 
-This document describes the playable exploration slice: its world model, the
-rules that govern it, the controls, and how progress is saved. It documents what
-exists today, which is deliberately small.
+This document describes the playable region: its world model, the rules that
+govern it, the controls, and how progress is saved. It documents what exists
+today, which is deliberately small.
 
 > **Placeholder content.** The area names, the character called Ysolde, and every
 > line of dialogue are provisional. The story, setting, and characters have not been
@@ -10,9 +10,15 @@ exists today, which is deliberately small.
 
 ## What you can do
 
-Launch Grimmoire and you are standing in the **Ruined Chapel**. You can walk
-around it, examine a cracked basin, speak to a hooded figure, and take the stair
-down to the **Sunken Cellar** — and come back up again. That is the whole slice.
+Launch Grimmoire and you are standing in the **Ruined Chapel**. From there you can
+walk out into the **Whispering Woods**, north to the **Hollow Village**, east to
+the **Moonwell Shrine**, or down the stair to the **Sunken Cellar** and on into
+the **Forgotten Catacombs**. Along the way you can examine what is worth
+examining, talk to five characters, read the **journal** of what you have found,
+and answer the moonwell.
+
+Every place is reachable without solving anything. The moonwell opens a shortcut
+between the shrine and the catacombs; it does not gate a place.
 
 ## Controls
 
@@ -21,6 +27,7 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 | `w` `a` `s` `d` or arrow keys | Move (and face that way). Hold to keep walking. |
 | `Shift` + a direction | Sprint |
 | `e` | Interact with whatever you are facing, or whatever is adjacent |
+| `j` | The journal of what you have found |
 | `h`, `?`, `F1` | Help and renderer diagnostics |
 | `F3` | The presentation study (a rendering prototype) |
 | `F2` | The renderer showcase (a development screen) |
@@ -28,7 +35,7 @@ down to the **Sunken Cellar** — and come back up again. That is the whole slic
 | `q`, `Ctrl`+`C` | Quit |
 
 The world is drawn across the **whole screen**, and the camera follows you: the
-two areas are larger than a normal terminal, so walking scrolls the view.
+areas are larger than a normal terminal, so walking scrolls the view.
 Grimmoire draws its own background, so the terminal's theme never shows through.
 
 The bottom two rows are an overlay, not part of the world. The upper row shows a
@@ -37,9 +44,14 @@ prompt for whatever is within reach, or the result of your last action, and says
 in, your position, the direction you face, and the essential controls.
 
 The world itself is **ASCII art**. Walls are drawn with a lit cap, a shadowed
-base, a side face, or as a pillar depending on what surrounds them; floors, paths,
-rubble and moss vary by position; water rolls; candles gutter along the walls;
-motes drift; and each area carries an inlaid motif cut into its open floors.
+base, a side face, or as a pillar depending on what surrounds them; floors, paths
+and water vary by position; water rolls; candles gutter along the walls; and each
+area carries an inlaid motif cut into its open floors.
+
+Each area also has its own **material** and its own **air**, which is what makes
+the wood, the village, the shrine and the catacombs recognisable before their
+names are read: grass and pollen in the wood, ash and cinders in the village, pale
+marble under cold silver motes in the shrine, bone dust in the catacombs.
 
 The player and the people they meet are small **figures**, not single letters:
 several cells tall, drawn in several colours at once (hair, skin, cloth, trim and
@@ -59,12 +71,19 @@ speculative.
 
 - A **tile** is `Floor`, `Path`, `Wall`, `Water`, `Tree`, or `Door`. Only floor
   and path can be walked on. A `Door` blocks movement but can be used.
-- An **entity** is an NPC (which speaks) or an object (which can be examined).
-  Entities block movement, so you cannot walk through the figure or the basin.
+- An **entity** is one of three things. An **NPC** speaks, from a fixed facing,
+  with a *figure* naming the silhouette the interface should draw. An **object**
+  is scenery that can be examined, with a *prop* naming its art and optionally a
+  **discovery** it teaches. A **brazier** is the shrine's one stateful object.
+  Entities block movement, so you cannot walk through a character or a well.
 - A **portal** is a doorway: a position, a destination area, an arrival position,
-  and a label. Every doorway is drawn as a door tile and can be used from either
-  side.
+  a label, and optionally the discovery that unseals it. Every doorway is drawn as
+  a door tile and can be used from either side; a sealed one is drawn, reachable
+  and interactive, and refuses with a message until the world state opens it.
 - The **player** has a position, an area, and a facing direction.
+- **Progression** is a set of discoveries, the journal that records them in order,
+  and the braziers lit at the moonwell. It is small on purpose: it is the state a
+  later inventory, spellbook or quest log would sit *beside*, not replace.
 
 Areas are authored as fixed-width ASCII rows, which keeps the content readable
 and lets the layout be reviewed like the game it produces:
@@ -135,6 +154,29 @@ narrower than three cells** — see [`map-design.md`](map-design.md).
   releases are not activations and auto-repeat is ignored, so holding `e` cannot
   interact over and over.
 
+## Progression and discoveries
+
+A **discovery** is a stable, saveable id with its content attached: a title and a
+journal entry (`game::discovery`). Recording one is what "finding something"
+means, and it happens when the player examines a relic or answers the moonwell —
+never because an area was loaded.
+
+Everything a discovery unlocks reads from the same set:
+
+- **Journal entries** (`j`), in the order they were found.
+- **Dialogue variants**: a character's `Speech` is a default plus a list of
+  variants, each unlocked by a discovery. The first matching variant wins, so the
+  list reads most-specific-first and resolution is deterministic however the
+  player got there.
+- **Sealed doorways**, which open when the discovery they name is known.
+
+The **moonwell** is the one puzzle. Three braziers, each marked with a phase of the
+moon, and a dial cut into the floor listing waning, full, waxing — in that order.
+Lighting them in that order answers the moon; lighting one out of turn puts *all*
+of them out, which is the feedback that says the order mattered. A partial success
+that stayed lit would let the player brute-force it, and resetting means it can
+never soft-lock. The glow is persistent: lit braziers stay lit across a save.
+
 ## Persistence
 
 Progress is saved automatically: on quitting, and immediately after travelling
@@ -144,42 +186,69 @@ The save file lives at `$XDG_DATA_HOME/grimmoire/save.txt`, or
 `$HOME/.local/share/grimmoire/save.txt` when `XDG_DATA_HOME` is not set. If
 neither is available, persistence is skipped and the game simply starts fresh.
 
-Only essential exploration state is stored — the current area, the player's
-position, and the areas visited:
+Only state that cannot be reconstructed is stored — the current area, the player's
+position, the areas visited, the journal, and the braziers lit:
 
 ```
-grimmoire-save 1
+grimmoire-save 2
 area=sunken-cellar
-pos=17 1
+pos=20 12
 visited=ruined-chapel sunken-cellar
+journal=chapel-basin village-well
+braziers=waning
 ```
 
-The format is versioned and parsed strictly. Anything unexpected — a different
-version, a missing field, a malformed number, an unknown key, a position that is
-not valid standing ground, or an area that no longer exists — causes the whole
-save to be ignored and a new game to start. Saving writes to a temporary file and
-renames it over the target, so an interrupted write cannot corrupt an existing
-save.
+The format is versioned and parsed strictly. Anything unexpected — an unknown
+version, a missing field, a malformed number, an unknown key, a *field the file's
+own version does not define*, a position that is not valid standing ground, or an
+area that no longer exists — causes the whole save to be ignored and a new game to
+start. Saving writes to a temporary file and renames it over the target, so an
+interrupted write cannot corrupt an existing save.
 
-The save format is intentionally narrow. Equipment, quests, and story flags will
-need a different design, and inventing one now would be premature.
+### Versions and migration
+
+| Version | Fields | Read by |
+| --- | --- | --- |
+| 1 | `area`, `pos`, `visited` | every version |
+| 2 | the above, plus `journal` and `braziers` | 2 and later |
+
+Files are always *written* at the current version and older files are still
+*read*. A version 1 save loads with an empty journal and no braziers lit, which is
+exactly the state that player was in when it was written: migration is a widening
+rather than a conversion, nothing is reinterpreted, and **no valid save is ever
+discarded because the schema grew**.
+
+Progression ids this build does not recognise are dropped *individually* — a
+discovery that was renamed or removed costs only itself, and the rest of the
+journal and the player's position survive. That is the same rule the visited set
+already used.
+
+A version 1 file that contains a version 2 field is rejected: it is not a file the
+game ever wrote, and guessing what it meant is worse than starting fresh.
+
+The format stays intentionally narrow. Equipment, quests, and story flags will
+need more design, and inventing it now would be premature.
 
 ## Where the code lives
 
 | Path | Responsibility |
 | --- | --- |
 | `src/game/area.rs` | Tiles, positions, directions, doorways, and the ASCII area parser |
-| `src/game/entity.rs` | NPCs and objects |
-| `src/game/dialogue.rs` | The minimal dialogue content model |
-| `src/game/world.rs` | The player's place in the world: movement, collision, interaction, travel, snapshots |
-| `src/game/areas.rs` | The two prototype areas (temporary content) |
+| `src/game/entity.rs` | NPCs, props and braziers; the figures and props they name |
+| `src/game/dialogue.rs` | Dialogue, and the speech variants a discovery unlocks |
+| `src/game/discovery.rs` | What can be learned, and the journal text for each |
+| `src/game/progress.rs` | What has been learned, and the moonwell's state |
+| `src/game/world.rs` | The player's place in the world: movement, collision, interaction, travel, progression, snapshots |
+| `src/game/areas.rs` | The six areas, the cast, and every landmark (content) |
 | `src/save.rs` | The versioned save format and the file store |
 | `src/ui/motion.rs` | The movement model: press, cadence, release, sprint, stall guard |
-| `src/ui/scenery.rs` | The ASCII world renderer: terrain glyphs, inlay, props, ambience, figures |
+| `src/ui/scenery.rs` | The ASCII world renderer: terrain glyphs, ground, inlay, props, ambience, figures |
+| `src/ui/cast.rs` | The cast table: each figure's art, inks and dialogue bust |
 | `src/ui/animation.rs` | The character animation model: stride, sprint, idle, blink |
 | `src/ui/effects.rs` | Transient feedback pulses |
 | `src/ui/exploration.rs` | The exploration screen: key mapping, camera, and the HUD overlay |
-| `src/ui/dialogue.rs` | The dialogue overlay and its ASCII portrait |
+| `src/ui/dialogue.rs` | The dialogue overlay and the speaker's bust |
+| `src/ui/journal.rs` | The journal panel |
 
 The `game` and `save` modules never draw and never touch a terminal. The UI maps
 tiles and entity kinds onto glyphs and colours; the game model never decides how
@@ -187,11 +256,15 @@ anything looks.
 
 ## Adding an area
 
-1. Author the rows (all the same width) and add a constructor in
-   `src/game/areas.rs` with a stable `AreaId`.
-2. Declare its entities and portals. Give each portal an `arrive` position on
-   walkable ground.
-3. Add it to `areas::all()` and point an existing portal at it.
+1. Draw it in `tools/generate-areas.py` and run `tools/apply-areas.py`, which
+   writes the grid into `src/game/areas.rs` and prints the coordinates.
+2. Add a constructor with a stable `AreaId`, and declare its entities and portals
+   using the printed coordinates. Give each portal an `arrive` position on
+   walkable ground, and every area at least one landmark worth examining.
+3. Add it to `areas::all()` and point an existing portal at it — both ways, since
+   `every_doorway_runs_both_ways` checks.
+4. Give it a `Ground`, an `Air` and a `Motif` in `ui::scenery`, or it will look
+   like the chapel with different walls.
 
 **Every passage must fit the character.** The sprite is five cells wide, so no
 tile the player can stand in may be narrower than three cells, and the routes
@@ -200,22 +273,24 @@ corridors, chamber mouths, the gaps between pillars and pews, and the approach t
 doorway. Read [`map-design.md`](map-design.md) before drawing a map — it lists the
 rule, the widths in use, and the other rules a layout already has to satisfy.
 
-`tools/generate-areas.py` draws the two areas and prints them; it widens a passage
-under the minimum, seals off any pocket that is not reachable from the main space —
-so a map cannot contain a region the player can see but never enter — and refuses
-to emit a map that is still too narrow. `cargo run --example preview -- chapel`
-prints a rendered area, which is the quickest way to check how a layout will look.
+`tools/generate-areas.py` draws the maps; `tools/apply-areas.py` writes them into
+`areas.rs`. The generator widens a passage under the minimum, seals off any pocket
+that is not reachable from the main space — so a map cannot contain a region the
+player can see but never enter — and refuses to emit a map that is still too
+narrow. `cargo run --example preview -- woods` prints a rendered area, which is the
+quickest way to check how a layout will look.
 
 The tests in `areas.rs` check that every spawn and arrival is on walkable ground,
 that every portal sits on a door tile and is reachable from both sides, that every
-doorway is a full character wide, that no walkable tile is in a passage the
-character does not fit through, that every entity can be walked up to, that most of
-each area is one connected space, that each area is at least as large as the
-reference viewport, and that entity glyphs are printable ASCII — so most authoring
-mistakes are caught without launching the game.
+doorway is a full character wide and runs both ways, that no walkable tile is in a
+passage the character does not fit through, that every entity can be walked up to
+and every area has something to examine, that the whole region is reachable from
+the chapel, that every discovery can actually be made, that most of each area is
+one connected space, and that each area is at least as large as the reference
+viewport — so most authoring mistakes are caught without launching the game.
 
 ## Not implemented
 
 No combat, spells, inventory, quests, skill trees, or story. Items cannot be
-picked up. There are two hand-authored areas and exactly one NPC, with no dialogue
-branching. Save data covers position and discovery only.
+picked up. Dialogue branches only on what has been discovered. There is one puzzle
+and five characters, and the content is placeholder throughout.

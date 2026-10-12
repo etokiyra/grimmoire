@@ -25,6 +25,7 @@ use super::animation::Performance;
 use super::dialogue::DialogueScreen;
 use super::effects::{Effects, Pulse};
 use super::help::{Binding, HelpOverlay};
+use super::journal::JournalScreen;
 use super::motion::{Motion, Movement};
 use super::scenery::Scenery;
 use super::screen::{Command, Screen};
@@ -32,7 +33,7 @@ use super::showcase::Showcase;
 use super::theme::Palette;
 use super::transition;
 use super::{FrameContext, viewport};
-use crate::game::{Direction, Interaction, Prompt, World, areas};
+use crate::game::{Direction, Figure, Interaction, Prompt, World, areas};
 use crate::input::{Key, KeyCode};
 use crate::render::{AssetId, Frame, Rect, Style, glyph};
 use crate::save::SaveStore;
@@ -48,10 +49,11 @@ const HUD_ROWS: u16 = 2;
 const AMBIENT_PERIOD: Duration = Duration::from_millis(90);
 
 /// Bindings listed by the help overlay while exploring.
-const CONTROLS: [Binding; 8] = [
+const CONTROLS: [Binding; 9] = [
     ("w a s d / arrows", "move (hold to keep walking)"),
     ("shift", "sprint while moving"),
     ("e", "interact with what you face"),
+    ("j", "journal of what you have found"),
     ("h / ? / F1", "controls and diagnostics"),
     ("F3", "presentation study (rendering)"),
     ("F2", "renderer showcase (development)"),
@@ -206,8 +208,23 @@ impl ExplorationScreen {
             }
         }
         match self.world.interact() {
-            Interaction::Dialogue(dialogue) => {
-                Command::Push(Box::new(DialogueScreen::new(dialogue, self.portrait)))
+            Interaction::Dialogue { dialogue, figure } => {
+                // The optional image is a portrait of the veiled figure; every
+                // other character is drawn from their own ASCII bust.
+                let portrait = if figure == Figure::Veiled {
+                    self.portrait
+                } else {
+                    None
+                };
+                Command::Push(Box::new(DialogueScreen::new(dialogue, figure, portrait)))
+            }
+            Interaction::Discovered(_) => {
+                // Finding something is worth a flourish, and it is written down
+                // immediately rather than waiting for a quit, so a discovery
+                // cannot be lost to a crash.
+                self.effects.spawn(self.world.player(), Pulse::Arrived);
+                self.persist();
+                Command::None
             }
             Interaction::Travelled(_) => {
                 self.travel = TRAVEL_DURATION;
@@ -339,6 +356,12 @@ impl Screen for ExplorationScreen {
                 KeyCode::Char('e') | KeyCode::Char('E') => {
                     return self.interact();
                 }
+                KeyCode::Char('j') | KeyCode::Char('J') => {
+                    return Command::Push(Box::new(JournalScreen::new(
+                        self.world.journal().to_vec(),
+                        crate::game::Progress::total(),
+                    )));
+                }
                 _ => {}
             }
         }
@@ -430,6 +453,10 @@ fn prompt_line(prompt: Prompt) -> String {
         Prompt::Speak(name) => format!("e  speak with {name}"),
         Prompt::Examine(name) => format!("e  examine {name}"),
         Prompt::Enter(name) => format!("e  enter {name}"),
+        // A sealed way is announced rather than hidden: the player should know it
+        // is there and that something is missing, not discover it by being
+        // refused.
+        Prompt::Sealed(name) => format!("e  {name} — sealed"),
     }
 }
 

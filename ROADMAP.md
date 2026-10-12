@@ -165,10 +165,40 @@ Delivered:
 - **An open-source face.** GPL-3.0-or-later, stated in `LICENSE` and `Cargo.toml`,
   and a README written as a project front page rather than a status note.
 
-## Phase 8 — Dialogue and story
+## Phase 8 — A living, explorable region (done)
 
-- A dialogue system with branching choices, built on the overlay that already
-  carries an ASCII portrait.
+The rendering foundation was in place; this phase built the *game* on top of it:
+somewhere to go, someone to meet, and a reason to look closely.
+
+Delivered:
+
+- **Six connected places**, all reachable without solving anything: the Ruined
+  Chapel, the Sunken Cellar, the Whispering Woods, the Hollow Village, the
+  Moonwell Shrine, and the Forgotten Catacombs. Each has its own **material** and
+  **air**, so it is recognisable before its name is read, and each has a landmark
+  worth walking up to.
+- **Five characters** with their own silhouettes, palettes and voices — a veiled
+  keeper, a lantern child, a scavenger who lies, a priestess who answers
+  obliquely, and something in the catacombs. Dialogue *reacts*: each character's
+  speech has variants unlocked by what the player has discovered.
+- **Discoveries and a journal.** Examining a relic or answering the moonwell
+  records a discovery with a title and a piece of the setting. The journal (`j`)
+  is the reward for looking closely, and the only one: no experience, no loot.
+- **One puzzle, written on the floor.** Three braziers and a dial, an order to
+  light them in, feedback that says when it was wrong, no way to soft-lock it, and
+  a state that persists. Answering it opens a **shortcut** between the shrine and
+  the catacombs — a reward for exploring, not a toll on it.
+- **A save format that migrates.** Version 2 adds the journal and the puzzle
+  state; version 1 files are still read, widened rather than converted, and an
+  unknown progression id costs only itself.
+- **The cast as a table.** `ui::cast` holds every figure's art, inks and dialogue
+  bust, so the renderer draws a role rather than a hardcoded character. Props got
+  the same treatment.
+
+## Phase 9 — Dialogue and story
+
+- A dialogue system with branching *choices*, built on the overlay that already
+  carries a bust and on the speech variants a discovery unlocks.
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.
 - Conversation state that persists, and quests built on top.
