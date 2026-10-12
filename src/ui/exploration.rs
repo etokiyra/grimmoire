@@ -265,7 +265,7 @@ impl ExplorationScreen {
             ('·', self.world.message().to_string(), palette.text_style())
         } else if let Some(prompt) = self.world.prompt() {
             (
-                '»',
+                '♥',
                 prompt_line(prompt),
                 Style::new().with_fg(palette.focus).bold(),
             )
@@ -277,7 +277,7 @@ impl ExplorationScreen {
 
         // Upper row, right: the movement state, so sprinting is unmistakable.
         if self.movement.is_sprinting() {
-            let label = "sprint »";
+            let label = "★ sprint »";
             view.put_str(
                 view.width()
                     .saturating_sub(glyph::display_width(label))
@@ -800,8 +800,11 @@ mod tests {
         let screen = screen();
         let (canvas, _) = compose_into(&screen, 120, 40);
         let text = frame_text(&canvas);
-        assert!(text.contains("o::o"), "the mage's face is missing:\n{text}");
-        assert!(text.contains("~~"), "the mage's hair is missing");
+        assert!(
+            text.contains("(●:●)"),
+            "the witch's face is missing:\n{text}"
+        );
+        assert!(text.contains("/^\\"), "the witch's hat is missing");
     }
 
     #[test]
@@ -815,6 +818,16 @@ mod tests {
             text.contains("sprint"),
             "the sprint control is undiscoverable"
         );
+    }
+
+    #[test]
+    fn the_interface_marks_are_single_column_glyphs() {
+        for ch in ['♥', '★', '·', '»', '✿', '❀', '✧'] {
+            assert!(
+                crate::render::glyph::is_drawable(ch),
+                "{ch:?} is not one column wide"
+            );
+        }
     }
 
     #[test]

@@ -514,7 +514,7 @@ mod tests {
         let app = fixture();
         let text = frame_text(&app);
         assert!(text.contains("Ruined Chapel"), "area name missing");
-        assert!(text.contains("o::o"), "the mage is missing");
+        assert!(text.contains("(●:●)"), "the witch is missing");
         assert!(text.contains("facing"), "status missing");
     }
 

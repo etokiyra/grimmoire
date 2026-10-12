@@ -110,6 +110,22 @@ impl Effects {
         self.live.is_empty()
     }
 
+    /// Every live pulse: where it is, what it is saying, and how strong it is.
+    ///
+    /// Used by the renderer to scatter sparkles; the pulses themselves stay
+    /// private so nothing else can reach in and mutate them.
+    #[must_use]
+    pub fn live(&self) -> Vec<(Position, Pulse, f32)> {
+        self.live
+            .iter()
+            .map(|effect| {
+                let age = self.clock.saturating_sub(effect.born);
+                let t = (age.as_secs_f32() / LENGTH.as_secs_f32()).clamp(0.0, 1.0);
+                (effect.at, effect.kind, 1.0 - t * t)
+            })
+            .collect()
+    }
+
     /// The pulse at `at`, with an intensity that falls from 1 to 0.
     ///
     /// The curve is eased so the pulse lands hard and fades out, which reads as

@@ -9,6 +9,27 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Changed — a kawaii witch, anime air, and figures at the scale of the world
+
+- **The player character is now a kawaii witch, and she is a third of the size she
+  was.** The old figure was six cells wide and five tall — five tiles high against
+  one-cell walls — which made her tower over the map. She is now **five cells wide
+  and three tall**, exactly the height of a doorway, a tree or the sigil, with
+  chibi proportions: a tall pointed hat and a face with two big bright eyes take
+  the whole figure, and the dress underneath is one row that swishes as she walks.
+  She carries a star wand whose star twinkles.
+- **She is drawn in pink and violet.** The character ink set moved from silver,
+  indigo and gold to pink hair, a violet hat and dress, white lace and big cyan
+  eyes — deliberately the most saturated thing on screen, so she pops off a world
+  made almost entirely of cold stone.
+- **Ysolde was rescaled to match**, and her face is now a void with two violet
+  eyes rather than a rim.
+- **Anime air.** A few of the drifting motes are now blossom rather than dust;
+  interactions and arrivals throw off sparkles that fly outward as the pulse
+  fades.
+- **Cuter interface marks**: a heart marks the prompt, a star marks sprinting, and
+  the dialogue bust is chibi — a big cowl and two large eyes.
+
 ### Added — anime-inspired identity, animation, and game feel
 
 - **Characters with identities, drawn in several inks at once.** A figure is ASCII

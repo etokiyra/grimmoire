@@ -41,15 +41,18 @@ const ENTRANCE: Duration = Duration::from_millis(220);
 /// How long it takes to slide away again.
 const EXIT: Duration = Duration::from_millis(150);
 
-/// The hooded figure's bust, drawn as ASCII when there is no image.
+/// The speaker's bust, drawn as ASCII when there is no image.
+///
+/// Deliberately chibi: a big cowl and two large eyes take most of the plate,
+/// which is the same proportions as the figures out in the world.
 const PORTRAIT_ASCII: [&str; 7] = [
-    "   ____   ",
-    "  /    \\  ",
-    " |  o o | ",
-    " |   <  | ",
-    "  \\____/  ",
-    " /######\\ ",
-    "|########|",
+    "   _____   ",
+    "  /     \\  ",
+    " |  o o  | ",
+    "  \\_____/  ",
+    " /#######\\ ",
+    "|#########|",
+    " \\#######/ ",
 ];
 
 /// A modal panel showing a short exchange, with a portrait when one exists.

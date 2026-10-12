@@ -192,18 +192,19 @@ impl Palette {
         shade_mid: Color::Indexed(236),
         shade_near: Color::Indexed(240),
         highlight_fg: Color::Indexed(232),
-        // A pale young mage: silver hair, warm skin, an indigo robe with gold
-        // braid, and a violet focus. The point is contrast against a world that
-        // is almost entirely cold stone.
+        // A kawaii witch: pink hair, a violet hat and dress with white lace,
+        // and big bright eyes. Deliberately the most saturated thing on screen -
+        // the point is that she pops off a world made almost entirely of cold
+        // stone.
         mage: Inks {
             skin: Color::Indexed(223),
-            hair: Color::Indexed(253),
-            cloth: Color::Indexed(61),
+            hair: Color::Indexed(219),
+            cloth: Color::Indexed(98),
             cloth_dark: Color::Indexed(60),
-            trim: Color::Indexed(179),
-            eye: Color::Indexed(123),
-            wood: Color::Indexed(137),
-            magic: Color::Indexed(183),
+            trim: Color::Indexed(231),
+            eye: Color::Indexed(51),
+            wood: Color::Indexed(180),
+            magic: Color::Indexed(213),
             shadow: Color::Indexed(234),
         },
         // The veiled one: no skin, a deep cowl, and cold violet light where a

@@ -78,8 +78,8 @@ grows. Grimmoire cannot maximise your window; that part is yours.
   cadence, releasing stops immediately, and `Shift` sprints. A tap is always
   exactly one step, and no lost event can leave you walking on your own.
 - **Visible feedback**: a refused step pulses the tile that refused it, an
-  interaction flashes whatever answered, and arriving somewhere new marks the
-  spot — all without ever hiding a glyph.
+  interaction flashes whatever answered and throws off sparkles, and arriving
+  somewhere new marks the spot — all without ever hiding a glyph.
 - **Animation that keeps pace**: characters stride once per step (never on a free
   running clock), sprint with a lean and a wake, breathe and blink when idle, and
   the dialogue panel rises and settles rather than appearing.
@@ -102,10 +102,12 @@ grows. Grimmoire cannot maximise your window; that part is yours.
   rubble vary by position without ever shimmering; water rolls; candles gutter
   along the walls; motes drift; and each area has an inlaid motif cut into its open
   floors.
-- **Characters drawn as ASCII figures**, several cells tall and several *inks* at
-  once — the mage has silver hair, a face with two eyes, an indigo robe with a gold
-  clasp and a crystal staff; Ysolde is a cowl with a trim rim and two violet points
-  of light. Four facing directions, a stride, a sprint, and an idle breath.
+- **Characters drawn as ASCII figures**, three cells tall — the same as a doorway
+  or a tree — and several *inks* at once. The witch has a tall hat, pink hair, two
+  big bright eyes, a violet dress with white lace, and a star wand that twinkles;
+  Ysolde is a cowl with two violet points of light and no face. Four facing
+  directions, a stride that swishes the dress, a sprint, and an idle breath that
+  blinks.
 - A pure, terminal-agnostic cell renderer: `Canvas`, `Cell`, `Style`, `Color`,
   `Rect`, and a clipped local-coordinate `CanvasView`.
 - A **fully opaque, application-owned background**: the theme paints every cell,

@@ -89,10 +89,10 @@ checks = [
     ("entered the alternate screen", b"\x1b[?1049h" in out),
     ("hid the cursor", b"\x1b[?25l" in out),
     ("composed the ASCII world", b"\xe2\x80\xa2" in out or b"#" in out),
-    # The mage's hair ink. Nothing else in the palette uses it, and the face
+    # The witch's hair ink. Nothing else in the palette uses it, and the face
     # cannot be matched as text because every ink change between its cells emits
     # an escape sequence.
-    ("drew the player", b"38;5;253m" in out),
+    ("drew the player", b"38;5;219m" in out),
     ("showed the controls", b"interact" in out),
     ("suspended below the minimum viewport", b"too small" in suspended),
     ("resumed after the resize", b"Ruined Chapel" in resumed),

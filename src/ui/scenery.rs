@@ -38,8 +38,8 @@ use super::effects::{Effects, Pulse};
 use super::theme::{Inks, Palette};
 use crate::render::{CanvasView, Color, Style};
 
-/// How many rows each figure is drawn in.
-const FIGURE_ROWS: i32 = 5;
+/// How many rows a figure's head takes, above its hem.
+const HEAD_ROWS: i32 = 2;
 
 /// The primary glyph families, grouped so the art can be read at a glance.
 mod art {
@@ -57,41 +57,44 @@ mod art {
     /// A candle flame, in the order it gutters.
     pub const FLAME: &[char] = &['\'', '.', 'i', '*', 'i', '.'];
 
-    /// The mage's body: rows 0..4 for `[north, east, south, west]`.
+    /// The witch's head: two rows for `[north, east, south, west]`.
     ///
-    /// Silver hair, a face with two eyes, an indigo robe with a gold clasp. The
-    /// legend is shared with the other figures - see `ink_for`.
-    pub const MAGE_BODY: [[&str; 4]; 4] = [
-        // North: the back of the head, no face.
-        ["  ~~  ", "  ~~  ", " %%%% ", "|####|"],
-        // East: a profile, the visible eye to the right.
-        ["  ~~  ", " (::o)", "/#++#\\", "|####|"],
-        // South: face on.
-        ["  ~~  ", "(o::o)", "/#++#\\", "|####|"],
+    /// Chibi proportions on purpose: a tall pointed hat and a face with two big
+    /// eyes take the whole figure, and the dress underneath is one row. The whole
+    /// sprite is three cells tall, the same as a doorway or a tree, so she stands
+    /// in the world rather than towering over it.
+    pub const WITCH_HEAD: [[&str; 2]; 4] = [
+        // North: the back of the hat and a fall of hair, no face.
+        [" /^\\ ", " ~~~ "],
+        // East: one eye, looking right.
+        [" /^\\ ", " (●:)"],
+        // South: face on, two big eyes.
+        [" /^\\ ", "(●:●)"],
         // West: the mirrored profile.
-        ["  ~~  ", "(o::) ", "\\#++#/", "|####|"],
+        [" /^\\ ", "( :●)"],
     ];
 
-    /// The veiled figure's body.
+    /// The veiled figure's head: a deep cowl and two cold lights.
     ///
-    /// A deep cowl, a trim rim, and cold light where a face should be. No skin is
-    /// used at all, which is what makes it read as something other than a person.
-    pub const VEILED_BODY: [[&str; 4]; 4] = [
-        // North: no face at all.
-        ["  __  ", " /++\\ ", "|####|", "|####|"],
-        // East: one eye in the shadow.
-        ["  __  ", " /++\\ ", "|@o  |", "|####|"],
-        // South: two points of cold light.
-        ["  __  ", " /++\\ ", "|@oo@|", "|####|"],
-        // West.
-        ["  __  ", " /++\\ ", "|  o@|", "|####|"],
+    /// No skin ink at all, which is what makes her read as something other than a
+    /// person.
+    pub const VEILED_HEAD: [[&str; 2]; 4] = [
+        [" ___ ", " ### "],
+        [" ___ ", " (o@)"],
+        [" ___ ", "(o@o)"],
+        [" ___ ", "(@o)"],
     ];
 
-    /// The stride that goes under a body: feet together, then apart.
-    pub const HEM: [&str; 2] = ["  /\\  ", " /  \\ "];
+    /// The hem row: the dress, swishing as she walks.
+    pub const DRESS: [&str; 2] = ["/#+#\\", "\\#+#/"];
+    /// The veiled figure's robe, with the same sway.
+    pub const ROBE: [&str; 2] = ["/###\\", "\\###/"];
 
-    /// A staff: a crystal on a haft, held beside the mage.
-    pub const STAFF: [&str; 5] = ["*", "+", "|", "|", "|"];
+    /// Sparkles thrown off by magic, in the order they twinkle.
+    pub const SPARKLE: &[char] = &['·', '+', '✧', '*', '✧', '+'];
+
+    /// A wand: a star on a short haft, held beside the witch.
+    pub const WAND: [&str; 2] = ["*", "|"];
 
     /// A cracked basin, two cells high.
     pub const BASIN: [&str; 3] = [".---.", "\\___/", "  |  "];
@@ -134,12 +137,13 @@ fn motif_for(area: AreaId) -> Option<&'static Motif> {
     }
 }
 
-/// One character's art: the body rows, the inks they are drawn in, and whether
-/// they carry a staff.
+/// One character's art: its head rows, its hem, the inks it is drawn in, and
+/// whether it carries a wand.
 struct Figure<'a> {
-    bodies: &'a [[&'a str; 4]; 4],
+    heads: &'a [[&'a str; 2]; 4],
+    hems: &'a [&'a str; 2],
     inks: &'a Inks,
-    staff: bool,
+    wand: bool,
 }
 
 /// The world, a palette, the time, and what the player is doing.
@@ -224,6 +228,7 @@ impl Scenery<'_> {
         self.draw_props(view, area, window);
         self.draw_ambience(view, area, window);
         self.draw_figures(view, area, window);
+        self.draw_sparkles(view, area, window);
     }
 
     /// The tiles worth visiting: the view, clipped to the area.
@@ -430,7 +435,12 @@ impl Scenery<'_> {
             if breath < -0.2 {
                 return;
             }
-            let (glyph, ink) = if breath > 0.7 {
+            // A few of them are blossom rather than dust, which is most of what
+            // makes the air read as anime rather than as a dusty room.
+            let petal = h % 5 == 0;
+            let (glyph, ink) = if petal {
+                (if breath > 0.5 { '✿' } else { '❀' }, self.palette.mage.hair)
+            } else if breath > 0.7 {
                 ('·', self.palette.focus)
             } else if breath > 0.1 {
                 ('\'', self.palette.text_muted)
@@ -456,9 +466,10 @@ impl Scenery<'_> {
             }
             let sway = (self.phase * 1.1).sin() > 0.3;
             let figure = Figure {
-                bodies: &art::VEILED_BODY,
+                heads: &art::VEILED_HEAD,
+                hems: &art::ROBE,
                 inks: &self.palette.veiled,
-                staff: false,
+                wand: false,
             };
             self.draw_figure(
                 view,
@@ -473,9 +484,10 @@ impl Scenery<'_> {
         // A sprint leans into the direction of travel and leaves a wake.
         let sprinting = matches!(self.player.stage, Stage::Sprint);
         let figure = Figure {
-            bodies: &art::MAGE_BODY,
+            heads: &art::WITCH_HEAD,
+            hems: &art::DRESS,
             inks: &self.palette.mage,
-            staff: true,
+            wand: true,
         };
         self.draw_figure(
             view,
@@ -503,13 +515,13 @@ impl Scenery<'_> {
         let Some((sx, sy)) = window.screen(at, view) else {
             return;
         };
-        let body = &figure.bodies[pose.facing as usize];
-        let hem = art::HEM[usize::from(sway)];
-        let width = body[0].chars().count() as i32;
+        let head = &figure.heads[pose.facing as usize];
+        let hem = figure.hems[usize::from(sway)];
+        let width = head[0].chars().count() as i32;
         let left = i32::from(sx) - (width - 1) / 2;
-        let top = i32::from(sy) - (FIGURE_ROWS - 1);
+        let top = i32::from(sy) - (HEAD_ROWS + 1 - 1);
 
-        for (row, line) in body.iter().chain(std::iter::once(&hem)).enumerate() {
+        for (row, line) in head.iter().chain(std::iter::once(&hem)).enumerate() {
             for (column, ch) in line.chars().enumerate() {
                 if ch == ' ' {
                     continue;
@@ -529,22 +541,28 @@ impl Scenery<'_> {
             }
         }
 
-        if figure.staff {
-            // The staff is held on the side the figure is not facing into.
-            let staff_left = match pose.facing {
+        if figure.wand {
+            // The wand is held out on the side she is not facing into.
+            let wand_left = match pose.facing {
                 Direction::East => left + width,
                 Direction::West => left - 1,
                 Direction::North => left - 1,
                 Direction::South => left + width,
             };
-            for (row, line) in art::STAFF.iter().enumerate() {
+            for (row, line) in art::WAND.iter().enumerate() {
                 let Some(ch) = line.chars().next() else {
                     continue;
                 };
                 let Some(ink) = ink_for(ch, figure.inks) else {
                     continue;
                 };
-                self.draw_cell(view, window, staff_left, top + row as i32, ch, ink);
+                // The star on the wand twinkles rather than sitting still.
+                let glyph = if ch == '*' {
+                    art::SPARKLE[(self.phase * 6.0) as usize % art::SPARKLE.len()]
+                } else {
+                    ch
+                };
+                self.draw_cell(view, window, wand_left, top + row as i32, glyph, ink);
             }
         }
     }
@@ -555,8 +573,8 @@ impl Scenery<'_> {
         let (dx, dy) = facing.delta();
         let style = Style::new().with_fg(self.palette.text_muted).dim();
         for step in 1..=2i32 {
-            let x = i32::from(at.x) - dx * step + 3;
-            let y = i32::from(at.y) - dy * step + 2;
+            let x = i32::from(at.x) - dx * step;
+            let y = i32::from(at.y) - dy * step;
             if x < 0 || y < 0 {
                 continue;
             }
@@ -566,6 +584,41 @@ impl Scenery<'_> {
             };
             let glyph = if dx != 0 { '·' } else { '\'' };
             self.put(view, sx, sy, world, glyph, style);
+        }
+    }
+
+    /// Twinkles thrown off by an interaction or an arrival.
+    ///
+    /// Deterministic: the same pulse always scatters the same sparkles, and each
+    /// is only ever drawn on bare, unoccupied floor, so a sparkle can never land
+    /// on a character or cover an exit.
+    fn draw_sparkles(&self, view: &mut CanvasView, area: &Area, window: Window) {
+        for (at, kind, strength) in self.effects.live() {
+            if !matches!(kind, Pulse::Touched | Pulse::Arrived) {
+                continue;
+            }
+            // They fly outward as the pulse fades.
+            let spread = 1 + ((1.0 - strength) * 2.0) as i32;
+            for corner in 0..4i32 {
+                let h = hash(i32::from(at.x) * 4 + corner, i32::from(at.y), 0x9e37);
+                let dx = if corner % 2 == 0 { -1 } else { 1 } * spread;
+                let dy = if corner < 2 { -1 } else { 1 } * spread;
+                let x = i32::from(at.x) + dx;
+                let y = i32::from(at.y) + dy;
+                if x < 0 || y < 0 || x >= i32::from(area.width()) || y >= i32::from(area.height()) {
+                    continue;
+                }
+                let world = Position::new(x as u16, y as u16);
+                if !area.tile(world).is_walkable() || area.entity_at(world).is_some() {
+                    continue;
+                }
+                let Some((sx, sy)) = window.screen(world, view) else {
+                    continue;
+                };
+                let glyph = art::SPARKLE[(h as usize >> 8) % art::SPARKLE.len()];
+                let style = Style::new().with_fg(self.palette.magic_of(kind)).bold();
+                self.put(view, sx, sy, world, glyph, style);
+            }
         }
     }
 
@@ -667,6 +720,23 @@ impl Scenery<'_> {
     }
 }
 
+/// The ink a pulse of a given kind is drawn in.
+impl Palette {
+    /// The colour a feedback pulse of this kind uses.
+    fn magic_of(&self, kind: Pulse) -> Color {
+        match kind {
+            Pulse::Blocked => self.warning,
+            Pulse::Touched => self.magic_role(),
+            Pulse::Arrived => self.accent,
+        }
+    }
+
+    /// The magical accent, which is what sparkles are made of.
+    fn magic_role(&self) -> Color {
+        self.mage.magic
+    }
+}
+
 /// The sigil's art for the current time, turning slowly.
 fn sigil_phase(phase: f32) -> &'static [&'static str] {
     &art::SIGIL[(phase * 0.7) as usize % art::SIGIL.len()]
@@ -690,7 +760,7 @@ fn inlay_glyph(motif: &Motif, position: Position) -> Option<char> {
 
 /// The glyph a legend character draws when the figure blinks.
 fn ink_glyph(ch: char, blinking: bool) -> char {
-    if blinking && (ch == 'o' || ch == 'v') {
+    if blinking && (ch == 'o' || ch == 'v' || ch == '●') {
         '-'
     } else {
         ch
@@ -704,7 +774,7 @@ fn ink_glyph(ch: char, blinking: bool) -> char {
 fn ink_for(ch: char, inks: &Inks) -> Option<Color> {
     Some(match ch {
         ' ' => return None,
-        'o' | 'v' => inks.eye,
+        'o' | 'v' | '●' => inks.eye,
         ':' => inks.skin,
         '~' => inks.hair,
         '%' | '_' => inks.cloth_dark,
@@ -732,6 +802,16 @@ fn neighbours_of(area: &Area, position: Position) -> Neighbours {
         east: solid(1, 0),
         west: solid(-1, 0),
     }
+}
+
+/// The player's screen cell in a canvas of this size, for tests.
+#[cfg(test)]
+fn axis_camera_offsets(world: &World, canvas: &crate::render::Canvas) -> (u16, u16) {
+    let area = world.area();
+    let player = world.player();
+    let x = i32::from(player.x) - axis_camera(area.width(), canvas.width(), player.x);
+    let y = i32::from(player.y) - axis_camera(area.height(), canvas.height(), player.y);
+    (x.max(0) as u16, y.max(0) as u16)
 }
 
 /// The world-space origin of the visible window for one axis.
@@ -831,7 +911,7 @@ mod tests {
                 );
             }
         }
-        assert!(text.contains("o::o"), "no player drawn:\n{text}");
+        assert!(text.contains("(●:●)"), "no witch drawn:\n{text}");
     }
 
     /// The glyph the renderer chooses for a wall with the given neighbours.
@@ -934,12 +1014,12 @@ mod tests {
         world.move_player(Direction::East);
         let (_, text) = draw(&world, 60, 20, 0.0);
         assert!(
-            text.contains("(::o)"),
-            "expected an east-facing face:\n{text}"
+            text.contains("(●:)"),
+            "expected an east-facing eye:\n{text}"
         );
         world.move_player(Direction::West);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        assert!(text.contains("(o::)"), "expected a west-facing face");
+        assert!(text.contains(":●)"), "expected a west-facing eye");
     }
 
     #[test]
@@ -966,25 +1046,22 @@ mod tests {
         let mut world = World::new(areas::all(), areas::CHAPEL);
         world.set_player_for_test(Position::new(56, 38));
         let (_, text) = draw(&world, 60, 24, 0.0);
-        assert!(text.contains("@oo@"), "Ysolde's eyes are missing:\n{text}");
-        assert!(text.contains("/++\\"), "Ysolde's hood rim is missing");
+        assert!(text.contains("(o@o)"), "Ysolde's eyes are missing:\n{text}");
+        assert!(text.contains("___"), "Ysolde's cowl is missing");
     }
 
     #[test]
-    fn the_mage_carries_a_staff() {
+    fn the_witch_carries_a_wand() {
         let world = World::new(areas::all(), areas::CHAPEL);
-        let (canvas, text) = draw(&world, 120, 40, 0.0);
-        assert!(text.contains('*'), "no staff crystal:\n{text}");
-        // The crystal is drawn in the magic ink, which nothing else uses.
+        let (canvas, _) = draw(&world, 120, 40, 0.0);
+        // The star on the wand twinkles through a small set of glyphs, but it is
+        // always drawn in the magic ink, which nothing else in the world uses
+        // while no effects are live.
         let magic = Palette::EXTENDED.mage.magic;
         let found = (0..canvas.height())
             .flat_map(|y| (0..canvas.width()).map(move |x| (x, y)))
-            .any(|(x, y)| {
-                canvas
-                    .get(x, y)
-                    .is_some_and(|cell| cell.ch == '*' && cell.style.fg == magic)
-            });
-        assert!(found, "the staff crystal is not in the magic ink");
+            .any(|(x, y)| canvas.get(x, y).is_some_and(|cell| cell.style.fg == magic));
+        assert!(found, "the wand's star is not in the magic ink");
     }
 
     #[test]
@@ -1046,17 +1123,28 @@ mod tests {
     fn a_pulse_changes_the_style_and_never_the_glyph() {
         let world = World::new(areas::all(), areas::CHAPEL);
         let at = world.player();
-        let plain = draw(&world, 60, 20, 0.0).1;
+
+        let cell_of = |world: &World, effects: &Effects| {
+            let mut canvas = Canvas::new(60, 20);
+            canvas.clear_with(Palette::EXTENDED.backdrop());
+            let mut view = canvas.view(canvas.bounds());
+            scenery(world, effects, Pose::idle(Direction::South)).draw(&mut view);
+            let (sx, sy) = super::axis_camera_offsets(world, &canvas);
+            (canvas, sx, sy)
+        };
+
+        let none = Effects::new();
+        let (plain, sx, sy) = cell_of(&world, &none);
+        let before = plain.get(sx, sy).expect("cell");
 
         let mut effects = Effects::new();
         effects.spawn(at, Pulse::Touched);
-        let mut canvas = Canvas::new(60, 20);
-        canvas.clear_with(Palette::EXTENDED.backdrop());
-        {
-            let mut view = canvas.view(canvas.bounds());
-            scenery(&world, &effects, Pose::idle(Direction::South)).draw(&mut view);
-        }
-        assert_eq!(plain, view_text(&canvas), "the pulse changed the glyphs");
+        let (pulsed, sx2, sy2) = cell_of(&world, &effects);
+        assert_eq!((sx, sy), (sx2, sy2));
+        let after = pulsed.get(sx, sy).expect("cell");
+
+        assert_eq!(before.ch, after.ch, "a pulse must not change the glyph");
+        assert_ne!(before.style, after.style, "but it must be visible");
     }
 
     #[test]
@@ -1119,18 +1207,20 @@ mod tests {
         // or a mote would have put there, the figure's own glyph is on top.
         let world = World::new(areas::all(), areas::CHAPEL);
         let (_, text) = draw(&world, 120, 40, 0.0);
-        assert!(text.contains("o::o"), "the face is missing");
-        assert!(text.contains("#++#"), "the robe is missing");
+        assert!(text.contains("(●:●)"), "the face is missing");
+        assert!(text.contains("/^\\"), "the hat is missing");
         // And the whole figure is present, in order, on consecutive rows: the
         // floor and the inlay never punch a hole through it.
         let lines: Vec<&str> = text.lines().collect();
         let face = lines
             .iter()
-            .position(|line| line.contains("o::o"))
+            .position(|line| line.contains("(●:●)"))
             .expect("the face");
-        assert!(lines[face - 1].contains("~~"), "the hair should be above");
-        assert!(lines[face + 1].contains("#++#"), "the robe should be below");
-        assert!(lines[face + 2].contains("|####|"), "and the robe's body");
+        assert!(lines[face - 1].contains("/^\\"), "the hat should be above");
+        assert!(
+            lines[face + 1].contains("/#+#\\"),
+            "the dress should be below"
+        );
     }
 
     #[test]
@@ -1151,6 +1241,6 @@ mod tests {
         );
         let world = World::new(vec![area], AreaId::new("stage"));
         let (_, text) = draw(&world, 12, 10, 0.0);
-        assert!(text.contains("o::o"), "no figure:\n{text}");
+        assert!(text.contains("(●:●)"), "no figure:\n{text}");
     }
 }

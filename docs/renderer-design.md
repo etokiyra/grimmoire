@@ -148,7 +148,11 @@ holds no entity, no doorway and no player — never over something that matters.
 - **Motes** drift over bare floor. They are anchored to the *world*, so they
   scroll with it and read as dust in a room rather than dirt on the screen, and
   they are sampled from a slowly shifting lattice — which is how they drift with
-  no per-mote state at all.
+  no per-mote state at all. A few of them are blossom rather than dust, which is
+  most of what makes the air read as anime.
+- **Sparkles** are thrown off an interaction or an arrival, flying outward as the
+  pulse fades. They are deterministic and only ever land on bare, unoccupied
+  floor.
 - **Water** carries two wave trains at different speeds plus occasional crests,
   so the surface rolls instead of repeating one stripe.
 - **The sigil** turns through two phases and pulses in the effect colour.
@@ -157,24 +161,30 @@ Every one of these is a function of `(position, time)`. None uses randomness, th
 frame count, or anything from the machine — so the same world and the same time
 always produce the same frame.
 
-### Figures, in several inks
+### Figures, in several inks, at the scale of the props
 
-Characters are not single coloured letters. A figure is ASCII art plus a
-**legend**: each character in its rows names an ink, and each cast member carries
-its own [`Inks`] value. That is what lets one small figure have silver hair, warm
-skin, an indigo robe, a gold clasp, cyan eyes and a violet staff crystal at once.
+Characters are not single coloured letters, and they are not giants either. A
+figure occupies **three cells** — the same as a doorway, a tree or the sigil — so
+she stands in the world rather than towering over it. Chibi proportions do the
+rest: a tall hat and a face with two big eyes take most of the figure, and the
+dress underneath is one row.
+
+A figure is ASCII art plus a **legend**: each character in its rows names an ink,
+and each cast member carries its own `Inks` value. That is what lets one small
+figure have pink hair, warm skin, a violet dress with white lace, big bright eyes
+and a star wand at once.
 
 ```
- ^^^                   ___
-(o::o)   the mage    /++\    Ysolde
-/#++#\   and staff   |@oo@|   (no skin at all:
-|####|                |####|    cold light in a cowl)
+ /^\                  ___
+(●:●)   the witch    (o@o)   Ysolde
+/#+#\   and wand     \###/   (no skin at all:
+                               cold light in a cowl)
 ```
 
-Both are four body rows plus a stride row, so a walk cycle costs two hem rows per
+Both are two head rows plus a dress row, so a walk cycle costs two hem rows per
 direction rather than a second full figure. Facing has four variants, the stride
-alternates per *step*, and an idle figure blinks on a slow clock and does not ask
-for a frame while it does so.
+alternates per *step* and swishes the dress, the wand's star twinkles, and an idle
+figure blinks on a slow clock and does not ask for a frame while it does so.
 
 ### Draw order, and feedback
 
