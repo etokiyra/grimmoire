@@ -227,9 +227,10 @@ Respect these; they are the point of the current structure:
   quantise its clock, and bound its drift with `Drift`: an animated full-screen
   field defeats the presenter's diff, which is what the first prototype did, and
   the drifting band's height is very nearly the whole cost of a living sky.
-- `src/ui/scenery.rs` — the ASCII world renderer. It is **not** an atmosphere
-  host yet; the next host is one gameplay place, not all six. Pure: a world, a palette, a
-  time and a pose in; cells out. Structure comes from a tile's neighbours,
+- `src/ui/scenery.rs` — the ASCII world renderer. Pure: a world, a palette, a
+  time and a pose in; cells out. It is **not** an atmosphere host yet; the next
+  host is one gameplay place, not all six. Structure comes from a tile's
+  neighbours,
   variation from a hash of its world position (never of the frame, or the world
   would shimmer), and light from distance. Decor — inlay, candles, motes — is
   drawn only where it cannot cover a character, a prop or a doorway, and the draw
