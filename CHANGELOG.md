@@ -9,6 +9,18 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Changed — a kawaii mage bunny, with readable profiles
+
+- **The character reads as a bunny now, so she is one.** The pointed head was
+  already being read as ears; the ears are now two separated points, the face
+  outline and the ears are fur rather than cloth, and the ears are the loudest
+  pink on screen. She carries a star wand and wears the same violet robe.
+- **The left and right profiles were reworked.** They were two near-identical
+  single-eye faces whose eye sat in the same place whichever way she turned, which
+  read as a missing eye rather than a turned head. Each profile is now authored
+  rather than mirrored, and **the eye sits toward the direction of travel**, with
+  the wand held out in front.
+
 ### Changed — a kawaii witch, anime air, and figures at the scale of the world
 
 - **The player character is now a kawaii witch, and she is a third of the size she

@@ -802,9 +802,14 @@ mod tests {
         let text = frame_text(&canvas);
         assert!(
             text.contains("(●:●)"),
-            "the witch's face is missing:\n{text}"
+            "the bunny's face is missing:\n{text}"
         );
-        assert!(text.contains("/^\\"), "the witch's hat is missing");
+        // The gap between the ears is transparent, so they are counted rather
+        // than matched as a string.
+        assert!(
+            text.lines().any(|line| line.matches('^').count() >= 2),
+            "the bunny's ears are missing"
+        );
     }
 
     #[test]

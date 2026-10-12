@@ -192,12 +192,12 @@ impl Palette {
         shade_mid: Color::Indexed(236),
         shade_near: Color::Indexed(240),
         highlight_fg: Color::Indexed(232),
-        // A kawaii witch: pink hair, a violet hat and dress with white lace,
-        // and big bright eyes. Deliberately the most saturated thing on screen -
-        // the point is that she pops off a world made almost entirely of cold
-        // stone.
+        // A kawaii mage bunny: pink ears, pale fur, a violet robe with white
+        // lace, and big bright eyes. Deliberately the most saturated thing on
+        // screen - the point is that she pops off a world made almost entirely
+        // of cold stone.
         mage: Inks {
-            skin: Color::Indexed(223),
+            skin: Color::Indexed(224),
             hair: Color::Indexed(219),
             cloth: Color::Indexed(98),
             cloth_dark: Color::Indexed(60),

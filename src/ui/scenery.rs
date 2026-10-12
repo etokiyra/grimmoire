@@ -57,21 +57,25 @@ mod art {
     /// A candle flame, in the order it gutters.
     pub const FLAME: &[char] = &['\'', '.', 'i', '*', 'i', '.'];
 
-    /// The witch's head: two rows for `[north, east, south, west]`.
+    /// The mage bunny's head: two rows for `[north, east, south, west]`.
     ///
-    /// Chibi proportions on purpose: a tall pointed hat and a face with two big
-    /// eyes take the whole figure, and the dress underneath is one row. The whole
-    /// sprite is three cells tall, the same as a doorway or a tree, so she stands
-    /// in the world rather than towering over it.
-    pub const WITCH_HEAD: [[&str; 2]; 4] = [
-        // North: the back of the hat and a fall of hair, no face.
-        [" /^\\ ", " ~~~ "],
-        // East: one eye, looking right.
-        [" /^\\ ", " (●:)"],
+    /// Chibi proportions on purpose: two long ears and a face with big eyes take
+    /// the whole figure, and the robe underneath is one row. The whole sprite is
+    /// three cells tall, the same as a doorway or a tree, so she stands in the
+    /// world rather than towering over it.
+    ///
+    /// The profiles are authored rather than mirrored at draw time, and the eye
+    /// sits *toward* the direction of travel, because that is the only cue that
+    /// makes a two-row head read as facing one way or the other.
+    pub const BUNNY_HEAD: [[&str; 2]; 4] = [
+        // North: the backs of the ears.
+        [" ^ ^ ", " ~~~ "],
+        // East: the eye forward, the muzzle to the right.
+        ["  ^^ ", "( :●)"],
         // South: face on, two big eyes.
-        [" /^\\ ", "(●:●)"],
+        [" ^ ^ ", "(●:●)"],
         // West: the mirrored profile.
-        [" /^\\ ", "( :●)"],
+        [" ^^  ", "(●: )"],
     ];
 
     /// The veiled figure's head: a deep cowl and two cold lights.
@@ -484,7 +488,7 @@ impl Scenery<'_> {
         // A sprint leans into the direction of travel and leaves a wake.
         let sprinting = matches!(self.player.stage, Stage::Sprint);
         let figure = Figure {
-            heads: &art::WITCH_HEAD,
+            heads: &art::BUNNY_HEAD,
             hems: &art::DRESS,
             inks: &self.palette.mage,
             wand: true,
@@ -776,6 +780,9 @@ fn ink_for(ch: char, inks: &Inks) -> Option<Color> {
         ' ' => return None,
         'o' | 'v' | '●' => inks.eye,
         ':' => inks.skin,
+        // The ears are the one loud colour; the head around them is fur.
+        '^' => inks.hair,
+        '(' | ')' => inks.skin,
         '~' => inks.hair,
         '%' | '_' => inks.cloth_dark,
         '+' | '=' => inks.trim,
@@ -911,7 +918,7 @@ mod tests {
                 );
             }
         }
-        assert!(text.contains("(●:●)"), "no witch drawn:\n{text}");
+        assert!(text.contains("(●:●)"), "no bunny drawn:\n{text}");
     }
 
     /// The glyph the renderer chooses for a wall with the given neighbours.
@@ -1011,15 +1018,13 @@ mod tests {
     #[test]
     fn the_player_faces_the_direction_they_walk() {
         let mut world = World::new(areas::all(), areas::CHAPEL);
+        // The eye sits toward the direction of travel: that is the whole cue.
         world.move_player(Direction::East);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        assert!(
-            text.contains("(●:)"),
-            "expected an east-facing eye:\n{text}"
-        );
+        assert!(text.contains(":●)"), "expected an east-facing eye:\n{text}");
         world.move_player(Direction::West);
         let (_, text) = draw(&world, 60, 20, 0.0);
-        assert!(text.contains(":●)"), "expected a west-facing eye");
+        assert!(text.contains("(●:"), "expected a west-facing eye");
     }
 
     #[test]
@@ -1208,7 +1213,11 @@ mod tests {
         let world = World::new(areas::all(), areas::CHAPEL);
         let (_, text) = draw(&world, 120, 40, 0.0);
         assert!(text.contains("(●:●)"), "the face is missing");
-        assert!(text.contains("/^\\"), "the hat is missing");
+        let ears = text
+            .lines()
+            .filter(|line| line.matches('^').count() >= 2)
+            .count();
+        assert!(ears > 0, "the ears are missing:\n{text}");
         // And the whole figure is present, in order, on consecutive rows: the
         // floor and the inlay never punch a hole through it.
         let lines: Vec<&str> = text.lines().collect();
@@ -1216,7 +1225,10 @@ mod tests {
             .iter()
             .position(|line| line.contains("(●:●)"))
             .expect("the face");
-        assert!(lines[face - 1].contains("/^\\"), "the hat should be above");
+        assert!(
+            lines[face - 1].matches('^').count() >= 2,
+            "the ears should be above the face"
+        );
         assert!(
             lines[face + 1].contains("/#+#\\"),
             "the dress should be below"

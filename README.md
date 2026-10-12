@@ -103,10 +103,11 @@ grows. Grimmoire cannot maximise your window; that part is yours.
   along the walls; motes drift; and each area has an inlaid motif cut into its open
   floors.
 - **Characters drawn as ASCII figures**, three cells tall — the same as a doorway
-  or a tree — and several *inks* at once. The witch has a tall hat, pink hair, two
-  big bright eyes, a violet dress with white lace, and a star wand that twinkles;
-  Ysolde is a cowl with two violet points of light and no face. Four facing
-  directions, a stride that swishes the dress, a sprint, and an idle breath that
+  or a tree — and several *inks* at once. The player is a kawaii mage bunny: long
+  pink ears, a pale face with two big bright eyes, a violet robe with white lace,
+  and a star wand that twinkles. Ysolde is a cowl with two violet points of light
+  and no face. Four facing directions with the eye placed toward the direction of
+  travel, a stride that swishes the robe, a sprint, and an idle breath that
   blinks.
 - A pure, terminal-agnostic cell renderer: `Canvas`, `Cell`, `Style`, `Color`,
   `Rect`, and a clipped local-coordinate `CanvasView`.

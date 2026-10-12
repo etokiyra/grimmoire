@@ -175,16 +175,22 @@ figure have pink hair, warm skin, a violet dress with white lace, big bright eye
 and a star wand at once.
 
 ```
- /^\                  ___
-(●:●)   the witch    (o@o)   Ysolde
+ ^ ^                  ___
+(●:●)   the bunny    (o@o)   Ysolde
 /#+#\   and wand     \###/   (no skin at all:
                                cold light in a cowl)
 ```
 
-Both are two head rows plus a dress row, so a walk cycle costs two hem rows per
-direction rather than a second full figure. Facing has four variants, the stride
-alternates per *step* and swishes the dress, the wand's star twinkles, and an idle
-figure blinks on a slow clock and does not ask for a frame while it does so.
+Both are two head rows plus a robe row, so a walk cycle costs two hem rows per
+direction rather than a second full figure. The stride alternates per *step* and
+swishes the robe, and the wand's star twinkles.
+
+**The profiles are authored rather than mirrored, and the eye sits toward the
+direction of travel.** A two-row head has almost nothing to say which way it is
+facing, so that eye position is the whole cue — the first attempt put the eye in
+the same place for both profiles and read as a missing eye rather than as a
+turned head. An idle figure blinks on a slow clock and does not ask for a frame
+while it does so.
 
 ### Draw order, and feedback
 
