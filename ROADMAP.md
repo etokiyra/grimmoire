@@ -407,7 +407,28 @@ Delivered:
 - Next: Tamsin, Nim and Wren stop short of the spine; the wizard has no history;
   nothing yet changes a location. The moon's name stays unwritten on purpose.
 
-## Phase 18 — Story
+## Phase 18 — The world answers (done)
+
+The prologue is now readable, and at least one choice changes a place.
+
+- **Pacing**: per-scene holds sized to their captions and their reveal, fixed-
+  length caption fades, per-scene progress, and clock-driven motion through the
+  long holds. Tested: every caption is held readable, and skipping works from any
+  scene and hands back exactly once.
+- **The head of the list**: the evidence the investigation needed. The wall's
+  first entry is two letters in an older hand; the scribe copied them; the word
+  the shrine has spent four centuries preventing is a person's name.
+- **The chapel is transformed** once Ysolde has been told to go and see it, and
+  **the twelfth lantern is lit** once Rin is told the dead are still somebody.
+  Both are visible in the world, not only in dialogue, and both survive a reload.
+- Next: the story can now let the player *use* what they know. The door to open is
+  a place where saying the name is possible and costs something — and where the
+  people who kept the arrangement decide, humanly and badly, whether to allow it.
+  Tamsin, Nim and Wren still stop short of anything they can act on, and there is
+  no revenge thread yet: the game has grief and guilt in it and nobody who wants
+  to hurt somebody for them.
+
+## Phase 19 — Story
 
 - Story, setting, and characters defined here (currently undecided) with
   authoring-friendly data.

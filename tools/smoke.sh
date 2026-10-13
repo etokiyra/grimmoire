@@ -73,6 +73,14 @@ title = wait_for(b"New Game", 20.0)
 
 # Enter the world the way a player does, so everything after this is the game.
 os.write(fd, b"\r")
+# A new game plays the prologue first, which is a minute of deliberate cinema and
+# not what this test is about. Skip it — the way a player would, and the way the
+# input contract says it must be skippable. The drain matters: the prologue draws
+# at sixty frames a second, and a pseudo-terminal that nobody is reading fills up
+# and blocks the game before it ever sees the key. So read it (and throw it away),
+# then press.
+drain(2.5)
+os.write(fd, b"\r")
 out = wait_for(b"Ruined Chapel", 20.0)
 for keys in (b"s", b"w", b"a", b"d", b"h"):
     os.write(fd, keys)

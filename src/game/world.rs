@@ -1129,6 +1129,74 @@ mod tests {
     }
 
     #[test]
+    fn the_story_the_player_made_survives_a_save_and_a_reload() {
+        // The consequences in this build are world state, so they have to be in
+        // the save: a chapel lit on Tuesday is still lit on Wednesday.
+        let mut world = region();
+        world.apply(&[
+            crate::game::Effect::Set(crate::game::Flag::YsoldeDeparted),
+            crate::game::Effect::Set(crate::game::Flag::RinLantern),
+            crate::game::Effect::Learn(Discovery::FirstGiven),
+        ]);
+        let saved = world.snapshot();
+
+        let mut reloaded = region();
+        assert!(reloaded.restore(&saved));
+        assert!(reloaded.progress().has(crate::game::Flag::YsoldeDeparted));
+        assert!(reloaded.progress().has(crate::game::Flag::RinLantern));
+        assert!(reloaded.knows(Discovery::FirstGiven));
+        assert_eq!(world.journal(), reloaded.journal());
+    }
+
+    #[test]
+    fn a_save_from_before_this_stage_loads_with_nothing_new_invented() {
+        // What the previous build could have written: the progression as it stood
+        // then, and none of this stage's facts. An older journey has to continue
+        // exactly as it was, and not be given consequences it never earned.
+        let old =
+            crate::save::SaveData::new("ruined-chapel", 70, 44, vec!["ruined-chapel".to_string()])
+                .with_progress(
+                    vec![
+                        "chapel-basin".to_string(),
+                        "village-well".to_string(),
+                        "catacomb-names".to_string(),
+                    ],
+                    vec![],
+                    vec!["ysolde-released".to_string(), "vesper-told".to_string()],
+                );
+        let mut world = region();
+        assert!(world.restore(&old));
+        assert!(world.knows(Discovery::CatacombNames));
+        assert!(world.progress().has(crate::game::Flag::YsoldeReleased));
+        assert!(!world.knows(Discovery::FirstGiven), "invented a discovery");
+        assert!(
+            !world.progress().has(crate::game::Flag::YsoldeDeparted),
+            "invented the chapel being let go"
+        );
+        assert!(!world.progress().has(crate::game::Flag::RinLantern));
+    }
+
+    #[test]
+    fn a_fact_from_a_later_build_costs_only_itself() {
+        // Forward compatibility by construction: a save naming a flag or a
+        // discovery this build has never heard of keeps everything else, so a
+        // later phase can add a fact without invalidating anyone's journey.
+        let mut world = region();
+        let mut data = world.snapshot();
+        data.journal = vec![
+            "chapel-basin".to_string(),
+            "the-name-said-out-loud".to_string(),
+        ];
+        data.flags = vec![
+            "ysolde-released".to_string(),
+            "the-bargain-ended".to_string(),
+        ];
+        assert!(world.restore(&data));
+        assert_eq!(&[Discovery::ChapelBasin], world.journal());
+        assert!(world.progress().has(crate::game::Flag::YsoldeReleased));
+    }
+
+    #[test]
     fn restore_drops_unknown_areas_from_the_visited_set() {
         let mut world = world();
         let mut data = world.snapshot();

@@ -9,6 +9,43 @@ it starts releasing.
 
 ## [Unreleased]
 
+### Changed — the prologue is paced to be read
+
+The five scenes moved too fast to read. Each hold is now set by what is in the
+scene rather than by a house style: 4.4 / 5.4 / 6.0 / 5.2 / 5.6 seconds, with the
+turn (a hand letting go) longest and the aftermath given silence rather than a
+hurry. Captions fade over a fixed half-second rather than a fraction of the
+scene, so the window they are fully readable for is `hold - delay - 2 x fade`
+whatever the scene is, and a test holds every one of them to at least 2.2
+seconds. The delayed captions buy their scene a beat of image first. The chapter
+card now *builds itself* inside its own scene — the building rising, the windows
+lighting, the name arriving — because progress is measured per scene rather than
+across the whole sequence. And the holds are kept alive by motion that runs on a
+clock rather than on the reveal: lamps breathing in the village, cold air
+crossing the shrine, moonlight travelling across the water, one mote in the empty
+nave.
+
+### Added — the story goes on, and the world answers
+
+- **The head of the list.** A new landmark at the head of the catacomb wall: two
+  letters in a hand older than the wall, and a gap nobody filled. The scribe was
+  copying them. The twelfth journal entry.
+- **The cast argues about it.** Vesper knows the two letters and refuses to say
+  them; Tamsin has counted the wall and never written down that its first entry is
+  the wrong shape; Ioreth's oldest instruction has no author; Nim has known since
+  the winter; Maren would have said it in the square; and Ysolde, told at last,
+  finds that the hard part is the mornings, not the rite.
+- **Two consequences you can walk into.** Telling Ysolde to go and see the wall
+  (`ysolde-departed`) lights the chapel: candles on every wall that faces the
+  floor, glazing with a fire behind it, the worn tally in the floor finished and
+  lit, the basin poured out across the flags, and cinders in the air instead of
+  dust. Telling Rin the twelfth is somebody too (`rin-lantern`) lights the twelfth
+  lantern in the wood, and Wren notices.
+- Both are read where the world is drawn, so they are visible from the moment the
+  player walks in, and both persist through a save. A save from before this stage
+  loads unchanged, and a save naming a fact this build has never heard of still
+  costs only itself.
+
 ### Added — the beginnings of the story
 
 Grimmoire has a plot now, told through the world rather than at the player.

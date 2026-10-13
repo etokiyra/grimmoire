@@ -9,10 +9,10 @@ revealed to the player as a block of exposition; every fact below is earned by
 examining something, by asking somebody, or by noticing that two accounts do not
 match.
 
-> **Status.** The prologue, the four characters who carry the spine (Ysolde,
-> Ioreth, Vesper, Maren), Cassen's and Rin's threads, four new landmarks and eleven
-> journal entries are **implemented**. Everything under *Unresolved* is **not**.
-> See the "What is implemented" section at the end before trusting any of this.
+> **Status.** The prologue, the cast's threads, twelve journal entries, and two
+> persistent world consequences are **implemented**. Everything under
+> *Unresolved* is **not**. See the "What is implemented" section at the end
+> before trusting any of this.
 
 ## The heart of it
 
@@ -65,14 +65,46 @@ believed a dry well would stop the choosing. It hurried it instead.
 still there. The basin she keeps is still full. She tells herself she is keeping
 the chapel.
 
+**The head of the list.** The wall in the catacombs is a ledger, and it has a
+head: two letters in a hand older than every other hand, and a gap beneath them
+that nobody ever filled. The scribe four lifetimes later was cutting *those same
+two letters* into her own wall. She was not writing a word. She was copying the
+first one.
+
+That is the evidence, and the story is careful never to overrule it with a
+revelation: what the letters are, the player and the cast can only argue about.
+What the argument establishes is this, and it is the thing that matters:
+
+> **The word the shrine has spent four hundred years preventing is not a word of
+> power. It is a person's name** — the name of the first one given — *and a
+> person's name is something you can mourn and release. That is what the shrine
+> could not afford.* A god's name cannot be said; a dead woman's name can. The
+> office turned a grave into a god so that the feeding could go on, and every
+> keeper since has inherited a rule with nobody's signature on it.
+
+Vesper knows the two letters and will not say them, and that refusal is his
+character rather than a withheld mechanic. Tamsin has counted the wall and never
+written down that its first entry is the wrong shape. Ioreth's oldest instruction
+has no author. Nim worked it out and has not slept since. Ysolde, when she is
+finally told, goes down and looks at it, and comes back and lights every window —
+because there is nothing else left to do with a name you cannot use.
+
 ## The player
 
 The wizard is a **wanderer with no history yet** — that is deliberate, and it is
 the one thing about the protagonist left open for a later phase. What drives them
 in this build is curiosity that keeps turning into responsibility: they arrive,
 they look at things, and the things turn out to matter to people who are still
-alive. The player never speaks, which is what lets them be the one who *asks* —
-the whole story is assembled out of other people's answers.
+alive.
+
+The player never speaks, so their character has to be carried by three things and
+only three: **the journal**, which is written in their voice and is opinionated
+("Nobody scratches a name into a wall for someone who died in bed"); **the
+questions they choose to ask**, which are the only way any of this is learned; and
+**the choices**, which are attitudes rather than good-or-bad options — ask Ysolde
+whether the moon ever asked, or leave her to the quiet; send her down to the wall,
+or do not. The wizard is a camera with a mind, and the mind is what the journal
+and the choices say it is.
 
 ## The cast
 
@@ -112,6 +144,17 @@ makes them a person rather than a function.
    been waiting nine years to be told.
 9. **Vesper's confession** — it closed the lid while she was still writing. The
    player may tell it to come in out of the draught.
+10. **The head of the list** — the wall's first entry is two letters in an older
+    hand, and the scribe copied them. *This is the discovery that turns the
+    investigation around*: the list was not begun as a list of the given.
+11. **The argument about what it is** — Vesper will not say the letters and
+    refuses to be made to; Tamsin admits the first entry is the wrong shape;
+    Ioreth admits the oldest instruction has no author; Nim has known and could
+    not sleep; Maren says she would have said it in the square. The player draws
+    the conclusion, and the game never states it for them.
+12. **Ysolde's mornings** — released, she finds that grief does not go anywhere.
+    If the player has been to the wall, they may tell her to go and see it, and
+    she does.
 
 After that the past is legible and the remaining questions are not about what
 happened but about what to do, which is where a later phase picks it up.
@@ -129,14 +172,56 @@ Five, all implemented, each a *story fact* saved by stable id:
 | Say nothing, and let him wonder | `cassen-befriended` | A warmer exchange, and he admits why he kept the letters. |
 | Tell Maren the truth | `maren-confessed` | Cassen's dialogue changes: he reveals he has known for eight years. |
 | Tell him to give the letters back | `letters-promised` | Ysolde's `returned` node: she reads one and refuses the rest. |
+| Tell Ysolde to go and see the wall herself | `ysolde-departed` | **The chapel is transformed** (below), and she has a new conversation afterwards. |
+| Tell Rin the twelfth is somebody too | `rin-lantern` | **The twelfth lantern is lit in the wood**, and stays lit; Wren notices. |
 
 There is no morality meter and no relationship score. A flag is a fact the world
-remembers, not a number it accumulates.
+remembers, not a number it accumulates. Most flags change what a person says. The
+last two change the *place*, which is the point of them: mercy should leave a
+mark you can walk into.
+
+## What the world does about it
+
+Two choices change a location, not a line. Both are read where the world is
+drawn, so they are there the moment the player walks in and there again after a
+reload.
+
+**The Ruined Chapel, once its keeper has let go** (after `ysolde-departed`). Ysolde
+goes down to the wall, and comes back and does the only thing she can think of:
+she lights the place. Every wall that faces the floor carries a candle where they
+were occasional; the glazing is the same glazing with a fire behind it; the tally
+worn into the floor — the very first thing the player ever sees there, cut into
+the flagstones by a hand that stopped — is finished and lit; the basin is a
+*different object*, poured out across the flags; and the motes in the air are
+cinders off the candles instead of the dust of an empty room. It is not a
+recolouring: it is a ruin that somebody has moved back into.
+
+**The Whispering Woods, once the twelfth lantern is lit** (after `rin-lantern`).
+Rin keeps eleven lights for people still walking, and one she has never lit
+because it belongs to somebody who is not. The player can tell her that the dead
+are still somebody to keep a light for. She lights it. It stays lit, and Wren —
+who has been leaving a light in that glade for a girl who cannot remember a week
+— notices that the girl has lit one for somebody else.
+
+Neither consequence undoes anything. Nobody comes back. The chapel being lit does
+not bring Ysolde's sister up out of the floor, and the twelfth lantern does not
+give Rin her mother. That is deliberate, and it is the shape of the whole story:
+ending the cycle means choosing to live in a place where the dead stay dead.
 
 ## Intentionally unresolved
 
 - **The moon's name.** Two letters exist; the word does not. Do not write it down.
   The moment it is known, the bargain has an ending, and that is a *later* story.
+  What the player can now learn is the *kind* of word it is — a person's name — and
+  that distinction is the whole moral weight of the phase. The letters themselves
+  stay unwritten, and Vesper's refusal to say them is a character beat, not a
+  locked door.
+- **Whether the moon ever asked.** This is the question the phase deliberately
+  opens and refuses to close. The shrine's oldest instruction has no signature;
+  the first entry on the wall is older than the wall's purpose. Ysolde's answer,
+  when asked, is not an answer: "That is not a sin. That is worse. A sin can be
+  forgiven." Whether the demand was ever real is left to the player, and the game
+  never confirms it either way.
 - **What the moonwell is.** It drinks, it answers, it gave a door back. Whether it
   is alive, indifferent, or an arrangement that outlived its meaning is left open
   on purpose. Ioreth's "very little of this is mine to explain" is the game's own
@@ -162,17 +247,40 @@ remembers, not a number it accumulates.
 - **The cruelty must cost the cruel.** Ysolde's keeping is love that will not let
   go; Ioreth's office is a life spent not looking; Vesper's penance is standing
   still. Nobody enjoys any of it.
+- **Hope has to cost something.** The two hopeful acts in this build are lighting
+  a lantern for a dead woman and telling a grieving woman the truth. Neither
+  brings anybody back and neither is free: one is Rin admitting what the twelfth
+  lantern is, the other is Ysolde finding out that the mornings are the hard part.
+  Do not add hope that costs nothing, and do not add a solution that would let the
+  dead be forgot.
+- **A mystery may be answered by a player and never by the narrator.** The two
+  letters are the test case: the cast argues, the evidence is real, and the game
+  never says who is right. When in doubt, let the most honest character refuse to
+  answer.
 
 ## What is implemented, and what is not
 
-**Implemented:** the five-scene prologue (`ui::opening`); the eleven journal
-entries; four new landmarks (the worn sigil, the wall of names, the sealed door,
-the twelfth lantern); Ysolde's, Ioreth's, Vesper's, Maren's, Cassen's and Rin's
-new material; the two new flags and the two newly-read ones; and the tests that
-keep every conversation a sound graph.
+**Implemented:** the five-scene prologue, paced so every caption is fully readable
+before its scene moves on (`ui::opening`); the twelve journal entries; five
+landmarks (the worn sigil, the wall of names, the head of the list, the sealed
+door, the twelfth lantern); the cast's threads — Ysolde's rite and her mornings,
+Ioreth's unsigned office, Vesper's refusal, Maren's rope, Tamsin's count, Cassen's
+eight years, Rin's eleven, Wren's glade, Nim's insomnia; the two world
+consequences above; and the tests that keep every conversation a sound graph, hold
+every caption readable, and check that the two consequences are visible and
+persist through a save.
 
-**Not implemented, and not promised:** no second chapter; no ending; no resolution
-of the moon's name; Tamsin, Nim and Wren have the material the previous phase gave
-them and one thread each that stops short of the spine; the wizard's own history;
-and any consequence beyond a changed line of dialogue — nothing in this build
-changes a location, opens a place, or alters the puzzle.
+**Not implemented, and not promised:** no second chapter and no ending; nothing
+resolves the moon's name; no branch *ends* the bargain; Tamsin's, Nim's and Wren's
+threads still stop short of anything they can act on; the wizard still has no
+history; there is no revenge thread at all — the game has grief and guilt in it
+and has not yet built anybody who wants to hurt someone for it; and the
+consequences change what a place looks like and says, not what is possible, so
+nothing new becomes reachable except in the sense that the truth is now known.
+
+**The one door the next phase should open:** the player can now learn that the word
+is a name and that the institution's whole purpose was to stop it being said. The
+story has not yet let them *use* that. The honest next step is a place where saying
+it — to somebody, in front of somebody, at a cost — is possible, and where the
+persons who have kept the arrangement can choose, badly and humanly, whether to let
+it be said.

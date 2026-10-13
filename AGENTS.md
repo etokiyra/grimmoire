@@ -279,6 +279,13 @@ Additional rules:
   are not the same screen with a flag, and pushing `from_save` for a new game is
   how the front door came to lie about what it did — "begin again" that resumed.
   A new game keeps the store, so the journey it begins is the one that is saved.
+- **A choice may change a place, and if it does, it must be visible.** Two flags
+  are read by the renderer and by nothing else: `ysolde-departed` turns the ruined
+  chapel into a lit room, and `rin-lantern` lights the twelfth lantern in the
+  wood. That is `ui::scenery` consulting `World::progress()`, exactly as the
+  brazier flames and the sealed doorway already do, and it is the *only* seam
+  there is: do not add a general "world state" system for it. A consequence that
+  exists only as a boolean nobody can see is not a consequence.
 - **The story is content, and `docs/story.md` is its bible.** Read it before
   writing a line. Do not contradict it, do not reveal an unresolved mystery, and
   do not explain the plot in dialogue: every revelation is somebody's answer to a

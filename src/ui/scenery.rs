@@ -36,7 +36,7 @@
 //! Everything here is pure: a world, a palette, a time and a pose in; cells out.
 //! It knows nothing about terminals, input, or the game's rules.
 
-use crate::game::{Area, AreaId, Direction, EntityKind, Figure, Position, Prop, Tile, World};
+use crate::game::{Area, AreaId, Direction, EntityKind, Figure, Flag, Position, Prop, Tile, World};
 
 use super::animation::{Pose, Stage};
 use super::effects::{Effects, Pulse};
@@ -127,6 +127,10 @@ mod art {
 
     /// A cracked basin: a bowl on a stem.
     pub const BASIN: [&str; 3] = [".---.", "\\___/", "  |  "];
+    /// The chapel's basin once it has been poured out: the bowl is still there
+    /// and there is nothing in it. A different object from the same one, which
+    /// is what makes the room read as changed rather than as recoloured.
+    pub const BASIN_DRY: [&str; 3] = [".---.", "\\_._/", "  |  "];
     /// A faded sigil, cut into the floor, in its two turning phases.
     pub const SIGIL: [[&str; 3]; 2] = [["\\|/", "-O-", "/|\\"], ["/|\\", "-O-", "\\|/"]];
     /// A well: a stone drum, unlike the basin because it is solid to the ground.
@@ -507,11 +511,18 @@ impl Scenery<'_> {
                 let in_a_run = neighbours.north && neighbours.south;
                 let (pane, mark) = aperture(self.world.area_id());
                 let pitch = window_pitch(self.world.area_id());
+                // Lit glass, once the chapel has been lit. The window is the same
+                // window: what changed is that there is a fire behind it.
+                let glass = if self.let_go() {
+                    self.palette.effect
+                } else {
+                    arte.window
+                };
                 if facing && in_a_run && position.y % pitch == 0 {
-                    return (pane, Style::new().with_fg(arte.window));
+                    return (pane, Style::new().with_fg(glass));
                 }
                 if facing && in_a_run && position.y % pitch == pitch / 2 {
-                    return (mark, Style::new().with_fg(arte.window).bold());
+                    return (mark, Style::new().with_fg(glass).bold());
                 }
                 // Damage breaks up long runs of masonry.
                 let h = hash(position.x as i32, position.y as i32, 0x11);
@@ -673,6 +684,18 @@ impl Scenery<'_> {
         distance(self.world.player(), position) <= LIGHT_RADIUS
     }
 
+    /// Whether the chapel's keeper has gone down to the wall at last.
+    ///
+    /// The one flag the *scenery* reads, and the reason it exists: when Ysolde
+    /// finally goes down to see the head of the list, she comes back and lights
+    /// every window, pours the basin out, and finishes the tally on the floor.
+    /// That is a place changing, and it has to be visible from the moment the
+    /// player walks in, without a single line of dialogue to explain it.
+    fn let_go(&self) -> bool {
+        self.world.area_id() == crate::game::areas::CHAPEL
+            && self.world.progress().has(Flag::YsoldeDeparted)
+    }
+
     /// The ink a floor is drawn in: brighter inside the light, stone outside it.
     fn floor_ink(&self, arte: crate::ui::theme::Arte, lit: bool, trodden: bool) -> Color {
         if trodden {
@@ -690,7 +713,11 @@ impl Scenery<'_> {
         if !neighbours.south || neighbours.north && neighbours.east && neighbours.west {
             return false;
         }
-        hash(position.x as i32, position.y as i32, 0x51) % 17 == 0
+        // Occasional sconces in a shrine nobody serves. After she has let go and
+        // lit the place, every wall that faces the floor carries a light, which
+        // is the difference between a ruin and a room with someone in it.
+        let every = if self.let_go() { 5 } else { 17 };
+        hash(position.x as i32, position.y as i32, 0x51) % every == 0
     }
 
     // -- inlay ---------------------------------------------------------------
@@ -712,7 +739,14 @@ impl Scenery<'_> {
             let Some(glyph) = inlay_glyph(motif, position) else {
                 return;
             };
-            let style = Style::new().with_fg(self.palette.accent_dim).dim();
+            // The tally in the floor, finished and lit, once the chapel has been
+            // let go: the same marks that were worn into the stone, and now the
+            // one thing in the room that is not faded.
+            let style = if self.let_go() {
+                Style::new().with_fg(self.palette.effect)
+            } else {
+                Style::new().with_fg(self.palette.accent_dim).dim()
+            };
             let style = self.shaded(style, distance(player, position));
             self.put(view, sx, sy, position, glyph, style);
         });
@@ -758,8 +792,24 @@ impl Scenery<'_> {
             match entity.kind {
                 EntityKind::Npc { .. } => {}
                 EntityKind::Object { prop, .. } => {
-                    let (art, ink, baseline) = prop_art(self.phase, prop, self.palette);
+                    let (art, ink, baseline) =
+                        prop_art(self.phase, prop, self.palette, self.let_go());
                     self.draw_art(view, window, at, art, ink, baseline);
+                    // The twelfth lantern, once somebody has decided that the
+                    // dead are still somebody to keep a light for. A flame above
+                    // the shutter, drawn exactly as a brazier's is, because it is
+                    // the same kind of fact: a thing the player did, still there.
+                    if prop == Prop::Lantern && self.world.progress().has(Flag::RinLantern) {
+                        let index = (self.phase * 4.0) as usize % art::BRAZIER_FLAME.len();
+                        self.draw_cell(
+                            view,
+                            window,
+                            i32::from(at.0),
+                            i32::from(at.1) - 2,
+                            art::BRAZIER_FLAME[index],
+                            self.palette.effect,
+                        );
+                    }
                 }
                 EntityKind::Brazier { phase, .. } => {
                     self.draw_art(view, window, at, &art::BRAZIER, self.palette.border, 2);
@@ -792,7 +842,14 @@ impl Scenery<'_> {
     /// shifting lattice, which is what makes them drift with no per-mote state,
     /// and they are only ever drawn on bare floor.
     fn draw_ambience(&self, view: &mut CanvasView, area: &Area, window: Window) {
-        let air = air_art(air_for(self.world.area_id()));
+        // A lit chapel carries its own weather: the motes in it are cinders off
+        // the candles rather than the dust of an empty room.
+        let kind = if self.let_go() {
+            Air::Ash
+        } else {
+            air_for(self.world.area_id())
+        };
+        let air = air_art(kind);
         let drift_x = (self.phase * 0.55) as i32;
         let drift_y = (self.phase * 0.31) as i32;
         let shimmer = (self.phase * 0.9).sin();
@@ -1162,8 +1219,17 @@ fn sigil_phase(phase: f32) -> &'static [&'static str] {
 ///
 /// One table, keyed by the prop the *model* named. Adding an artefact means a new
 /// [`Prop`] and a new arm here, and nothing else in the renderer learns about it.
-fn prop_art(phase: f32, prop: Prop, palette: &Palette) -> (&'static [&'static str], Color, usize) {
+/// `let_go` is the one piece of world state this table is given: the chapel's
+/// basin is a different *object* once it has been poured out, not the same object
+/// at a different brightness.
+fn prop_art(
+    phase: f32,
+    prop: Prop,
+    palette: &Palette,
+    let_go: bool,
+) -> (&'static [&'static str], Color, usize) {
     match prop {
+        Prop::Basin if let_go => (&art::BASIN_DRY[..], palette.border, 2),
         Prop::Basin => (&art::BASIN[..], palette.interactive, 2),
         Prop::Sigil => (sigil_phase(phase), palette.effect, 1),
         Prop::Well => (&art::WELL[..], palette.interactive, 2),
@@ -1258,7 +1324,7 @@ mod tests {
     use super::{
         Backdrop, Neighbours, Scenery, axis_camera, distance, hash, inlay_glyph, motif_for,
     };
-    use crate::game::{Area, AreaId, Direction, Position, Tile, World, areas};
+    use crate::game::{Area, AreaId, Direction, Position, Prop, Tile, World, areas};
     use crate::render::{Canvas, Color, Style};
     use crate::ui::Palette;
     use crate::ui::animation::Pose;
@@ -1309,6 +1375,123 @@ mod tests {
         }
         let text = view_text(&canvas);
         (canvas, text)
+    }
+
+    /// A world parked where the interesting thing is, with some story facts
+    /// already true, the way a save would hand it over.
+    fn world_at(area: AreaId, at: Position, flags: &[&str]) -> World {
+        let mut world = World::new(areas::all(), area);
+        let data = crate::save::SaveData::new(area.as_str(), at.x, at.y, vec![]).with_progress(
+            vec![],
+            vec![],
+            flags.iter().map(|flag| (*flag).to_string()).collect(),
+        );
+        assert!(world.restore(&data), "{at:?} is not somewhere to stand");
+        world
+    }
+
+    /// How many cells are drawn in the palette's warm ink.
+    ///
+    /// Candles, lit glazing and a finished tally all use it and nothing else in
+    /// the chapel does, so counting it counts "the room has been lit" without
+    /// caring which glyph carries it.
+    fn warm_cells(canvas: &Canvas) -> usize {
+        let warm = Palette::EXTENDED.effect;
+        (0..canvas.height())
+            .flat_map(|y| (0..canvas.width()).map(move |x| (x, y)))
+            .filter_map(|(x, y)| canvas.get(x, y))
+            .filter(|cell| cell.ch != ' ' && cell.style.fg == warm)
+            .count()
+    }
+
+    #[test]
+    fn the_chapel_is_a_lit_room_once_its_keeper_has_let_go() {
+        // Standing in the apse, where the basin and the glazing both show.
+        let apse = Position::new(76, 7);
+        let (before, before_text) = draw(&world_at(areas::CHAPEL, apse, &[]), 120, 40, 0.0);
+        let (after, after_text) = draw(
+            &world_at(areas::CHAPEL, apse, &["ysolde-departed"]),
+            120,
+            40,
+            0.0,
+        );
+        assert_ne!(before_text, after_text, "the chapel did not change at all");
+
+        // The candles are the loudest signal, and the one that survives a
+        // sixteen-colour terminal: every wall that faces the floor now carries a
+        // light, where before they were occasional.
+        let candles = |text: &str| text.matches('\'').count();
+        assert!(
+            candles(&after_text) > candles(&before_text),
+            "no extra candles were lit: {} then {}",
+            candles(&before_text),
+            candles(&after_text)
+        );
+
+        // And the whole room is carrying light: candles, the glazing, and the
+        // tally in the floor, all in the one warm ink and none of it there before.
+        let warm = |canvas: &Canvas| warm_cells(canvas);
+        assert!(
+            warm(&after) > warm(&before) * 2,
+            "the chapel was not lit: {} then {}",
+            warm(&before),
+            warm(&after)
+        );
+        let _ = before;
+    }
+
+    #[test]
+    fn the_basin_is_a_different_object_once_the_chapel_has_been_let_go() {
+        // Checked at the table rather than the frame: the basin is the chapel's
+        // focal object, and pouring it out has to be something a player can see
+        // is not the same object, not the same bowl at a lower brightness.
+        let basin = |let_go| super::prop_art(0.0, Prop::Basin, &Palette::EXTENDED, let_go);
+        let full = basin(false);
+        let dry = basin(true);
+        assert_eq!(
+            ["  |  ", "\\___/", ".---."],
+            [full.0[2], full.0[1], full.0[0]]
+        );
+        assert_ne!(full.0, dry.0, "the basin was not poured out");
+        assert_ne!(full.1, dry.1, "the basin is the same object recoloured");
+    }
+
+    #[test]
+    fn the_twelfth_lantern_lights_and_stays_lit() {
+        let before = draw(
+            &world_at(areas::WOODS, Position::new(64, 40), &[]),
+            120,
+            40,
+            0.0,
+        );
+        let after = draw(
+            &world_at(areas::WOODS, Position::new(64, 40), &["rin-lantern"]),
+            120,
+            40,
+            0.0,
+        );
+        assert_ne!(before.1, after.1, "lighting the lantern changed nothing");
+        // Exactly one more flame in the wood, where the lantern hangs.
+        assert_eq!(
+            warm_cells(&after.0),
+            warm_cells(&before.0) + 1,
+            "the lantern lit more than one light"
+        );
+    }
+
+    #[test]
+    fn a_chapel_that_has_not_been_let_go_is_left_alone() {
+        // The flag is named after Ysolde's decision, and it must not bleed into
+        // anywhere else: the other five places are exactly what they were.
+        for area in [areas::CELLAR, areas::SHRINE, areas::VILLAGE] {
+            let plain = World::new(areas::all(), area);
+            let flagged = world_at(area, plain.player(), &["ysolde-departed"]);
+            assert_eq!(
+                draw(&plain, 100, 30, 0.0).1,
+                draw(&flagged, 100, 30, 0.0).1,
+                "{area:?} changed when the chapel's keeper let go"
+            );
+        }
     }
 
     #[test]

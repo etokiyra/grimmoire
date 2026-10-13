@@ -43,6 +43,8 @@ pub enum Discovery {
     ShrineSeal,
     /// A twelfth lantern in the wood, unlit, with a name inside the shutter.
     TwelfthLantern,
+    /// The head of the wall of names: two letters, older than the list.
+    FirstGiven,
 }
 
 impl Discovery {
@@ -50,7 +52,7 @@ impl Discovery {
     ///
     /// A save naming anything outside this list is treated as unknown and
     /// dropped, so an old or hand-edited file can never invent progress.
-    pub const ALL: [Discovery; 11] = [
+    pub const ALL: [Discovery; 12] = [
         Discovery::ChapelBasin,
         Discovery::WoodsGlade,
         Discovery::VillageWell,
@@ -62,6 +64,7 @@ impl Discovery {
         Discovery::CatacombNames,
         Discovery::ShrineSeal,
         Discovery::TwelfthLantern,
+        Discovery::FirstGiven,
     ];
 
     /// The stable slug written to save data.
@@ -82,6 +85,7 @@ impl Discovery {
             Discovery::CatacombNames => "catacomb-names",
             Discovery::ShrineSeal => "shrine-seal",
             Discovery::TwelfthLantern => "twelfth-lantern",
+            Discovery::FirstGiven => "first-given",
         }
     }
 
@@ -106,6 +110,7 @@ impl Discovery {
             Discovery::CatacombNames => "The Wall of Names",
             Discovery::ShrineSeal => "The Sealed Door",
             Discovery::TwelfthLantern => "The Twelfth Lantern",
+            Discovery::FirstGiven => "The First Name",
         }
     }
 
@@ -165,6 +170,12 @@ impl Discovery {
                 "A twelfth lantern, unlit, hung higher than the others on a branch \
                  that has grown around it. Inside the shutter, scratched where only \
                  the person lighting it would look: a name, and a small cross."
+            }
+            Discovery::FirstGiven => {
+                "The list has a head: two letters, in a hand older than any other \
+                 hand on the wall, and a gap below them nobody ever filled. The \
+                 scribe was cutting those same two letters into her own wall much \
+                 later. She was not writing a word. She was copying the first one."
             }
         }
     }

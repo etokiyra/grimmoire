@@ -71,11 +71,15 @@ pub enum Flag {
     YsoldeReleased,
     /// Vesper was told to come in out of the draught.
     VesperTold,
+    /// Ysolde went down to the wall at last, and the chapel was left to her dead.
+    YsoldeDeparted,
+    /// Rin lit the twelfth lantern, for the one who was not walking.
+    RinLantern,
 }
 
 impl Flag {
     /// Every flag the game can set.
-    pub const ALL: [Flag; 10] = [
+    pub const ALL: [Flag; 12] = [
         Flag::CassenAccused,
         Flag::CassenBefriended,
         Flag::LettersPromised,
@@ -86,6 +90,8 @@ impl Flag {
         Flag::YsoldeToldOfTheMoonwell,
         Flag::YsoldeReleased,
         Flag::VesperTold,
+        Flag::YsoldeDeparted,
+        Flag::RinLantern,
     ];
 
     /// The stable slug written to save data.
@@ -102,6 +108,8 @@ impl Flag {
             Flag::YsoldeToldOfTheMoonwell => "ysolde-told",
             Flag::YsoldeReleased => "ysolde-released",
             Flag::VesperTold => "vesper-told",
+            Flag::YsoldeDeparted => "ysolde-departed",
+            Flag::RinLantern => "rin-lantern",
         }
     }
 

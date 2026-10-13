@@ -86,16 +86,82 @@ static SCENES: [Scene; 5] = [
 ];
 
 /// How long each scene holds, in order.
+///
+/// These are set by what is *in* each scene, not by a house style: a caption
+/// takes about two and a half seconds to read twice, so every scene is at least
+/// that plus its fades, and the ones carrying the weight get more.
+///
+/// - **Village** establishes the place and the ordinary life in it. Shortest.
+/// - **Rite** is the decision: two captions, a colonnade, and a dial being read.
+///   It needs the time to be understood, not just seen.
+/// - **Going** is the turn. A hand letting go is the beat the whole prologue is
+///   built around, so it is the longest of the story scenes, and its caption
+///   arrives *late*, after the figure has already started walking.
+/// - **After** is four words and a building with nothing lit in it. It has to sit
+///   in silence after everything that came before, not hurry on to the card.
+/// - **Chapter** is the card: the building rises, the windows light, the name is
+///   written. Every one of those is a beat rather than a state, so it is long
+///   enough for all three to land.
 static SCENE_HOLD: [Duration; 5] = [
-    Duration::from_millis(2300),
-    Duration::from_millis(2300),
-    Duration::from_millis(2300),
-    Duration::from_millis(2300),
-    Duration::from_millis(4600),
+    Duration::from_millis(4400),
+    Duration::from_millis(5400),
+    Duration::from_millis(6000),
+    Duration::from_millis(5200),
+    Duration::from_millis(5600),
 ];
 
-/// The whole prologue.
-const PROLOGUE_HOLD: Duration = Duration::from_millis(2300 * 4 + 4600);
+/// The whole prologue: the scenes, holding for as long as they take.
+const PROLOGUE_HOLD: Duration = Duration::from_millis(4400 + 5400 + 6000 + 5200 + 5600);
+
+/// What each scene is read with, in the order the scenes come.
+///
+/// Kept as data rather than inline at each call site so that the pacing can be
+/// tested against the captions that actually ship: the test walks this table and
+/// checks that every one of these lines is on screen, at full strength, in the
+/// last moments of its own scene.
+static SCENE_CAPTIONS: [&[&str]; 5] = [
+    &[
+        "The water had failed before.",
+        "They knew what it cost, and they paid it.",
+    ],
+    &[
+        "This time the well was dry and the wood was dying.",
+        "Somebody had to be given, or everybody would be.",
+    ],
+    &[
+        "She said she would go down herself.",
+        "I have told the moon, she wrote. I did not answer.",
+    ],
+    &["The water never came back.", "She did."],
+    // The chapter card names itself, so it has no caption.
+    &[],
+];
+
+/// How long each caption waits before arriving.
+///
+/// A scene that shows something irreversible wants a beat of image first, so the
+/// words comment on what the player has already seen rather than announcing it.
+static CAPTION_DELAY: [Duration; 5] = [
+    Duration::ZERO,
+    Duration::ZERO,
+    Duration::from_millis(1100),
+    Duration::from_millis(700),
+    Duration::ZERO,
+];
+
+/// How long a caption takes to come up and to go away.
+///
+/// Fixed in *seconds* rather than as a fraction of the scene: a caption that
+/// fades over a fifth of a five-second hold takes a second to become readable,
+/// which is a second of the scene spent on the fade instead of on the words.
+const CAPTION_FADE: Duration = Duration::from_millis(600);
+
+/// The shortest a caption may be left fully readable, whatever the scene.
+///
+/// A test holds every scene to this, so shortening a hold until its text cannot
+/// be read is a build failure rather than a judgement call.
+#[cfg(test)]
+const CAPTION_READABLE: Duration = Duration::from_millis(2200);
 
 /// How long the ground takes to rise over it at the end.
 const AWAY: Duration = Duration::from_millis(420);
@@ -261,22 +327,57 @@ impl OpeningScreen {
         }
     }
 
-    /// Where the sequence is: which scene, and how far through it, 0 to 1.
-    fn where_we_are(&self) -> (Scene, f32) {
+    /// Where the sequence is: which scene, how long it has been held, and how
+    /// long it holds for. Times, not fractions, because the caption's fades are
+    /// measured in seconds and a fraction of a scene is a different length in
+    /// every scene.
+    fn scene_clock(&self) -> (Scene, Duration, Duration) {
         let mut left = self.age;
         for (index, hold) in SCENE_HOLD.iter().enumerate() {
             if left < *hold {
-                let progress = left.as_secs_f32() / hold.as_secs_f32();
-                return (SCENES[index], progress.clamp(0.0, 1.0));
+                return (SCENES[index], left, *hold);
             }
             left = left.saturating_sub(*hold);
         }
-        (Scene::Chapter, 1.0)
+        let last = SCENE_HOLD[SCENES.len() - 1];
+        (Scene::Chapter, last, last)
     }
 
-    /// How far the whole sequence has come, 0 to 1.
+    /// Where the sequence is: which scene, and how far through it, 0 to 1.
+    ///
+    /// This is the *current scene's* progress rather than the whole prologue's.
+    /// The chapter card is the last scene, and it is the scene that has to build
+    /// itself — the building rising, the windows lighting, the name arriving — so
+    /// reading whole-sequence progress here would have all of that finished
+    /// before the card was even reached.
+    fn where_we_are(&self) -> (Scene, f32) {
+        let (scene, elapsed, hold) = self.scene_clock();
+        (
+            scene,
+            (elapsed.as_secs_f32() / hold.as_secs_f32()).clamp(0.0, 1.0),
+        )
+    }
+
+    /// How far through its own scene the sequence is, 0 to 1.
+    ///
+    /// The *current scene's* progress, not the prologue's. The chapter card is the
+    /// last scene and the one that has to build itself — the building rising, the
+    /// windows lighting, the name arriving — so whole-prologue progress would have
+    /// all of that finished before the card was even reached. Every fraction below
+    /// is therefore a fraction of one scene's hold, not of the whole sequence.
     fn progress(&self) -> f32 {
-        (self.age.as_secs_f32() / OPENING.as_secs_f32()).clamp(0.0, 1.0)
+        self.where_we_are().1
+    }
+
+    /// Seconds since the prologue began, for motion that must not stop when a
+    /// scene's reveal is over.
+    ///
+    /// A scene's `progress` drives its *reveal*, which is finite by design. The
+    /// clock drives the weather on top of it — water moving, a lamp breathing,
+    /// dust crossing a colonnade — so that a long hold stays alive without
+    /// restarting the reveal or competing with the words.
+    fn clock(&self) -> f32 {
+        self.age.as_secs_f32()
     }
 
     /// How bright the sky should be by now, 0 to 1.
@@ -369,11 +470,51 @@ impl OpeningScreen {
         }
     }
 
-    /// A caption, low in the frame, fading in and out with its scene.
-    fn caption(&self, view: &mut CanvasView, area: Rect, lines: &[&str], progress: f32) {
-        // In quickly, held, out quickly: a caption that lingers past its scene
-        // reads as part of the next one.
-        let shown = ease(progress, 0.10, 0.26) * (1.0 - ease(progress, 0.86, 1.0));
+    /// Says the words this scene is read with, if it has any.
+    ///
+    /// One place rather than four, so the pacing test can hold the shipped
+    /// caption table to the shipped hold table.
+    fn scene_caption(&self, view: &mut CanvasView, area: Rect) {
+        let (scene, elapsed, hold) = self.scene_clock();
+        let index = SCENES.iter().position(|item| *item == scene).unwrap_or(0);
+        self.caption(view, area, index, elapsed, hold);
+    }
+
+    /// The caption of the scene at `index`, high in the frame.
+    ///
+    /// The fades are fixed in seconds rather than as a fraction of the scene, so
+    /// the window a caption is fully readable is `hold - delay - 2 *
+    /// CAPTION_FADE` whatever the scene is. The delay lets a scene hold its image
+    /// for a beat before naming it, which is what makes the words land as a
+    /// comment on what the player has already seen rather than as a title card.
+    fn caption(
+        &self,
+        view: &mut CanvasView,
+        area: Rect,
+        index: usize,
+        elapsed: Duration,
+        hold: Duration,
+    ) {
+        let lines = SCENE_CAPTIONS[index];
+        if lines.is_empty() {
+            return;
+        }
+        let delay = CAPTION_DELAY[index];
+        // How far above the horizon the words sit. High in the sky for the
+        // scenes that are sky and figures; lower for the ruined chapel, whose
+        // facade fills the frame and whose rose window would otherwise be
+        // written over. The words belong in the dark of the nave, under it.
+        let gap = match SCENES[index] {
+            Scene::After => 6,
+            _ => 11,
+        };
+        let fade = CAPTION_FADE.as_secs_f32();
+        let since = elapsed.saturating_sub(delay).as_secs_f32();
+        let left = (hold.as_secs_f32() - elapsed.as_secs_f32()).max(0.0);
+        let raw = (since / fade)
+            .clamp(0.0, 1.0)
+            .min((left / fade).clamp(0.0, 1.0));
+        let shown = raw * raw * (3.0 - 2.0 * raw);
         if shown <= 0.02 {
             return;
         }
@@ -383,7 +524,7 @@ impl OpeningScreen {
         // somebody standing at the bottom of it.
         let row = self
             .horizon(area)
-            .saturating_sub(11 + lines.len() as u16 * 2);
+            .saturating_sub(gap + lines.len() as u16 * 2);
         for (offset, line) in lines.iter().enumerate() {
             let width = glyph::display_width(line);
             if width > area.width {
@@ -414,7 +555,7 @@ impl OpeningScreen {
     }
 
     /// The village below the wood, and one light going out.
-    fn compose_village(&self, frame: &mut Frame, area: Rect, progress: f32) {
+    fn compose_village(&self, frame: &mut Frame, area: Rect, progress: f32, clock: f32) {
         let horizon = self.horizon(area);
         let support = self.support;
         let mut view = frame.view(area);
@@ -450,6 +591,12 @@ impl OpeningScreen {
                 }
             }
             if index >= out {
+                // A lamp is a small fire, so it breathes rather than glowing
+                // steadily. The flicker runs on the clock rather than on the
+                // reveal, so the village stays alive through the long hold after
+                // the last lamp has gone out — which is when it matters most.
+                let flicker = 0.78 + 0.22 * (clock * 2.4 + index as f32 * 1.7).sin();
+                let lamp = lit.mix(Rgb::new(146, 78, 30), 1.0 - flicker);
                 for (dx, dy) in [(span / 3, 1), (span / 3 + 2, 2)] {
                     let x = left + dx;
                     let y = horizon.saturating_sub(dy as u16);
@@ -458,7 +605,7 @@ impl OpeningScreen {
                             x as u16,
                             y,
                             '▖',
-                            Style::new().with_fg(lit.to_color(support)).bold(),
+                            Style::new().with_fg(lamp.to_color(support)).bold(),
                         );
                     }
                 }
@@ -505,19 +652,11 @@ impl OpeningScreen {
             );
         }
 
-        self.caption(
-            &mut view,
-            area,
-            &[
-                "The water had failed before.",
-                "They knew what it cost, and they paid it.",
-            ],
-            progress,
-        );
+        self.scene_caption(&mut view, area);
     }
 
     /// The shrine's hall: three cold braziers, a dial, and a decision.
-    fn compose_rite(&self, frame: &mut Frame, area: Rect, progress: f32) {
+    fn compose_rite(&self, frame: &mut Frame, area: Rect, progress: f32, clock: f32) {
         let horizon = self.horizon(area);
         let support = self.support;
         let mut view = frame.view(area);
@@ -573,6 +712,24 @@ impl OpeningScreen {
             );
         }
 
+        // Cold air crossing the hall, on the clock: ten slow motes, so a long
+        // hold reads as a cold room rather than as a still frame. They never
+        // touch the dial, the figures or the caption band.
+        for step in 0..10u16 {
+            let seed = f32::from(step) * 2.399;
+            let travel = (clock * (0.30 + (step % 3) as f32 * 0.11) + seed).fract();
+            let x = (f32::from(area.width) * travel) as u16;
+            let y = horizon.saturating_sub(2 + (seed * 7.0).sin().abs() as u16 * 4);
+            if y >= area.y && y < horizon {
+                view.put_char(
+                    x.min(area.width.saturating_sub(1)),
+                    y,
+                    '·',
+                    Style::new().with_fg(Rgb::new(74, 88, 132).to_color(support)),
+                );
+            }
+        }
+
         // The priestess at the dial, and the lantern keeper at the far end.
         let priest = sprite::for_figure(Figure::Priestess);
         let x = area.centered_x(priest.width);
@@ -602,19 +759,11 @@ impl OpeningScreen {
             );
         }
 
-        self.caption(
-            &mut view,
-            area,
-            &[
-                "This time the well was dry and the wood was dying.",
-                "Somebody had to be given, or everybody would be.",
-            ],
-            progress,
-        );
+        self.scene_caption(&mut view, area);
     }
 
     /// The water, and two figures at its edge.
-    fn compose_going(&self, frame: &mut Frame, area: Rect, progress: f32) {
+    fn compose_going(&self, frame: &mut Frame, area: Rect, progress: f32, clock: f32) {
         let horizon = self.horizon(area);
         let support = self.support;
         let mut view = frame.view(area);
@@ -632,7 +781,12 @@ impl OpeningScreen {
             for x in 0..area.width {
                 let centre = 1.0 - ((f32::from(x) / f32::from(area.width)) - 0.5).abs() * 2.0;
                 if centre > 0.5 && (usize::from(x) + usize::from(y)) % 7 == 0 {
-                    view.put_char(x, y, '·', Style::new().with_fg(glint.to_color(support)));
+                    // The moonlight on the water travels, row by row, on the
+                    // clock. It is the only thing that moves in the longest hold
+                    // of the prologue, and it moves very slowly on purpose.
+                    let swell = 0.45 + 0.55 * (clock * 0.8 + f32::from(y) * 0.6).sin();
+                    let spark = glint.mix(Rgb::new(44, 56, 96), 1.0 - swell);
+                    view.put_char(x, y, '·', Style::new().with_fg(spark.to_color(support)));
                 }
             }
         }
@@ -679,19 +833,11 @@ impl OpeningScreen {
             );
         }
 
-        self.caption(
-            &mut view,
-            area,
-            &[
-                "She said she would go down herself.",
-                "I have told the moon, she wrote. I did not answer.",
-            ],
-            progress,
-        );
+        self.scene_caption(&mut view, area);
     }
 
     /// What was left: the chapel, with nothing lit in it.
-    fn compose_after(&self, frame: &mut Frame, area: Rect, progress: f32) {
+    fn compose_after(&self, frame: &mut Frame, area: Rect, progress: f32, clock: f32) {
         let horizon = self.horizon(area);
         let support = self.support;
         let mut view = frame.view(area);
@@ -745,12 +891,25 @@ impl OpeningScreen {
             );
         }
 
-        self.caption(
-            &mut view,
-            area,
-            &["The water never came back.", "She did."],
-            progress,
-        );
+        // Almost nothing moves here, and that is the scene: a mote or two crossing
+        // the empty nave on the clock, slow enough that a player may not notice.
+        // The stillness is the point; this is only so the frame is not a still.
+        for step in 0..3u16 {
+            let seed = f32::from(step) * 3.1;
+            let travel = (clock * 0.05 + seed).fract();
+            let x = (f32::from(area.width) * travel) as u16;
+            let y = horizon.saturating_sub(6 + (seed * 5.0).sin().abs() as u16 * 5);
+            if y >= area.y && y < horizon {
+                view.put_char(
+                    x.min(area.width.saturating_sub(1)),
+                    y,
+                    '·',
+                    Style::new().with_fg(Rgb::new(54, 58, 80).to_color(support)),
+                );
+            }
+        }
+
+        self.scene_caption(&mut view, area);
     }
 
     /// The magic circle: an outer ring, an inner ring of runes, and four spokes.
@@ -1126,11 +1285,12 @@ impl Screen for OpeningScreen {
         }
         // Five scenes, each composed as a whole image, then the chapter card.
         let (scene, progress) = self.where_we_are();
+        let clock = self.clock();
         match scene {
-            Scene::Village => self.compose_village(frame, area, progress),
-            Scene::Rite => self.compose_rite(frame, area, progress),
-            Scene::Going => self.compose_going(frame, area, progress),
-            Scene::After => self.compose_after(frame, area, progress),
+            Scene::Village => self.compose_village(frame, area, progress, clock),
+            Scene::Rite => self.compose_rite(frame, area, progress, clock),
+            Scene::Going => self.compose_going(frame, area, progress, clock),
+            Scene::After => self.compose_after(frame, area, progress, clock),
             Scene::Chapter => {
                 self.compose_scene(frame, area, self.support);
                 self.compose_actors(frame, area, self.support);
@@ -1245,6 +1405,14 @@ mod tests {
         out
     }
 
+    /// Runs the sequence forward to a given moment, in frame-sized steps, the way
+    /// the application would.
+    fn advance_to(screen: &mut OpeningScreen, at: Duration) {
+        while screen.age < at {
+            screen.update(Duration::from_millis(16));
+        }
+    }
+
     #[test]
     fn the_name_and_the_chapter_arrive_rather_than_being_there() {
         let mut screen = ready();
@@ -1253,9 +1421,16 @@ mod tests {
             row_letters(&screen, 3),
             "the name was there before it was written"
         );
-        for _ in 0..130 {
-            screen.update(Duration::from_millis(100));
-        }
+        // The story scenes are read without a wordmark anywhere near the top.
+        let into_the_rite: Duration = super::SCENE_HOLD[..2].iter().sum();
+        advance_to(&mut screen, into_the_rite);
+        assert_eq!(
+            String::new(),
+            row_letters(&screen, 3),
+            "the name arrived before the chapter card did"
+        );
+        // By the end of the card it has been written, and the chapter named.
+        advance_to(&mut screen, super::OPENING);
         assert_eq!("GRIMMOIRE", row_letters(&screen, 3), "the name is wrong");
         assert!(
             row_letters(&screen, 5).ends_with("RUINEDCHAPEL"),
@@ -1267,19 +1442,96 @@ mod tests {
     #[test]
     fn the_building_rises_and_its_windows_light() {
         let mut screen = ready();
-        for _ in 0..12 {
-            screen.update(Duration::from_millis(100));
-        }
+        // The building is the chapter card's, so it rises while the card is on
+        // screen rather than having finished somewhere behind the story.
+        let chapter: Duration = super::SCENE_HOLD[..4].iter().sum();
+        advance_to(&mut screen, chapter + Duration::from_millis(200));
         let early = joined(&screen, 120, 40).matches('█').count();
-        for _ in 0..60 {
-            screen.update(Duration::from_millis(100));
-        }
+        advance_to(&mut screen, chapter + Duration::from_millis(3000));
         let late = joined(&screen, 120, 40).matches('█').count();
         assert!(
             late > early,
             "the building did not rise: {early} then {late}"
         );
         assert!(late > 200, "the building is only {late} cells");
+    }
+
+    #[test]
+    fn every_caption_is_fully_readable_before_its_scene_ends() {
+        for index in 0..super::SCENES.len() {
+            let lines = super::SCENE_CAPTIONS[index];
+            if lines.is_empty() {
+                continue;
+            }
+            let start: Duration = super::SCENE_HOLD[..index].iter().sum();
+            let hold = super::SCENE_HOLD[index];
+            // The last moment the caption is at full strength, before its tail
+            // fade begins.
+            let mut screen = ready();
+            advance_to(&mut screen, start + hold - super::CAPTION_FADE);
+            let frame = text(&screen, 120, 40);
+            for line in lines {
+                assert!(
+                    frame.contains(line),
+                    "scene {index} lost its caption before the scene ended: {line:?}"
+                );
+            }
+            // And the window it is fully readable for is long enough to read it.
+            let window = hold - super::CAPTION_DELAY[index] - super::CAPTION_FADE * 2;
+            assert!(
+                window >= super::CAPTION_READABLE,
+                "scene {index} holds its words readable for only {window:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_caption_does_not_arrive_before_its_scene_has_shown_anything() {
+        // The delayed captions buy their scene a beat of image first. Checked as
+        // behaviour: at the moment the scene opens, the words are not yet there.
+        for (index, delay) in super::CAPTION_DELAY.iter().enumerate() {
+            if delay.is_zero() {
+                continue;
+            }
+            let start: Duration = super::SCENE_HOLD[..index].iter().sum();
+            let mut screen = ready();
+            advance_to(&mut screen, start + Duration::from_millis(1));
+            let frame = text(&screen, 120, 40);
+            for line in super::SCENE_CAPTIONS[index] {
+                assert!(
+                    !frame.contains(line),
+                    "scene {index} said its words before it showed its image"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_press_skips_from_any_scene_and_hands_back_exactly_once() {
+        for index in 0..super::SCENES.len() {
+            let start: Duration = super::SCENE_HOLD[..index].iter().sum();
+            let mut screen = ready();
+            advance_to(&mut screen, start + Duration::from_millis(50));
+            assert!(matches!(
+                screen.handle_key(Key::new(KeyCode::Esc)),
+                Command::None
+            ));
+            let mut handed_back = 0;
+            let mut command = Command::None;
+            for _ in 0..20 {
+                screen.update(Duration::from_millis(100));
+                command = screen.after_update();
+                if !matches!(command, Command::None) {
+                    handed_back += 1;
+                    break;
+                }
+            }
+            assert!(
+                matches!(command, Command::Return(Message::Finished)),
+                "skipping scene {index} did not hand the screen back"
+            );
+            assert_eq!(1, handed_back, "scene {index} answered more than once");
+        }
     }
 
     #[test]
@@ -1312,7 +1564,7 @@ mod tests {
     fn it_finishes_on_its_own_and_hands_the_screen_back() {
         let mut screen = ready();
         let mut command = Command::None;
-        for _ in 0..200 {
+        for _ in 0..400 {
             screen.update(Duration::from_millis(100));
             command = screen.after_update();
             if !matches!(command, Command::None) {
