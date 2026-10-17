@@ -29,11 +29,11 @@ they say next.
 </div>
 
 > **Status: early development.** There is no release and no tagged version yet.
-> Grimmoire is a small, playable **anime-inspired exploration RPG** — a title
-> screen, a region of six connected places, nine characters to talk to, a journal
-> of what you have found, one puzzle, conversations with real choices, and
-> fail-soft saving — on top of a custom ASCII renderer. It is not a complete
-> game.
+> Grimmoire is a small, playable **anime-inspired exploration RPG** — a five-scene
+> prologue, a title screen, a region of six connected places, nine characters to
+> talk to, twelve journal entries, one puzzle, conversations with real choices
+> that change the world, and fail-soft saving — on top of a custom ASCII renderer.
+> It is not a complete game.
 
 ## The region
 
@@ -80,9 +80,15 @@ through" for nine years admit she cut it herself.
 There is no experience, no loot, and no combat yet — and deliberately so: the
 reward for looking closely is knowing more. The long-term vision is
 character-focused dialogue, strategic turn-based magic combat, skill trees, and
-story-and-mastery progression. The story, world, characters and detailed mechanics
-are **deliberately undecided** — everything currently in the game is placeholder
-content. See [`ROADMAP.md`](ROADMAP.md).
+story-and-mastery progression.
+
+This phase has a story, and [`docs/story.md`](docs/story.md) is its bible: a
+village that survived a drought by agreeing, together, to feed the water, and a
+shrine that has spent four hundred years making sure nobody finishes the sentence
+that would end it. The wizard arrives nine years after the water stopped coming
+back. What the wizard is, what lies past the sealed door, and what the moon's name
+is are **deliberately left open** — the name is never written down. See
+[`ROADMAP.md`](ROADMAP.md).
 
 ## Why it looks the way it does
 
@@ -121,9 +127,8 @@ Nine characters are in the world: a hooded wraith with two cold lights, a lanter
 keeper, a scavenger under a bundle, a priestess under a crescent crown, a
 skeleton wound in grave-wrappings, an apprentice with ribbons, a wandering mage
 under an enormous hat, a moss-and-mushroom spirit, and a warden in plumed steel.
-Eleven more — a necromancer, a hag, a plague doctor, an assassin, a dark knight,
-an imp, a bat, an ooze, a drake, and the Lich King — are in the library for what
-comes next.
+Eight more — a necromancer, a plague doctor, an assassin, an imp, a bat, an ooze,
+a drake, and the Lich King — are in the library for what comes next.
 
 <div align="center">
 <img src="docs/images/bunny.png" alt="The mage bunny drawn as ASCII, zoomed" width="330">
@@ -132,6 +137,14 @@ comes next.
 ## Screenshots
 
 <div align="center">
+
+**The prologue.** Five scenes, each with its own composition, sky and caption:
+the village below the wood and one lamp going out; the shrine deciding; the walk
+down to the water; and the chapel afterwards, with nothing lit in it. Then the
+chapter card, which builds itself.
+
+<img src="docs/images/prologue-village.png" alt="The prologue's village at night: one lamp lit in a row of dark houses under a moon" width="820">
+<img src="docs/images/prologue-chapter.png" alt="The chapter card: Grimmoire, I — Ruined Chapel, over the chapel silhouette" width="820">
 
 **The opening.** A night sky of twinkling glyphs, a moon, a horizon with the
 chapel standing on it, and the name in a warm ramp. The menu knows whether there
@@ -160,6 +173,14 @@ catacomb of bone.
 <img src="docs/images/shrine.png" alt="The Moonwell Shrine, its water lit and its braziers burning" width="400">
 <img src="docs/images/catacombs.png" alt="The mage bunny in a bone-floored catacomb gallery" width="400">
 
+**The world answers.** Two choices change a place rather than a line: tell Ysolde
+to go and see the wall and the chapel is lit for the first time since the water
+left; tell Rin the twelfth lantern belongs to somebody too and it burns in the
+wood.
+
+<img src="docs/images/chapel-let-go.png" alt="The Ruined Chapel after Ysolde lets go: candles lit, the glazing warm, the floor tally finished" width="400">
+<img src="docs/images/woods-twelfth-lit.png" alt="The Whispering Woods with the twelfth lantern lit beside the path" width="400">
+
 </div>
 
 ## Requirements
@@ -179,10 +200,11 @@ terminal of at least **80×24** reporting 256 colours.
 kitty --directory "$PWD" cargo run --release
 ```
 
-You start in the **Ruined Chapel**. The stair down to the Sunken Cellar is at the
-south end of the nave, and a door in the west wall leads out into the Whispering
-Woods. Press <kbd>e</kbd> when the prompt appears, and <kbd>J</kbd> to read what
-you have found so far.
+A new game opens with the **five-scene prologue**. <kbd>Esc</kbd>, <kbd>Enter</kbd>
+or <kbd>Space</kbd> skips it. Then you start in the **Ruined Chapel**: the stair
+down to the Sunken Cellar is at the south end of the nave, and a door in the west
+wall leads out into the Whispering Woods. Press <kbd>e</kbd> when the prompt
+appears, and <kbd>J</kbd> to read what you have found so far.
 
 | Key | Action |
 | --- | --- |
@@ -191,10 +213,12 @@ you have found so far.
 | <kbd>E</kbd> | Interact with what you face |
 | <kbd>J</kbd> | The journal of what you have found |
 | <kbd>W</kbd>/<kbd>S</kbd>, <kbd>Enter</kbd> | Move between choices, and say one |
+| <kbd>Esc</kbd>, <kbd>Enter</kbd>, <kbd>Space</kbd> | Skip the prologue |
+| <kbd>Esc</kbd> | Leave a conversation (what was said still counts) |
 | <kbd>H</kbd>, <kbd>?</kbd>, <kbd>F1</kbd> | Help and diagnostics |
 | <kbd>F3</kbd> | Presentation study (rendering prototype) |
 | <kbd>F2</kbd> | Renderer showcase (development screen) |
-| <kbd>Esc</kbd>, <kbd>Q</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> | Quit |
+| <kbd>Q</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd>, or <kbd>Esc</kbd> elsewhere | Quit |
 
 Progress saves automatically on quit and whenever you move between areas — see
 [`docs/gameplay.md`](docs/gameplay.md) for the save location and format.
@@ -209,7 +233,11 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 - Six connected areas that are **bigger than the viewport**, so the camera scrolls
   and the environment fills the screen. Every one is reachable from the start.
-- **An animated opening** with a menu that reflects the save, a safe
+- **A five-scene prologue** — a village and a lamp going out, a shrine deciding,
+  a walk down to the water, the chapel afterwards, and a chapter card that builds
+  itself. Every scene has its own composition, sky and caption, and the prologue
+  can be skipped.
+- **An animated title screen** with a menu that reflects the save, a safe
   confirmation before starting again, and settings of their own.
 - **Nine characters**, each with their own silhouette, inks, portrait and voice:
   a veiled keeper of the chapel, a lantern child in the wood, a scavenger who is
@@ -221,12 +249,16 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 - **Conversations with choices.** Ask, refuse, press, or stay quiet; what you
   choose is remembered, changes what that character says next, and sometimes
   changes what someone else says too.
-- **A journal** of what you have found, written when you find it rather than when
-  you arrive somewhere, and kept across saves. Discoveries announce themselves
-  over the world the moment they are made.
+- **A journal** of what you have found — twelve entries for this phase — written
+  when you find it rather than when you arrive somewhere, and kept across saves.
+  Discoveries announce themselves over the world the moment they are made.
 - **Discoveries that matter**: what you learn changes what a character will say to
   you, and answering the moonwell opens a way that was sealed — for both
   directions, so it is a shortcut and not a toll.
+- **Choices that change a place**, not just a line: tell Ysolde to go and see the
+  wall and the chapel is lit for the first time since the water left; tell Rin the
+  twelfth lantern belongs to somebody too and it burns in the wood. Both stay
+  changed in the save.
 - **One puzzle** with its rules written on the floor: three braziers, a dial, and
   an order. Lighting them out of turn puts all three out, so the order has to be
   read rather than guessed, and it can never be soft-locked.
@@ -279,10 +311,11 @@ grows. Grimmoire cannot maximise your window; that part is yours.
 
 ## Not implemented yet
 
-Combat, spells, inventory, items you can pick up, quests, skill trees, and a
-story. Dialogue branches only on what you have discovered — there is no scripting
-and no conversation tree. The six areas and the five characters are hand-authored
-placeholders.
+Combat, spells, inventory, items you can pick up, quests, and skill trees. There
+is no scripting language: a conversation is a data graph that branches on what you
+know and on what you have done, and the graph is checked at build time. The
+wizard's own history, the moon's name, and what lies past the sealed door are
+deliberately unwritten — see [`docs/story.md`](docs/story.md).
 
 ## Build and run
 
@@ -360,8 +393,14 @@ own the drawing model. No image decoder is needed — Kitty decodes.
 - [`docs/renderer-design.md`](docs/renderer-design.md) — the rendering
   architecture, the ASCII scenery renderer, the movement model and why the two axes
   are paced differently, the measured numbers, and what was verified live.
+- [`docs/renderer-investigation.md`](docs/renderer-investigation.md) — the
+  renderer's structural limits, the atmosphere layer's investigation, and what each
+  stage of it established.
 - [`docs/gameplay.md`](docs/gameplay.md) — the world model, controls, movement,
   interaction rules, and save format.
+- [`docs/story.md`](docs/story.md) — the narrative bible: what actually happened,
+  the cast and their contradictions, the order revelations arrive in, and the
+  questions that stay open.
 - [`docs/map-design.md`](docs/map-design.md) — the rules an area must satisfy, how
   a map is generated, and how the rules are enforced.
 - [`AGENTS.md`](AGENTS.md) — the vision, the boundaries, and the invariants.
@@ -409,9 +448,9 @@ own the drawing model. No image decoder is needed — Kitty decodes.
   model has no continuation cell.
 - Presentation repaints per changed cell rather than tracking damage rectangles. A
   step with a scrolled camera rewrites a few thousand cells.
-- The world is six rooms with nine characters. Dialogue branches on what you know
-  and on what you have done, but there is no conversation tree beyond that, no
-  quest log, and no combat. The art and content are placeholders.
+- The world is six rooms with nine characters. Conversations are a data graph that
+  branches on what you know and on what you have done; there is still no quest log,
+  no items, and no combat. What comes after this phase's story is unwritten.
 - Visual verification was done on Linux under Kitty 0.49.2; other platforms are
   untested.
 - Terminal restoration cannot be guaranteed against `SIGKILL` or power loss.
